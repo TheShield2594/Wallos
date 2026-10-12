@@ -54,6 +54,7 @@ if ($adminRow['login_disabled'] == 1) {
 
         $db->close();
         header("Location: login.php");
+        exit();
     } else {
         $userId = $row['id'];
         $main_currency = $row['main_currency'];
@@ -95,6 +96,7 @@ if ($adminRow['login_disabled'] == 1) {
 
         $db->close();
         header("Location: .");
+        exit();
     }
 }
 

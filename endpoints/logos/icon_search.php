@@ -1,4 +1,17 @@
 <?php
+require_once '../../includes/connect_endpoint.php';
+
+// These fetch from third-party search and icon services on the caller's
+// behalf, so they are for signed-in users only, not an open proxy.
+if (empty($userId)) {
+    http_response_code(401);
+    header('Content-Type: application/json');
+    echo json_encode(['error' => 'Unauthorized']);
+    exit;
+}
+session_write_close();
+$db->close();
+
 /*
   Icon search backed by the selfh.st and Dashboard Icons (homarr-labs) collections.
   Both are GitHub-backed icon sets served over jsDelivr with a machine-readable index,
