@@ -420,6 +420,15 @@ switch ($action) {
             exit;
         }
 
+        if ($frequency < 1 || $frequency > 366) {
+            echo json_encode([
+                'success' => false,
+                'title' => 'Invalid frequency',
+                'message' => 'Parameter "frequency" must be an integer from 1 to 366.'
+            ]);
+            exit;
+        }
+
         // Validate Dates
         if (!validateDate($nextPayment)) {
             echo json_encode([
@@ -710,6 +719,15 @@ switch ($action) {
                 'success' => false,
                 'title' => 'Invalid cycle',
                 'message' => 'Parameter "cycle" must be 1 (Days), 2 (Weeks), 3 (Months), or 4 (Years).'
+            ]);
+            exit;
+        }
+
+        if ($frequency < 1 || $frequency > 366) {
+            echo json_encode([
+                'success' => false,
+                'title' => 'Invalid frequency',
+                'message' => 'Parameter "frequency" must be an integer from 1 to 366.'
             ]);
             exit;
         }

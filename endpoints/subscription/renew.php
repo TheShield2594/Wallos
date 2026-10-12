@@ -31,8 +31,15 @@ if ($subscriptionToRenew === false) {
 }
 
 $nextPaymentDate = new DateTime($subscriptionToRenew['next_payment']);
-$frequency = $subscriptionToRenew['frequency'];
-$cycle = $cycles[$subscriptionToRenew['cycle']]['name'];
+$frequency = (int) $subscriptionToRenew['frequency'];
+$cycle = $cycles[$subscriptionToRenew['cycle']]['name'] ?? null;
+
+if ($frequency < 1 || !in_array($cycle, ['Daily', 'Weekly', 'Monthly', 'Yearly'], true)) {
+    die(json_encode([
+        "success" => false,
+        "message" => translate("error", $i18n)
+    ]));
+}
 
 // Calculate the interval to add based on the cycle
 $intervalSpec = "P";
@@ -58,7 +65,6 @@ $updateQuery = "UPDATE subscriptions SET next_payment = :nextPaymentDate WHERE i
 $updateStmt = $db->prepare($updateQuery);
 $updateStmt->bindValue(':nextPaymentDate', $nextPaymentDate->format('Y-m-d'));
 $updateStmt->bindValue(':subscriptionId', $subscriptionId);
-$updateStmt->execute();
 
 if ($updateStmt->execute()) {
     $response = [

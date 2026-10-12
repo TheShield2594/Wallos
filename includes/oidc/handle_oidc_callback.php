@@ -134,7 +134,14 @@ if ($userData) {
             // Create a new user
 
             //check if username is already taken
-            $usernameBase = $userInfo['preferred_username'] ?? generate_username_from_email($email);
+            // preferred_username is IdP-controlled: hold it to the same characters
+            // as the email fallback (plus "@", which IdPs often use), since
+            // usernames are echoed into pages and delimit the
+            // "user|token|currency" remember-me cookie.
+            $usernameBase = preg_replace('/[^a-zA-Z0-9._@-]/', '', (string) ($userInfo['preferred_username'] ?? ''));
+            if ($usernameBase === '') {
+                $usernameBase = generate_username_from_email($email);
+            }
             $username = $usernameBase;
             $attempt = 1;
 
