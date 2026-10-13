@@ -164,3 +164,17 @@ wallos_test('the potential-savings total normalizes each cycle and converts each
     assert_same(0, get_upcoming_cancellations_monthly_value([], null, 1),
         'nothing flagged means nothing to save');
 });
+
+wallos_test('the cancellation cron keeps the account id while looping over household members', function () {
+    $source = file_get_contents(WALLOS_ROOT . '/endpoints/cronjobs/sendcancellationnotifications.php');
+
+    // Reusing $userId as the loop key replaced the account id with a household
+    // member id, so every channel after email ran its SSRF check (and its
+    // household lookup) against the wrong account.
+    assert_not_contains('foreach ($notify as $userId', $source,
+        'no channel loop overwrites $userId');
+    assert_not_contains("household WHERE id = :userId'", $source,
+        'household lookups are not by id alone');
+    assert_same(7, substr_count($source, "household WHERE id = :id AND user_id = :ownerId"),
+        'every channel looks up the payer within the owning account');
+});
