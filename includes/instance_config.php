@@ -3,7 +3,7 @@
 /*
   Instance settings the deployment can own.
 
-  Wallos keeps its instance SMTP and its public URL in the admin table, entered
+  Tally keeps its instance SMTP and its public URL in the admin table, entered
   through the admin page. That works, and it keeps working exactly as before -
   but it means the credentials of the mail server live in the database, and that
   somebody has to type them in again by hand after every fresh volume. In a

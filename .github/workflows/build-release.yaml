@@ -85,7 +85,7 @@ jobs:
         with:
           images: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-            ghcr.io/ellite/wallos
+            ghcr.io/theshield2594/tally
           tags: ${{ needs.release.outputs.tag_patterns }}
       # necessary for multi-platform images
       - name: Set up QEMU
@@ -100,7 +100,7 @@ jobs:
           context: .
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
-          outputs: type=image,"name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},ghcr.io/ellite/wallos",push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
+          outputs: type=image,"name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},ghcr.io/theshield2594/tally",push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
           # Scope cache per platform to prevent architecture-mismatched layers
           cache-from: type=gha,scope=${{ github.workflow }}-${{ matrix.platform }}
           cache-to: type=gha,mode=max,scope=${{ github.workflow }}-${{ matrix.platform }}
@@ -150,7 +150,7 @@ jobs:
         with:
           images: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-            ghcr.io/ellite/wallos
+            ghcr.io/theshield2594/tally
           tags: ${{ needs.release.outputs.tag_patterns }}
       - name: Create manifest list and push to Docker Hub
         working-directory: /tmp/digests
@@ -163,7 +163,7 @@ jobs:
         run: |
           docker buildx imagetools create \
             $(jq -cr '.tags | map(select(startswith("ghcr.io")) | "-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf 'ghcr.io/ellite/wallos@sha256:%s ' *)
+            $(printf 'ghcr.io/theshield2594/tally@sha256:%s ' *)
       - name: Send notification to Discord
         if: needs.release.outputs.release_created == 'true'
         uses: Ilshidur/action-discord@d2594079a10f1d6739ee50a2471f0ca57418b554 # v0.4.0 (pin @master to a full commit SHA)

@@ -50,7 +50,7 @@ function getLogoFromUrl($url, $uploadDir, $name, $i18n, $settings)
         $ch = curl_init($currentUrl);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
         curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-        curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Wallos/1.0');
+        curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Tally/1.0');
         
         curl_setopt($ch, CURLOPT_FOLLOWLOCATION, false); 
 

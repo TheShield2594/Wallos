@@ -146,11 +146,12 @@ function page_toolbar_end()
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Wallos - Subscription Tracker</title>
-  <meta name="apple-mobile-web-app-title" content="Wallos">
+  <title>Tally - Subscription Tracker</title>
+  <meta name="apple-mobile-web-app-title" content="Tally">
   <meta name="theme-color" content="<?= $theme == "light" ? "#FFFFFF" : "#171A20" ?>" id="theme-color" />
   <meta name="referrer" content="no-referrer">
-  <link rel="icon" type="image/png" href="images/icon/favicon.ico" sizes="16x16">
+  <link rel="icon" href="images/icon/favicon.ico" sizes="any">
+  <link rel="icon" href="images/brand/tally-icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="images/icon/apple-touch-icon.png">
   <link rel="apple-touch-icon" sizes="152x152" href="images/icon/apple-touch-icon-152.png">
   <link rel="apple-touch-icon" sizes="180x180" href="images/icon/apple-touch-icon-180.png">
@@ -226,7 +227,7 @@ function page_toolbar_end()
 <body class="<?= $theme ?> <?= $languages[$lang]['dir'] ?>">
   <div class="app" data-page="<?= htmlspecialchars(basename($page, '.php')) ?>">
     <nav class="sidebar" aria-label="<?= translate('dashboard', $i18n) ?>">
-      <a href="." class="sidebar-logo" title="Wallos - Subscription Tracker">
+      <a href="." class="sidebar-logo" title="Tally - Subscription Tracker">
         <?php include "images/siteicons/svg/logo.php"; ?>
       </a>
       <?php foreach ($navItems as $navItem) {

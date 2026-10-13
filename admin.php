@@ -519,7 +519,7 @@ $loginDisabledAllowed = $userCount == 1 && $settings['registrations_open'] == 0;
                             <?= translate('current_version', $i18n) ?>:
                             <span>
                                 <?= htmlspecialchars($version) ?>
-                                <a href="https://github.com/ellite/Wallos/releases/tag/<?= htmlspecialchars($version) ?>"
+                                <a href="https://github.com/<?= htmlspecialchars($githubRepository) ?>/releases/tag/<?= htmlspecialchars($version) ?>"
                                     target="_blank" title="<?= translate('external_url', $i18n) ?>" rel="noreferrer">
                                     <i class="fa-solid fa-arrow-up-right-from-square"></i>
                                 </a>
@@ -529,7 +529,7 @@ $loginDisabledAllowed = $userCount == 1 && $settings['registrations_open'] == 0;
                             <?= translate('latest_version', $i18n) ?>:
                             <span class="updates-list-latest">
                                 <?= htmlspecialchars($latestVersion) ?>
-                                <a href="https://github.com/ellite/Wallos/releases/tag/<?= htmlspecialchars($latestVersion) ?>"
+                                <a href="https://github.com/<?= htmlspecialchars($githubRepository) ?>/releases/tag/<?= htmlspecialchars($latestVersion) ?>"
                                     target="_blank" title="<?= translate('external_url', $i18n) ?>" rel="noreferrer">
                                     <i class="fa-solid fa-arrow-up-right-from-square"></i>
                                 </a>

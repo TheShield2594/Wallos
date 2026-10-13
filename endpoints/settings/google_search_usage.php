@@ -25,7 +25,7 @@ $ch = curl_init();
 curl_setopt($ch, CURLOPT_URL, 'https://serpapi.com/account?api_key=' . urlencode($apiKey));
 curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 curl_setopt($ch, CURLOPT_TIMEOUT, 15);
-curl_setopt($ch, CURLOPT_USERAGENT, 'Wallos');
+curl_setopt($ch, CURLOPT_USERAGENT, 'Tally');
 $response = curl_exec($ch);
 $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
 unset($ch);

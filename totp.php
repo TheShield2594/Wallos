@@ -151,7 +151,7 @@ if (isset($_POST['one-time-code'])) {
             // The login still proceeds if this cannot be stored — the code was
             // genuine — but the replay window is then unguarded, so say so.
             if ($statement->execute() === false) {
-                error_log('Wallos: could not record the used TOTP step for user '
+                error_log('Tally: could not record the used TOTP step for user '
                     . (int) $_SESSION['totp_user_id'] . '; this code stays replayable until it expires');
             }
         }
@@ -252,9 +252,10 @@ if (isset($_POST['one-time-code'])) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="theme-color" content="<?= $theme == "light" ? "#FFFFFF" : "#171A20" ?>" id="theme-color" />
-    <meta name="apple-mobile-web-app-title" content="Wallos">
-    <title>Wallos - Subscription Tracker</title>
-    <link rel="icon" type="image/png" href="images/icon/favicon.ico" sizes="16x16">
+    <meta name="apple-mobile-web-app-title" content="Tally">
+    <title>Tally - Subscription Tracker</title>
+    <link rel="icon" href="images/icon/favicon.ico" sizes="any">
+    <link rel="icon" href="images/brand/tally-icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="images/icon/apple-touch-icon.png">
     <link rel="apple-touch-icon" sizes="152x152" href="images/icon/apple-touch-icon-152.png">
     <link rel="apple-touch-icon" sizes="180x180" href="images/icon/apple-touch-icon-180.png">
@@ -289,11 +290,11 @@ if (isset($_POST['one-time-code'])) {
                 <h1><?= translate('auth_tagline', $i18n) ?></h1>
                 <p><?= translate('auth_tagline_sub', $i18n) ?></p>
             </div>
-            <div class="auth-brand-footer">Wallos &mdash; Subscription Tracker</div>
+            <div class="auth-brand-footer">Tally &mdash; Subscription Tracker</div>
         </aside>
         <section class="container">
             <header>
-                <div class="logo-image" title="Wallos - Subscription Tracker">
+                <div class="logo-image" title="Tally - Subscription Tracker">
                     <?php include "images/siteicons/svg/logo.php"; ?>
                 </div>
                 <p>
@@ -328,4 +329,4 @@ if (isset($_POST['one-time-code'])) {
     </div>
 </body>
 
-</html>
+</html>

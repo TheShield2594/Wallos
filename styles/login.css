@@ -86,12 +86,29 @@ select:focus-visible {
 header .logo-image {
   display: flex;
   justify-content: center;
-  margin-bottom: 18px;
+  margin-bottom: 20px;
+  color: var(--text);
 }
 
-header .logo-image svg {
-  width: auto;
-  height: 34px;
+header .logo-image .brand {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+header .logo-image .brand-icon {
+  width: 64px;
+  height: 64px;
+  filter: drop-shadow(0 6px 14px rgba(37, 99, 235, 0.25));
+}
+
+header .logo-image .brand-name {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text2);
 }
 
 .container>header>p,

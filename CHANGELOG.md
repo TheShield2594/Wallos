@@ -1,5 +1,7 @@
 # Changelog
 
+Tally is a fork of [Wallos](https://github.com/ellite/Wallos). The entries up to and including 5.8.3 are from the Wallos project.
+
 ## [5.8.3](https://github.com/ellite/Wallos/compare/v5.8.2...v5.8.3) (2026-10-01)
 
 

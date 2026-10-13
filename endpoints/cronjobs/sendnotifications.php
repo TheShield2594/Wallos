@@ -464,7 +464,7 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
                     $emailaddress = !empty($user['email']) ? $user['email'] : $defaultEmail;
                     $name = !empty($user['name']) ? $user['name'] : $defaultName;
 
-                    $mail->setFrom($email['fromEmail'], 'Wallos App');
+                    $mail->setFrom($email['fromEmail'], 'Tally');
                     $mail->addAddress($emailaddress, $name);
 
                     if (!empty($email['otherEmails'])) {
@@ -481,7 +481,7 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
                         }
                     }
 
-                    $mail->Subject = 'Wallos Notification';
+                    $mail->Subject = 'Tally Notification';
                     $mail->Body = $message;
 
                     if ($mail->send()) {
@@ -687,7 +687,7 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
                     // Prepare PushPlus Data
                     $data = array(
                         'token' => $pushplus['token'],
-                        'title' => '订阅续期提醒 - Wallos',
+                        'title' => '订阅续期提醒 - Tally',
                         'content' => mb_convert_encoding($messageContent, 'UTF-8', 'auto'),
                         'template' => 'json'
                     );
@@ -980,7 +980,7 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
                     $result = $stmt->execute();
                     $user = $result->fetchArray(SQLITE3_ASSOC);
 
-                    $title = 'Wallos Notification';
+                    $title = 'Tally Notification';
                     $name = $user['name'] ?? "";
                     $message = buildNotificationMessage($name, $perUser, $periodSummaryLine, $sendPeriodStartSummaryOnly);
                     if ($message === "") {
@@ -1051,7 +1051,7 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
                         }
 
                         $payload = json_encode([
-                            'title' => 'Wallos Notification',
+                            'title' => 'Tally Notification',
                             'body' => $message,
                         ]);
 

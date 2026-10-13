@@ -2,7 +2,9 @@
 
 ## Reporting a Vulnerability
 
-If you discover any security vulnerabilities in this project, please report them to the developer by emailing [wallos@henrique.pt](mailto:wallos@henrique.pt). I appreciate your help in keeping the project secure.
+If you discover any security vulnerabilities in this project, please report them privately through GitHub: open the repository's **Security** tab and choose **Report a vulnerability** ([direct link](https://github.com/TheShield2594/Wallos/security/advisories/new)). Please don't open a public issue for security problems.
+
+If the vulnerability also affects upstream [Wallos](https://github.com/ellite/Wallos), please report it there as well.
 
 ## Supported Versions
 
@@ -23,7 +25,7 @@ What is being done currenty:
 
 ## Reporting a Security Concern
 
-If you have any security concerns or questions regarding the security of this project, please contact the developer at [wallos@henrique.pt](mailto:wallos@henrique.pt).
+If you have any security concerns or questions regarding the security of this project, please use the same private reporting link above.
 
 ## Responsible Disclosure
 

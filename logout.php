@@ -38,13 +38,13 @@ if (isset($_SESSION['token'])) {
     $stmt = $db->prepare($sql);
 
     if ($stmt === false) {
-        error_log('Wallos: could not prepare the login token deletion on logout; '
+        error_log('Tally: could not prepare the login token deletion on logout; '
             . 'any browser still holding the cookie stays signed in');
     } else {
         $stmt->bindParam(':token', $token, SQLITE3_TEXT);
 
         if ($stmt->execute() === false) {
-            error_log('Wallos: could not revoke the login token on logout; '
+            error_log('Tally: could not revoke the login token on logout; '
                 . 'any browser still holding the cookie stays signed in');
         }
     }

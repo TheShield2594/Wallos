@@ -2,7 +2,7 @@
 /*
 This API Endpoint accepts POST requests only.
 It receives the following parameters:
-- api_key: the API key of the user (for Wallos authentication).
+- api_key: the API key of the user (for Tally authentication).
 - action: the action to perform ('add', 'edit', 'delete').
 - name: (required for 'add', optional for 'edit') the name of the payment method.
 - enabled: (optional for 'add' and 'edit'; '1' for enabled, '0' for disabled).
@@ -127,7 +127,7 @@ function getLogoFromUrl($url, $uploadDir, $name, $settings)
         $ch = curl_init($currentUrl);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
         curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-        curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Wallos/1.0');
+        curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Tally/1.0');
         curl_setopt($ch, CURLOPT_FOLLOWLOCATION, false); 
         curl_setopt($ch, CURLOPT_RESOLVE, ["{$host}:{$port}:{$ip}"]);
 

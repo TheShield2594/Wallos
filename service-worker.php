@@ -94,8 +94,9 @@ const staticAssets = [
     'images/icon/apple-touch-icon-152.png',
     'images/icon/apple-touch-icon.png',
     'images/screenshots/desktop.png',
-    'images/siteicons/wallos.png',
-    'images/siteicons/walloswhite.png',
+    'images/brand/tally-wordmark.png',
+    'images/brand/tally-wordmark-white.png',
+    'images/brand/tally-icon.svg',
     'images/avatars/1.svg',
     'images/avatars/2.svg',
     'images/avatars/3.svg',
@@ -300,11 +301,11 @@ self.addEventListener('push', function (event) {
         try {
             data = event.data.json();
         } catch (e) {
-            data = { title: 'Wallos', body: event.data.text() };
+            data = { title: 'Tally', body: event.data.text() };
         }
     }
 
-    const title = data.title || 'Wallos';
+    const title = data.title || 'Tally';
     const options = {
         body: data.body || '',
         icon: 'images/icon/android-chrome-192x192.png',

@@ -48,7 +48,7 @@ Example response:
       "enabled": 1,
       "token": "********",
       "user_key": "userkey123",
-      "title": "Wallos",
+      "title": "Tally",
       "priority": 0,
       "sound": "pushover"
     },

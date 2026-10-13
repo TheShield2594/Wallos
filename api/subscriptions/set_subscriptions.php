@@ -2,7 +2,7 @@
 /*
 This API Endpoint accepts POST requests only.
 It receives the following parameters:
-- api_key: the API key of the user (for Wallos authentication).
+- api_key: the API key of the user (for Tally authentication).
 - action: the action to perform ('add', 'edit', 'delete').
 - id / subscription_id: (required for 'edit' and 'delete') the ID of the subscription.
 

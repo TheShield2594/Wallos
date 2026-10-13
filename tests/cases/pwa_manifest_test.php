@@ -36,7 +36,7 @@ wallos_test('the manifest is valid JSON with the expected content type', functio
 
     $decoded = json_decode($output, true);
     assert_true($decoded !== null, 'manifest.php produces valid JSON');
-    assert_same('Wallos', $decoded['short_name'] ?? null, 'the manifest content is otherwise unchanged');
+    assert_same('Tally', $decoded['short_name'] ?? null, 'the manifest content is otherwise unchanged');
 });
 
 wallos_test('theme_color and background_color track the theme cookie', function () {

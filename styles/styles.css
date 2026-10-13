@@ -1,5 +1,5 @@
 /*
-  Wallos — "If Apple made it" UI.
+  Tally — "If Apple made it" UI.
 
   One responsive layout:
     phone   (< 640px)  bottom tab bar, large titles, details as a full page
@@ -121,12 +121,28 @@ img {
   display: block;
   align-self: flex-start;
   margin: 0 10px 22px;
-  line-height: 0;
+  color: var(--text);
+  text-decoration: none;
 }
 
-.sidebar-logo svg {
-  width: auto;
-  height: 26px;
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.brand-icon {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+}
+
+.brand-name {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1;
 }
 
 .sidebar-item {

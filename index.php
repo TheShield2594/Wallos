@@ -151,7 +151,7 @@ $dashboardRow = function ($subscription, $subtitle, $tone = '') use ($currencies
                     <strong><?= translate('new_version_available', $i18n) ?></strong>
                     <span><?= translate('current_version', $i18n) ?>: <?= htmlspecialchars($version) ?> → <?= htmlspecialchars($latestVersion) ?></span>
                 </div>
-                <a class="btn" href="https://github.com/ellite/Wallos/releases/tag/<?= htmlspecialchars($latestVersion) ?>"
+                <a class="btn" href="https://github.com/<?= htmlspecialchars($githubRepository) ?>/releases/tag/<?= htmlspecialchars($latestVersion) ?>"
                     target="_blank" rel="noreferrer"><?= translate('release_notes', $i18n) ?></a>
             </div>
             <?php

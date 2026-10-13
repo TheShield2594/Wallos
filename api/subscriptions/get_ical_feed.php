@@ -150,7 +150,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" || $_SERVER["REQUEST_METHOD"] === "GET
     header('Content-Type: text/calendar; charset=utf-8');
     header('Content-Disposition: attachment; filename="subscriptions.ics"');
 
-    $icsContent = "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Wallos//iCalendar//EN\nNAME:Wallos\nX-WR-CALNAME:Wallos\n";
+    $icsContent = "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Tally//iCalendar//EN\nNAME:Tally\nX-WR-CALNAME:Tally\n";
 
     foreach ($subscriptionsToReturn as $subscription) {
         $subscription['payer_user'] = $subscription['payer_user_name'];

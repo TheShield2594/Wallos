@@ -1,15 +1,15 @@
-# Contributing to wallos
+# Contributing to Tally
 
 We welcome contributions from the community and look forward to working with you to improve this project!
 
 ## How to Contribute
 
-1.  **Fork the repository:** Start by forking the wallos repository to your own GitHub account.
+1.  **Fork the repository:** Start by forking the Tally repository to your own GitHub account.
 2.  **Clone your fork:** Clone the forked repository to your local machine (replace <YOUR_USERNAME> with your actual github username):
 
     ```bash
-    git clone https://github.com/<YOUR_USERNAME>/wallos.git
-    cd wallos
+    git clone https://github.com/<YOUR_USERNAME>/Wallos.git
+    cd Wallos
     ```
 
 3.  **Create a branch:** Create a new branch for your changes:
@@ -27,7 +27,7 @@ We welcome contributions from the community and look forward to working with you
 4.  **Make your changes:** Implement your feature or bug fix.
 5.  **Test your changes:** Ensure that your changes work as expected.
 
-    Wallos has a small test suite in `tests/`. It needs no Composer or local PHP
+    Tally has a small test suite in `tests/`. It needs no Composer or local PHP
     installation — it runs in a throwaway container:
 
     ```bash
@@ -51,7 +51,7 @@ We welcome contributions from the community and look forward to working with you
     git push origin feature/your-feature-name
     ```
 
-8.  **Create a Pull Request:** Go to the wallos repository on GitHub (https://github.com/ellite/wallos) and create a pull request from your branch to the `main` branch.
+8.  **Create a Pull Request:** Go to the Tally repository on GitHub (https://github.com/TheShield2594/Wallos) and create a pull request from your branch to the `main` branch.
 
 ## Pull Request Guidelines
 
@@ -69,7 +69,7 @@ We welcome contributions from the community and look forward to working with you
 
 ## Translations
 
-If you want to contribute with a translation of wallos:
+If you want to contribute with a translation of Tally:
 
 1.  **Add your language code:**
     * Open `includes/i18n/languages.php`.
@@ -88,8 +88,8 @@ If you want to contribute with a translation of wallos:
 
 ## Contributors
 
-<a href="https://github.com/ellite/wallos/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=ellite/wallos" />
+<a href="https://github.com/TheShield2594/Wallos/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=TheShield2594/Wallos" />
 </a>
 
 
