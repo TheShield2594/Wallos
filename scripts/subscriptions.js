@@ -916,27 +916,32 @@ function autoFillNextPaymentDate(e) {
   const cycle = cycleSelect.value;
   const frequency = Number(frequencySelect.value);
 
-  const nextDate = new Date(startDate.value);
+  const baseDate = new Date(startDate.value);
+  let nextDate = new Date(baseDate);
   let safetyCounter = 0;
   const maxIterations = 1000;
 
+  // Each occurrence is computed from the start date, with months and years
+  // clamped to the end of the month, so Jan 31 renews Feb 28 then Mar 31.
   while (nextDate <= today && safetyCounter < maxIterations) {
+    safetyCounter++;
     switch (cycle) {
     case '1': // Days
-      nextDate.setDate(nextDate.getDate() + frequency);
+      nextDate = new Date(baseDate);
+      nextDate.setDate(baseDate.getDate() + frequency * safetyCounter);
       break;
     case '2': // Weeks
-      nextDate.setDate(nextDate.getDate() + 7 * frequency);
+      nextDate = new Date(baseDate);
+      nextDate.setDate(baseDate.getDate() + 7 * frequency * safetyCounter);
       break;
-    case '3': // Months  
-      nextDate.setMonth(nextDate.getMonth() + frequency);
+    case '3': // Months
+      nextDate = addMonthsClamped(baseDate, frequency * safetyCounter);
       break;
     case '4': // Years
-      nextDate.setFullYear(nextDate.getFullYear() + frequency);
+      nextDate = addMonthsClamped(baseDate, 12 * frequency * safetyCounter);
       break;
     default:
     }
-    safetyCounter++;
   }
 
 if (safetyCounter === maxIterations) {
@@ -944,6 +949,15 @@ if (safetyCounter === maxIterations) {
 }
 
 nextPayment.value = toISOStringWithTimezone(nextDate).substring(0, 10);
+}
+
+function addMonthsClamped(date, months) {
+  const result = new Date(date);
+  result.setDate(1);
+  result.setMonth(result.getMonth() + months);
+  const lastDay = new Date(result.getFullYear(), result.getMonth() + 1, 0).getDate();
+  result.setDate(Math.min(date.getDate(), lastDay));
+  return result;
 }
 
 function toISOStringWithTimezone(date) {

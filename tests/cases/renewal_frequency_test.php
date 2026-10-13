@@ -30,6 +30,7 @@ function renewal_cron_sandbox()
         copy(WALLOS_ROOT . '/endpoints/cronjobs/' . $file, $root . '/endpoints/cronjobs/' . $file);
     }
     copy(WALLOS_ROOT . '/includes/connect_endpoint_crontabs.php', $root . '/includes/connect_endpoint_crontabs.php');
+    copy(WALLOS_ROOT . '/includes/renewal_dates.php', $root . '/includes/renewal_dates.php');
     foreach (glob(WALLOS_ROOT . '/includes/i18n/*.php') as $file) {
         copy($file, $root . '/includes/i18n/' . basename($file));
     }
@@ -137,4 +138,26 @@ wallos_test('both subscription save paths bound frequency and cycle', function (
     $api = file_get_contents(WALLOS_ROOT . '/api/subscriptions/set_subscriptions.php');
     assert_same(2, substr_count($api, '$frequency < 1 || $frequency > 366'),
         'the API refuses a frequency outside 1-366 on both add and edit');
+});
+
+wallos_test('the renewal cron keeps an end-of-month subscription on the last day of the month', function () {
+    $root = renewal_cron_sandbox();
+    $db = new SQLite3($root . '/db/wallos.db');
+    wallos_test_create_user($db, 1, 'admin');
+    $stmt = $db->prepare("INSERT INTO subscriptions (user_id, name, price, currency_id, next_payment, cycle, frequency, auto_renew, inactive)
+                          VALUES (1, 'end of month', 1, :currencyId, '2020-01-31', 3, 1, 1, 0)");
+    $stmt->bindValue(':currencyId', wallos_test_currency_id(1, 0), SQLITE3_INTEGER);
+    $stmt->execute();
+    $db->close();
+
+    $run = run_renewal_cron($root, 20);
+    assert_same(0, $run['exitCode'], 'the cron exits cleanly: ' . trim(strip_tags($run['output'])));
+
+    $db = new SQLite3($root . '/db/wallos.db');
+    $nextPayment = new DateTime($db->querySingle("SELECT next_payment FROM subscriptions WHERE name = 'end of month'"));
+    $db->close();
+
+    assert_true($nextPayment->format('Y-m-d') >= date('Y-m-d'), 'the subscription was renewed into the future');
+    assert_same($nextPayment->format('t'), $nextPayment->format('j'),
+        'it renews on the last day of the month instead of drifting to the 3rd');
 });

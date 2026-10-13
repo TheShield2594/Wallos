@@ -2,6 +2,7 @@
 
 require_once 'validate.php';
 require_once __DIR__ . '/../../includes/connect_endpoint_crontabs.php';
+require_once __DIR__ . '/../../includes/renewal_dates.php';
 
 require 'settimezone.php';
 
@@ -38,23 +39,13 @@ while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
         continue;
     }
 
-    // Calculate the interval to add based on the cycle
-    $intervalSpec = "P";
-    if ($cycle == 'Daily') {
-        $intervalSpec .= "{$frequency}D";
-    } elseif ($cycle === 'Weekly') {
-        $intervalSpec .= "{$frequency}W";
-    } elseif ($cycle === 'Monthly') {
-        $intervalSpec .= "{$frequency}M";
-    } elseif ($cycle === 'Yearly') {
-        $intervalSpec .= "{$frequency}Y";
-    }
-
-    $interval = new DateInterval($intervalSpec);
-
-    // Add intervals until the next payment date is in the future
+    // Advance whole cycles until the next payment date is in the future,
+    // clamping month and year steps to the end of the month.
+    $baseDate = $nextPaymentDate;
+    $steps = 0;
     while ($nextPaymentDate < $currentDate) {
-        $nextPaymentDate->add($interval);
+        $steps++;
+        $nextPaymentDate = wallos_renewal_date($baseDate, $cycle, $frequency, $steps);
     }
 
     // Update the subscription's next_payment date

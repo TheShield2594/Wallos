@@ -127,23 +127,30 @@ if ($result) {
 }
 
 foreach ($subscriptions as $subscription) {
+  // API-created rows can leave payer, category or payment method unset.
   $memberId = $subscription['payer_user_id'];
-  $members[$memberId]['count']++;
+  if (isset($memberId, $members[$memberId])) {
+    $members[$memberId]['count']++;
+  }
   $categoryId = $subscription['category_id'];
-  $categories[$categoryId]['count']++;
+  if (isset($categoryId, $categories[$categoryId])) {
+    $categories[$categoryId]['count']++;
+  }
   $paymentMethodId = $subscription['payment_method_id'];
-  $payment_methods[$paymentMethodId]['count']++;
+  if (isset($paymentMethodId, $payment_methods[$paymentMethodId])) {
+    $payment_methods[$paymentMethodId]['count']++;
+  }
 }
 
 if ($sortOrder == "category_id") {
   usort($subscriptions, function ($a, $b) use ($categories) {
-    return $categories[$a['category_id']]['order'] - $categories[$b['category_id']]['order'];
+    return ($categories[$a['category_id']]['order'] ?? PHP_INT_MAX) <=> ($categories[$b['category_id']]['order'] ?? PHP_INT_MAX);
   });
 }
 
 if ($sortOrder == "payment_method_id") {
   usort($subscriptions, function ($a, $b) use ($payment_methods) {
-    return $payment_methods[$a['payment_method_id']]['order'] - $payment_methods[$b['payment_method_id']]['order'];
+    return ($payment_methods[$a['payment_method_id']]['order'] ?? PHP_INT_MAX) <=> ($payment_methods[$b['payment_method_id']]['order'] ?? PHP_INT_MAX);
   });
 }
 
@@ -184,7 +191,7 @@ foreach ($subscriptions as $subscription) {
   $currencyId = $subscription['currency_id'];
   $print[$id]['auto_renew'] = $subscription['auto_renew'];
   $print[$id]['next_payment'] = $formatter->format(strtotime($subscription['next_payment']));
-  $print[$id]['payment_method_name'] = $payment_methods[$paymentMethodId]['name'];
+  $print[$id]['payment_method_name'] = $payment_methods[$paymentMethodId]['name'] ?? '';
   $print[$id]['payment_method_id'] = $paymentMethodId;
   $print[$id]['category_id'] = $subscription['category_id'];
   $print[$id]['payer_user_id'] = $subscription['payer_user_id'];
@@ -200,6 +207,13 @@ foreach ($subscriptions as $subscription) {
   if (isset($settings['showMonthlyPrice']) && $settings['showMonthlyPrice'] === 'true') {
     $print[$id]['price'] = getPricePerMonth($cycle, $frequency, $print[$id]['price']);
   }
+  // Sort on the price in the main currency, whether or not it is displayed
+  // converted, so mixed currencies order by value rather than raw number.
+  $sortPrice = $currencyId != $mainCurrencyId ? getPriceConverted(floatval($subscription['price']), $currencyId, $db) : floatval($subscription['price']);
+  if (isset($settings['showMonthlyPrice']) && $settings['showMonthlyPrice'] === 'true') {
+    $sortPrice = getPricePerMonth($cycle, $frequency, $sortPrice);
+  }
+  $print[$id]['sort_price'] = $sortPrice;
   if (isset($settings['showOriginalPrice']) && $settings['showOriginalPrice'] === 'true') {
     $print[$id]['original_price'] = floatval($subscription['price']);
     $print[$id]['original_currency_code'] = $currencies[$subscription['currency_id']]['code'];

@@ -118,7 +118,17 @@ $monthLabel = (new IntlDateFormatter($lang, IntlDateFormatter::FULL, IntlDateFor
 $hasMonthlyBudget = isset($monthlyBudget) && $monthlyBudget > 0;
 $budgetPercent = $hasMonthlyBudget ? min(100, ($totalCostPerMonth ?? 0) / $monthlyBudget * 100) : 0;
 
-$dashboardRow = function ($subscription, $subtitle, $tone = '') use ($currencies) {
+$convertCurrency = isset($settings['convertCurrency']) && $settings['convertCurrency'] === 'true';
+$dashboardPrice = function ($subscription) use ($convertCurrency, $userData, $currencies, $db, $userId) {
+    $mainCurrencyId = $userData['main_currency'];
+    if ($convertCurrency && $subscription['currency_id'] != $mainCurrencyId) {
+        $price = getPriceConverted($subscription['price'], $subscription['currency_id'], $db, $userId);
+        return formatPrice($price, $currencies[$mainCurrencyId]['code'], $currencies);
+    }
+    return formatPrice($subscription['price'], $currencies[$subscription['currency_id']]['code'], $currencies);
+};
+
+$dashboardRow = function ($subscription, $subtitle, $tone = '') use ($dashboardPrice) {
     return render_list_row([
         'id' => $subscription['id'],
         'name' => $subscription['name'],
@@ -127,7 +137,7 @@ $dashboardRow = function ($subscription, $subtitle, $tone = '') use ($currencies
         'logo_text_color' => $subscription['logo_text_color'] ?? null,
         'subtitle' => $subtitle,
         'subtitle_tone' => $tone,
-        'trailing' => formatPrice($subscription['price'], $currencies[$subscription['currency_id']]['code'], $currencies),
+        'trailing' => $dashboardPrice($subscription),
     ]);
 };
 ?>

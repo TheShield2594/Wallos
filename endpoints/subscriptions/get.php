@@ -195,9 +195,10 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
     $formatted_date = $formatter->format($next_payment_timestamp);
     $print[$id]['next_payment'] = $formatted_date;
     $print[$id]['auto_renew'] = $subscription['auto_renew'];
-    $paymentIconFolder = (strpos($payment_methods[$paymentMethodId]['icon'], 'images/uploads/icons/') !== false) ? "" : "images/uploads/logos/";
-    $print[$id]['payment_method_icon'] = $paymentIconFolder . $payment_methods[$paymentMethodId]['icon'];
-    $print[$id]['payment_method_name'] = $payment_methods[$paymentMethodId]['name'];
+    $paymentMethodIcon = $payment_methods[$paymentMethodId]['icon'] ?? '';
+    $paymentIconFolder = (strpos($paymentMethodIcon, 'images/uploads/icons/') !== false) ? "" : "images/uploads/logos/";
+    $print[$id]['payment_method_icon'] = $paymentMethodIcon === '' ? '' : $paymentIconFolder . $paymentMethodIcon;
+    $print[$id]['payment_method_name'] = $payment_methods[$paymentMethodId]['name'] ?? '';
     $print[$id]['payment_method_id'] = $paymentMethodId;
     $print[$id]['category_id'] = $subscription['category_id'];
     $print[$id]['payer_user_id'] = $subscription['payer_user_id'];
@@ -216,6 +217,13 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
     if (isset($settings['showMonthlyPrice']) && $settings['showMonthlyPrice'] === 'true') {
       $print[$id]['price'] = getPricePerMonth($cycle, $frequency, $print[$id]['price']);
     }
+    // Sort on the price in the main currency, whether or not it is displayed
+    // converted, so mixed currencies order by value rather than raw number.
+    $sortPrice = $currencyId != $mainCurrencyId ? getPriceConverted(floatval($subscription['price']), $currencyId, $db) : floatval($subscription['price']);
+    if (isset($settings['showMonthlyPrice']) && $settings['showMonthlyPrice'] === 'true') {
+      $sortPrice = getPricePerMonth($cycle, $frequency, $sortPrice);
+    }
+    $print[$id]['sort_price'] = $sortPrice;
     if (isset($settings['showOriginalPrice']) && $settings['showOriginalPrice'] === 'true') {
       $print[$id]['original_price'] = floatval($subscription['price']);
       $print[$id]['original_currency_code'] = $currencies[$subscription['currency_id']]['code'];
@@ -235,13 +243,13 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
 
   if ($sortOrder == "category_id") {
     usort($print, function ($a, $b) use ($categories) {
-      return $categories[$a['category_id']]['order'] - $categories[$b['category_id']]['order'];
+      return ($categories[$a['category_id']]['order'] ?? PHP_INT_MAX) <=> ($categories[$b['category_id']]['order'] ?? PHP_INT_MAX);
     });
   }
   
   if ($sortOrder == "payment_method_id") {
     usort($print, function ($a, $b) use ($payment_methods) {
-      return $payment_methods[$a['payment_method_id']]['order'] - $payment_methods[$b['payment_method_id']]['order'];
+      return ($payment_methods[$a['payment_method_id']]['order'] ?? PHP_INT_MAX) <=> ($payment_methods[$b['payment_method_id']]['order'] ?? PHP_INT_MAX);
     });
   }
 

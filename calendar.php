@@ -1,6 +1,7 @@
 <?php
 require_once 'includes/header.php';
 require_once 'includes/currency_rates.php';
+require_once 'includes/renewal_dates.php';
 
 function getPriceConverted($price, $currency, $database, $userId)
 {
@@ -198,32 +199,25 @@ if ($weekStartsSunday) {
         continue;
       }
 
-      switch ($cycle) {
-        case 1: // Days
-          $incrementString = "+{$frequency} days";
-          break;
-        case 2: // Weeks
-          $incrementString = "+{$frequency} weeks";
-          break;
-        case 3: // Months
-          $incrementString = "+{$frequency} months";
-          break;
-        case 4: // Years
-          $incrementString = "+{$frequency} years";
-          break;
-        default:
-          $incrementString = "+{$frequency} months";
+      $cycleNames = [1 => 'Daily', 2 => 'Weekly', 3 => 'Monthly', 4 => 'Yearly'];
+      $cycleName = $cycleNames[$cycle] ?? 'Monthly';
+      if ((int) $frequency < 1) {
+        continue;
       }
 
+      $baseDate = new DateTime(date('Y-m-d', $nextPaymentDate));
+      $occurrence = function ($steps) use ($baseDate, $cycleName, $frequency) {
+        return wallos_renewal_date($baseDate, $cycleName, $frequency, $steps)->getTimestamp();
+      };
       $endDate = strtotime("+" . $yearsToLoad . " years", $nextPaymentDate);
 
       // Find the first payment date of the month by moving backwards
-      $startDate = $nextPaymentDate;
-      while ($startDate > $startOfMonth) {
-        $startDate = strtotime("-" . $incrementString, $startDate);
+      $steps = 0;
+      while ($occurrence($steps) > $startOfMonth) {
+        $steps--;
       }
 
-      for ($date = $startDate; $date <= $endDate; $date = strtotime($incrementString, $date)) {
+      for ($date = $occurrence($steps); $date <= $endDate; $date = $occurrence(++$steps)) {
         if ($date < $subscriptionStartDate) {
           continue;
         }
