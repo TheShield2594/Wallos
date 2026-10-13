@@ -25,7 +25,7 @@ if (!is_null($settings['latest_version'])) {
                 </h3>
                 <span>
                     <?= translate('release_notes', $i18n) ?>
-                    <a href="https://github.com/<?= htmlspecialchars($githubRepository) ?>/releases/tag/<?= $version ?>" target="_blank"
+                    <a href="https://github.com/<?= htmlspecialchars($githubRepository) ?>/releases/tag/<?= htmlspecialchars($releaseTagPrefix) ?><?= $version ?>" target="_blank"
                         title="<?= translate('external_url', $i18n) ?>" rel="noreferrer">
                         <i class="fa-solid fa-arrow-up-right-from-square"></i>
                     </a>
@@ -39,7 +39,7 @@ if (!is_null($settings['latest_version'])) {
                     </h3>
                     <span>
                         <?= translate('release_notes', $i18n) ?>
-                        <a href="https://github.com/<?= htmlspecialchars($githubRepository) ?>/releases/tag/<?= $latestVersion ?>" target="_blank"
+                        <a href="https://github.com/<?= htmlspecialchars($githubRepository) ?>/releases/tag/<?= htmlspecialchars($releaseTagPrefix) ?><?= $latestVersion ?>" target="_blank"
                             title="<?= translate('external_url', $i18n) ?>" rel="noreferrer">
                             <i class="fa-solid fa-arrow-up-right-from-square"></i>
                         </a>

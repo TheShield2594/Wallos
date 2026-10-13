@@ -20,7 +20,11 @@ if ($fetch === false) {
     die('Error fetching data from GitHub API');
 }
 
-$latestVersion = json_decode($fetch, true)['tag_name'];
+// Release tags carry a prefix ("tally-v1.2.3"); store just the version.
+$latestVersion = json_decode($fetch, true)['tag_name'] ?? '';
+if ($releaseTagPrefix !== '' && strpos($latestVersion, $releaseTagPrefix) === 0) {
+    $latestVersion = substr($latestVersion, strlen($releaseTagPrefix));
+}
 
 // Check that $latestVersion is a valid version number
 if (!preg_match('/^v\d+\.\d+\.\d+$/', $latestVersion)) {

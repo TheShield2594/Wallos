@@ -15,7 +15,10 @@ env:
   REGISTRY: docker.io
   REGISTRY_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
   REGISTRY_PASSWORD: ${{ secrets.DOCKERHUB_TOKEN }}
+  # Docker Hub is optional: set the DOCKERHUB_TAG variable (and the
+  # DOCKERHUB_USERNAME / DOCKERHUB_TOKEN secrets) to publish there as well.
   IMAGE_NAME: ${{ vars.DOCKERHUB_TAG }}
+  GHCR_IMAGE: ghcr.io/theshield2594/tally
 
 jobs:
   release:
@@ -64,7 +67,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Log into registry ${{ env.REGISTRY }}
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && env.IMAGE_NAME != ''
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -77,13 +80,24 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image names
+        id: images
+        run: |
+          images="$GHCR_IMAGE"
+          if [ -n "$IMAGE_NAME" ]; then
+            images="$REGISTRY/$IMAGE_NAME"$'\n'"$images"
+          fi
+          {
+            echo 'list<<EOF'
+            echo "$images"
+            echo EOF
+            echo "csv=$(echo "$images" | paste -sd, -)"
+          } >> "$GITHUB_OUTPUT"
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-            ghcr.io/theshield2594/tally
+          images: ${{ steps.images.outputs.list }}
           tags: ${{ needs.release.outputs.tag_patterns }}
       # necessary for multi-platform images
       - name: Set up QEMU
@@ -98,7 +112,7 @@ jobs:
           context: .
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
-          outputs: type=image,"name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},ghcr.io/theshield2594/tally",push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
+          outputs: type=image,"name=${{ steps.images.outputs.csv }}",push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
           # Scope cache per platform to prevent architecture-mismatched layers
           cache-from: type=gha,scope=${{ github.workflow }}-${{ matrix.platform }}
           cache-to: type=gha,mode=max,scope=${{ github.workflow }}-${{ matrix.platform }}
@@ -119,6 +133,9 @@ jobs:
 
   merge:
     runs-on: ubuntu-latest
+    env:
+      # Read here so the Discord step can be skipped when it isn't set.
+      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
     needs: [release, build]
     if: github.event_name != 'pull_request'
     steps:
@@ -129,6 +146,7 @@ jobs:
           pattern: digests-*
           merge-multiple: true
       - name: Log into registry ${{ env.REGISTRY }}
+        if: env.IMAGE_NAME != ''
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -142,15 +160,27 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+      - name: Image names
+        id: images
+        run: |
+          images="$GHCR_IMAGE"
+          if [ -n "$IMAGE_NAME" ]; then
+            images="$REGISTRY/$IMAGE_NAME"$'\n'"$images"
+          fi
+          {
+            echo 'list<<EOF'
+            echo "$images"
+            echo EOF
+            echo "csv=$(echo "$images" | paste -sd, -)"
+          } >> "$GITHUB_OUTPUT"
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-            ghcr.io/theshield2594/tally
+          images: ${{ steps.images.outputs.list }}
           tags: ${{ needs.release.outputs.tag_patterns }}
       - name: Create manifest list and push to Docker Hub
+        if: env.IMAGE_NAME != ''
         working-directory: /tmp/digests
         run: |
           docker buildx imagetools create \
@@ -161,9 +191,9 @@ jobs:
         run: |
           docker buildx imagetools create \
             $(jq -cr '.tags | map(select(startswith("ghcr.io")) | "-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf 'ghcr.io/theshield2594/tally@sha256:%s ' *)
+            $(printf '${{ env.GHCR_IMAGE }}@sha256:%s ' *)
       - name: Send notification to Discord
-        if: needs.release.outputs.release_created == 'true'
+        if: needs.release.outputs.release_created == 'true' && env.DISCORD_WEBHOOK != ''
         uses: Ilshidur/action-discord@d2594079a10f1d6739ee50a2471f0ca57418b554 # v0.4.0 (pin @master to a full commit SHA)
         with:
           args: "A new release has been created: ${{ steps.meta.outputs.version }}"
