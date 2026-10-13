@@ -152,3 +152,18 @@ wallos_test('every notification channel in the crons is guarded against exceptio
             $file . ' keeps sending to the other recipients when one email fails');
     }
 });
+
+wallos_test('cron channels handle provider responses and settings correctly', function () {
+    $renewal = file_get_contents(WALLOS_ROOT . '/endpoints/cronjobs/sendnotifications.php');
+    $cancellation = file_get_contents(WALLOS_ROOT . '/endpoints/cronjobs/sendcancellationnotifications.php');
+
+    assert_contains('webhookParseHeaders($ntfy["headers"]', $cancellation,
+        'cancellation ntfy headers are parsed by the shared helper, so empty headers do not throw');
+    assert_not_contains('array_keys($headers)', $cancellation,
+        'no array_keys() on a json_decode() result that can be null');
+    assert_contains("'days_until' => \$subscription['days']", $renewal,
+        '{{days_until}} is the days left for this subscription, not the account default');
+    assert_not_contains("\$resultData['code'] == 200) {\n                                    echo \"Mattermost", $renewal,
+        'Mattermost success is not read from a JSON body it never sends');
+    assert_contains('Mattermost API error: HTTP ', $renewal, 'a Mattermost failure reports its HTTP status');
+});

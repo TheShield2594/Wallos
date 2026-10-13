@@ -815,16 +815,14 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
                             $result = curl_exec($ch);
                             $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 
+                            // A Mattermost incoming webhook answers a plain "ok", not
+                            // JSON, so success is the HTTP status.
                             if ($result === false) {
                                 echo "Error sending Mattermost notifications: " . curl_error($ch) . "<br />";
+                            } elseif ($httpCode >= 400) {
+                                echo "Mattermost API error: HTTP " . $httpCode . " " . $result . "<br />";
                             } else {
-                                $resultData = json_decode($result, true);
-                                if (isset($resultData['code']) && $resultData['code'] == 200) {
-                                    echo "Mattermost Notifications sent successfully<br />";
-                                } else {
-                                    $errorMsg = isset($resultData['msg']) ? $resultData['msg'] : 'Unknown error';
-                                    echo "Mattermost API error: " . $errorMsg . "<br />";
-                                }
+                                echo "Mattermost Notifications sent successfully<br />";
                             }
                             unset($ch);
                         }
@@ -973,7 +971,7 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
                 
                             foreach ($perUser as $subscription) {
                                 $payload = webhookFillPayload($webhook['payload'], [
-                                    'days_until' => $days,
+                                    'days_until' => $subscription['days'],
                                     'subscription_name' => $subscription['name'],
                                     'subscription_price' => $subscription['formatted_price'],
                                     'subscription_currency' => $subscription['currency'],
@@ -1008,7 +1006,8 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
                                 $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
                 
                                 if ($response === false || $httpCode >= 400) {
-                                    echo "Error sending notifications: " . curl_error($ch) . "<br />";
+                                    $errorDetail = $response === false ? curl_error($ch) : "HTTP " . $httpCode;
+                                    echo "Error sending notifications: " . $errorDetail . "<br />";
                                 } else {
                                     echo "Webhook Notification sent for subscription: " . $subscription['name'] . "<br />";
                                 }

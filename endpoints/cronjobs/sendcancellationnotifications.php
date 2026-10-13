@@ -564,10 +564,9 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
                                 $message .= $subscription['name'] . " for " . $subscription['price'] . "\n";
                             }
 
-                            $headers = json_decode($ntfy["headers"], true);
-                            $customheaders = array_map(function ($key, $value) {
-                                return "$key: $value";
-                            }, array_keys($headers), $headers);
+                            // Empty or non-JSON headers made array_keys(null) throw, so
+                            // no ntfy cancellation notification was ever sent.
+                            $customheaders = webhookParseHeaders($ntfy["headers"] ?? '');
 
                             $ch = curl_init();
 
@@ -658,7 +657,8 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
                                 $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
                 
                                 if ($response === false || $httpCode >= 400) {
-                                    echo "Error sending cancellation notifications: " . curl_error($ch) . "<br />";
+                                    $errorDetail = $response === false ? curl_error($ch) : "HTTP " . $httpCode;
+                                    echo "Error sending cancellation notifications: " . $errorDetail . "<br />";
                                 } else {
                                     echo "Webhook Cancellation Notification sent for subscription: " . $subscription['name'] . "<br />";
                                 }
