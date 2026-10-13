@@ -54,9 +54,27 @@ jobs:
             echo EOF
           } >> "$GITHUB_OUTPUT"
 
+  tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          # Same PHP version and extensions as the Docker image.
+          php-version: "8.3"
+          extensions: sqlite3, pdo_sqlite, curl, gd, intl, mbstring, openssl, calendar, zip
+          coverage: none
+      - name: Run tests
+        # tests/run.php exits non-zero when any case fails.
+        run: php tests/run.php
+
   build:
     runs-on: ubuntu-latest
-    needs: release
+    # No image is built, or pushed, from code whose tests fail.
+    needs: [release, tests]
     strategy:
       fail-fast: false
       matrix:
