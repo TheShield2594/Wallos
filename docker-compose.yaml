@@ -1,7 +1,7 @@
 services:
   tally:
     container_name: tally
-    image: ghcr.io/theshield2594/tally:latest
+    image: ghcr.io/theshield2594/tally:main
     ports:
       - "8282:80/tcp"
     environment:
