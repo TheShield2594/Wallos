@@ -84,10 +84,10 @@ docker run -d --name tally \
   -v /path/to/tally/db:/var/www/html/db \
   -v /path/to/tally/logos:/var/www/html/images/uploads/logos \
   -e TZ=Europe/Berlin -p 8282:80 --restart unless-stopped \
-  ghcr.io/theshield2594/tally:latest
+  ghcr.io/theshield2594/tally:main
 ```
 
-The image is built and published to the GitHub Container Registry by this repository's [Build & Release workflow](.github/workflows/build-release.yaml). You can also build it yourself from a clone:
+The image is built and published to the GitHub Container Registry by this repository's [Build & Release workflow](.github/workflows/build-release.yaml). `:main` follows the latest code on `main`; each release is also tagged with its version (for example `:1.0.0`). There is no `:latest` tag. You can also build it yourself from a clone:
 
 ```bash
 docker build -t tally .
@@ -103,7 +103,7 @@ To turn off the container health check (for Docker older than 25, or faster star
 services:
   tally:
     container_name: tally
-    image: ghcr.io/theshield2594/tally:latest
+    image: ghcr.io/theshield2594/tally:main
     ports:
       - "8282:80/tcp"
     environment:
