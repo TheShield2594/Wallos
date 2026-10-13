@@ -181,8 +181,14 @@ function checkThemeNeedsUpdate() {
     document.body.className = themePreference;
     const themeColorMetaTag = document.querySelector('meta[name="theme-color"]');
     themeColorMetaTag.setAttribute('content', themePreference === 'dark' ? '#171A20' : '#FFFFFF');
+    if (typeof applyAuthThemeIcon === 'function') {
+      applyAuthThemeIcon();
+    }
   }
 }
+
+// Keep following the system appearance until the user picks one.
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', checkThemeNeedsUpdate);
 
 window.onload = function () {
   restoreFormFields();

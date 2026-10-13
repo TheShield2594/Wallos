@@ -283,7 +283,7 @@ if (isset($_POST['username'])) {
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="<?= $theme == "light" ? "#FFFFFF" : "#171A20" ?>" id="theme-color" />
     <meta name="apple-mobile-web-app-title" content="Tally">
     <title>Tally - Subscription Tracker</title>
