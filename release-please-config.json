@@ -1,12 +1,15 @@
 {
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "bootstrap-sha": "fad58960d00201f20060f67148ab7fd1a5e0ca95",
   "packages": {
     ".": {
       "release-type": "simple",
       "component": "tally",
       "include-component-in-tag": true,
       "include-v-in-tag": true,
-      "extra-files": ["includes/version.php"]
+      "extra-files": [
+        "includes/version.php"
+      ]
     }
   }
 }
