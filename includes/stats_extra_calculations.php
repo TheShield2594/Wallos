@@ -1,5 +1,5 @@
 <?php
-// Wallos v5 — additional statistics for stats.php.
+// Tally v5 — additional statistics for stats.php.
 // Requires stats_calculations.php to have run first ($subscriptions, $db, $userId, $userData, $i18n, $lang).
 // All monetary values are converted to the main currency. Lifetime figures assume current prices.
 

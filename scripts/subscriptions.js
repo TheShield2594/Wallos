@@ -1,10 +1,15 @@
-let isSortOptionsOpen = false;
 let scrollTopBeforeOpening = 0;
 const shouldScroll = window.innerWidth <= 768;
-function toggleSortOptions() {
-  const sortOptions = document.querySelector("#sort-options");
-  sortOptions.classList.toggle("is-open");
-  isSortOptionsOpen = !isSortOptionsOpen;
+
+function setFormOpen(open) {
+  const modal = document.getElementById('subscription-form');
+  modal.classList.toggle("is-open", open);
+  document.querySelector('#subscription-form-backdrop').classList.toggle('is-open', open);
+  document.body.classList.toggle('no-scroll', open);
+  if (open) {
+    const firstField = modal.querySelector('#name');
+    setTimeout(() => firstField && firstField.focus({ preventScroll: true }), 50);
+  }
 }
 
 function toggleNotificationDays() {
@@ -61,7 +66,7 @@ function fillEditFormFields(subscription) {
   const formTitle = document.querySelector("#form-title");
   formTitle.textContent = translate('edit_subscription');
   const logo = document.querySelector("#form-logo");
-  const logoFile = subscription.logo !== null ? "images/uploads/logos/" + logoFilenameForCurrentTheme(subscription) : "";
+  const logoFile = subscription.logo ? "images/uploads/logos/" + logoFilenameForCurrentTheme(subscription) : "";
   if (logoFile) {
     logo.src = logoFile;
     logo.style = 'display: block';
@@ -133,15 +138,14 @@ function fillEditFormFields(subscription) {
   deleteButton.style = 'display: block';
   deleteButton.setAttribute("onClick", `deleteSubscription(event, ${subscription.id})`);
 
-  const modal = document.getElementById('subscription-form');
-  modal.classList.add("is-open");
+  setFormOpen(true);
 }
 
 function openEditSubscription(event, id) {
-  event.stopPropagation();
+  if (event) {
+    event.stopPropagation();
+  }
   scrollTopBeforeOpening = window.scrollY;
-  const body = document.querySelector('body');
-  body.classList.add('no-scroll');
   const url = `endpoints/subscription/get.php?id=${id}`;
   fetch(url)
     .then((response) => {
@@ -167,22 +171,15 @@ function openEditSubscription(event, id) {
 
 function addSubscription() {
   resetForm();
-  const modal = document.getElementById('subscription-form');
-  
   const startDate = document.querySelector("#start_date");
   startDate.value = new Date().toISOString().split('T')[0];
-
-  modal.classList.add("is-open");
-  const body = document.querySelector('body');
-  body.classList.add('no-scroll');
+  setFormOpen(true);
 }
 
 function closeAddSubscription() {
-  const modal = document.getElementById('subscription-form');
-  modal.classList.remove("is-open");
-  const body = document.querySelector('body');
-  body.classList.remove('no-scroll');
-  if (shouldScroll) {
+  const wasOpen = document.getElementById('subscription-form').classList.contains('is-open');
+  setFormOpen(false);
+  if (shouldScroll && wasOpen) {
     window.scrollTo(0, scrollTopBeforeOpening);
   }
   resetForm();
@@ -206,106 +203,6 @@ function handleFileSelect(event) {
     reader.readAsDataURL(fileInput.files[0]);
   }
 }
-
-function deleteSubscription(event, id) {
-  event.stopPropagation();
-  event.preventDefault();
-
-  if (!confirm(translate('confirm_delete_subscription'))) {
-    return;
-  }
-
-  fetch("endpoints/subscription/delete.php", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-CSRF-Token": window.csrfToken,
-    },
-    body: JSON.stringify({ id: id }),
-  })
-    .then((response) => response.json())
-    .then((data) => {
-      if (data.success) {
-        showSuccessMessage(translate('subscription_deleted'));
-        fetchSubscriptions(null, null, "delete");
-        closeAddSubscription();
-        closeSubscriptionDetails();
-      } else {
-        showErrorMessage(data.message || translate('error_deleting_subscription'));
-      }
-    })
-    .catch((error) => {
-      console.error("Error:", error);
-      showErrorMessage(translate('error_deleting_subscription'));
-    });
-}
-
-
-function cloneSubscription(event, id) {
-  event.stopPropagation();
-  event.preventDefault();
-
-  fetch("endpoints/subscription/clone.php", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-CSRF-Token": window.csrfToken,
-    },
-    body: JSON.stringify({ id: id }),
-  })
-    .then((response) => {
-      if (!response.ok) {
-        throw new Error(translate("network_response_error"));
-      }
-      return response.json();
-    })
-    .then((data) => {
-      if (data.success) {
-        const newId = data.id;
-        fetchSubscriptions(newId, event, "clone");
-        showSuccessMessage(decodeURI(data.message));
-      } else {
-        showErrorMessage(data.message || translate("error"));
-      }
-    })
-    .catch((error) => {
-      showErrorMessage(error.message || translate("error"));
-    });
-}
-
-
-function renewSubscription(event, id) {
-  event.stopPropagation();
-  event.preventDefault();
-
-  fetch("endpoints/subscription/renew.php", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-CSRF-Token": window.csrfToken,
-    },
-    body: JSON.stringify({ id: id }),
-  })
-    .then((response) => {
-      if (!response.ok) {
-        throw new Error(translate("network_response_error"));
-      }
-      return response.json();
-    })
-    .then((data) => {
-      if (data.success) {
-        const newId = data.id;
-        fetchSubscriptions(newId, event, "renew");
-        showSuccessMessage(decodeURI(data.message));
-      } else {
-        showErrorMessage(data.message || translate("error"));
-      }
-    })
-    .catch((error) => {
-      showErrorMessage(error.message || translate("error"));
-    });
-}
-
 
 function setSearchButtonStatus() {
 
@@ -564,67 +461,34 @@ function fetchSubscriptions(id, event, initiator) {
     .then(data => {
       if (data) {
         subscriptionsContainer.innerHTML = data;
-        const mainActions = document.querySelector("#main-actions");
-        if (data.includes("no-matching-subscriptions")) {
-          // mainActions.classList.add("hidden");
-        } else {
-          mainActions.classList.remove("hidden");
-        }
       }
 
       if (initiator == "clone" && id && event) {
         openEditSubscription(event, id);
       }
 
-      setSwipeElements();
-      if (initiator === "add") {
-        if (document.getElementsByClassName('subscription').length === 1) {
-          setTimeout(() => {
-            swipeHintAnimation();
-          }, 1000);
-        }
+      // The first subscription added replaces the empty page: reload so the
+      // toolbar (search, filter, sort) appears too.
+      if (initiator === "add" && document.querySelector('.subs-layout.is-empty')) {
+        window.location.reload();
+        return;
       }
+
       searchSubscriptions();
+      syncDetailsWithList(initiator === "renew" ? id : null);
     })
     .catch(error => {
       console.error(translate('error_reloading_subscription'), error);
     });
 }
 
-function setSubscriptionsView(view) {
-  const subscriptionsContainer = document.querySelector("#subscriptions");
-  subscriptionsContainer.classList.toggle("grid-view", view === "grid");
-  document.querySelectorAll('.subscription').forEach((card) => {
-    setCardFlipped(card, false);
-    card.style.transform = '';
-    card.style.transition = '';
-    card.style.zIndex = '';
-  });
-  document.querySelector("#view-list-button").classList.toggle("selected", view !== "grid");
-  document.querySelector("#view-grid-button").classList.toggle("selected", view === "grid");
-
-  const expirationDate = new Date();
-  expirationDate.setFullYear(expirationDate.getFullYear() + 1);
-  document.cookie = "subscriptionsView=" + view + "; expires=" + expirationDate.toUTCString() + "; SameSite=Lax";
-}
-
 function setSortOption(sortOption) {
-  const sortOptionsContainer = document.querySelector("#sort-options");
-  const sortOptionsList = sortOptionsContainer.querySelectorAll("li");
-  sortOptionsList.forEach((option) => {
-    if (option.getAttribute("id") === "sort-" + sortOption) {
-      option.classList.add("selected");
-    } else {
-      option.classList.remove("selected");
-    }
-  });
   const daysToExpire = 30;
   const expirationDate = new Date();
   expirationDate.setDate(expirationDate.getDate() + daysToExpire);
   const cookieValue = encodeURIComponent(sortOption) + '; expires=' + expirationDate.toUTCString();
   document.cookie = 'sortOrder=' + cookieValue + '; SameSite=Lax';
   fetchSubscriptions(null, null, "sort");
-  toggleSortOptions();
 }
 
 function convertSvgToPng(file, callback) {
@@ -735,57 +599,69 @@ document.addEventListener('DOMContentLoaded', function () {
       submitFormData(formData, submitButton, endpoint);
     }
   });
-
-  document.addEventListener('mousedown', function (event) {
-    const sortOptions = document.querySelector('#sort-options');
-    const sortButton = document.querySelector("#sort-button");
-
-    if (!sortOptions.contains(event.target) && !sortButton.contains(event.target) && isSortOptionsOpen) {
-      sortOptions.classList.remove('is-open');
-      isSortOptionsOpen = false;
-    }
-  });
-
-  document.querySelector('#sort-options').addEventListener('focus', function () {
-    isSortOptionsOpen = true;
-  });
 });
 
 function searchSubscriptions() {
   const searchInput = document.querySelector("#search");
-  const searchContainer = searchInput.parentElement;
-  const searchTerm = searchInput.value.trim().toLowerCase();
-
-  if (searchTerm.length > 0) {
-    searchContainer.classList.add("has-text");
-  } else {
-    searchContainer.classList.remove("has-text");
+  if (!searchInput) {
+    return;
   }
+  const searchTerm = searchInput.value.trim().toLowerCase();
+  searchInput.closest('.search-field').classList.toggle("has-text", searchTerm.length > 0);
 
-  const subscriptions = document.querySelectorAll(".subscription");
-  subscriptions.forEach(subscription => {
-    const name = subscription.getAttribute('data-name').toLowerCase();
-    if (!name.includes(searchTerm)) {
-      subscription.parentElement.classList.add("hide");
-    } else {
-      subscription.parentElement.classList.remove("hide");
-    }
+  document.querySelectorAll("#subscriptions .group").forEach((group) => {
+    let visible = 0;
+    group.querySelectorAll(".list-row").forEach((row) => {
+      const matches = row.getAttribute('data-name').toLowerCase().includes(searchTerm);
+      row.classList.toggle("hide", !matches);
+      row.classList.toggle("is-first", matches && visible === 0);
+      if (matches) {
+        visible++;
+      }
+    });
+    group.classList.toggle("hide", visible === 0);
   });
+
+  const noResults = document.querySelector("#search-no-results");
+  const anyVisible = document.querySelector("#subscriptions .group:not(.hide)");
+  const hasGroups = document.querySelector("#subscriptions .group");
+  if (noResults) {
+    noResults.classList.toggle("hide", !hasGroups || !!anyVisible);
+  }
 }
 
 function clearSearch() {
   const searchInput = document.querySelector("#search");
-
   searchInput.value = "";
-  searchInput.parentElement.classList.remove("mobile-expanded");
   searchSubscriptions();
 }
 
-function toggleMobileSearch() {
-  const searchContainer = document.querySelector(".top-actions .search");
+// Keep the details panel in step with the list after it is re-rendered: show
+// the same subscription if it is still there, otherwise (wide screens, where
+// the panel is a permanent column) the first one.
+function syncDetailsWithList(reloadId) {
+  if (typeof currentDetailsId === 'undefined') {
+    return;
+  }
+  const keepId = reloadId || currentDetailsId;
+  if (keepId && document.querySelector(`.list-row[data-id="${keepId}"]`)) {
+    loadSubscriptionDetails(keepId, false);
+    return;
+  }
+  if (keepId) {
+    closeSubscriptionDetails();
+  }
+  selectFirstSubscriptionWhenInline();
+}
 
-  searchContainer.classList.add("mobile-expanded");
-  document.querySelector("#search").focus();
+function selectFirstSubscriptionWhenInline() {
+  if (!detailsIsInline() || currentDetailsId) {
+    return;
+  }
+  const firstRow = document.querySelector('#subscriptions .list-row:not(.hide)');
+  if (firstRow) {
+    loadSubscriptionDetails(firstRow.dataset.id, false);
+  }
 }
 
 function closeSubMenus() {
@@ -794,64 +670,6 @@ function closeSubMenus() {
     subMenu.classList.remove('is-open');
   });
 
-}
-
-function setSwipeElements() {
-  if (window.mobileNavigation) {
-    const swipeElements = document.querySelectorAll('.subscription');
-
-    swipeElements.forEach((element) => {
-      let startX = 0;
-      let startY = 0;
-      let currentX = 0;
-      let currentY = 0;
-      let translateX = 0;
-      const maxTranslateX = element.classList.contains('manual') ? -240 : -180;
-
-      element.addEventListener('touchstart', (e) => {
-        if (element.closest('.subscriptions.grid-view')) return; // no swipe actions in grid view
-        startX = e.touches[0].clientX;
-        startY = e.touches[0].clientY;
-        element.style.transition = ''; // Remove transition for smooth dragging
-      });
-
-      element.addEventListener('touchmove', (e) => {
-        if (element.closest('.subscriptions.grid-view')) return;
-        currentX = e.touches[0].clientX;
-        currentY = e.touches[0].clientY;
-
-        const diffX = currentX - startX;
-        const diffY = currentY - startY;
-
-        // Check if the swipe is more horizontal than vertical
-        if (Math.abs(diffX) > Math.abs(diffY)) {
-          e.preventDefault(); // Prevent vertical scrolling
-
-          // Only update translateX if swiping within allowed range
-          if (!(translateX === maxTranslateX && diffX < 0)) {
-            translateX = Math.min(0, Math.max(maxTranslateX, diffX)); // Clamp translateX between -180 and 0
-            element.style.transform = `translateX(${translateX}px)`;
-          }
-        }
-      });
-
-      element.addEventListener('touchend', () => {
-        if (element.closest('.subscriptions.grid-view')) return;
-        // Check the final swipe position to determine snap behavior
-        if (translateX < maxTranslateX / 2) {
-          // If more than halfway to the left, snap fully open
-          translateX = maxTranslateX;
-        } else {
-          // If swiped less than halfway left or swiped right, snap back to closed
-          translateX = 0;
-        }
-        element.style.transition = 'transform 0.2s ease'; // Smooth snap effect
-        element.style.transform = `translateX(${translateX}px)`;
-        element.style.zIndex = '1';
-      });
-    });
-
-  }
 }
 
 const activeFilters = [];
@@ -864,6 +682,9 @@ activeFilters['notifications'] = [];
 
 document.addEventListener("DOMContentLoaded", function () {
   var filtermenu = document.querySelector('#filtermenu-button');
+  if (!filtermenu) {
+    return;
+  }
   filtermenu.addEventListener('click', function () {
     this.parentElement.querySelector('.filtermenu-content').classList.toggle('is-open');
     closeSubMenus();
@@ -871,7 +692,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
   document.addEventListener('click', function (e) {
     var filtermenuContent = document.querySelector('.filtermenu-content');
-    if (filtermenuContent.classList.contains('is-open')) {
+    if (filtermenuContent && filtermenuContent.classList.contains('is-open')) {
       var subMenus = document.querySelectorAll('.filtermenu-submenu');
       var clickedInsideSubmenu = Array.from(subMenus).some(subMenu => subMenu.contains(e.target) || subMenu === e.target);
 
@@ -882,9 +703,46 @@ document.addEventListener("DOMContentLoaded", function () {
     }
   });
 
-  setSwipeElements();
+  initFiltersFromUrl();
+  searchSubscriptions();
+  selectFirstSubscriptionWhenInline();
 
+  // "/" jumps to search, as in the toolbar hint.
+  document.addEventListener('keydown', function (event) {
+    const tag = (document.activeElement || {}).tagName;
+    const search = document.querySelector('#search');
+    if (event.key === '/' && search && !['INPUT', 'SELECT', 'TEXTAREA'].includes(tag) && !event.metaKey && !event.ctrlKey) {
+      event.preventDefault();
+      search.focus();
+    }
+    if (event.key === 'Escape' && document.querySelector('#subscription-form.is-open')) {
+      closeAddSubscription();
+    }
+  });
+
+  // Moving between layouts (e.g. resizing past the wide breakpoint) can turn
+  // the panel into the inline column; make sure it has something to show.
+  const wideQuery = window.matchMedia('(min-width: 1100px)');
+  wideQuery.addEventListener('change', selectFirstSubscriptionWhenInline);
 });
+
+// Filters can arrive in the URL, e.g. a category picked in the sidebar.
+function initFiltersFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const map = { category: 'categories', member: 'members', payment: 'payments' };
+  Object.keys(map).forEach((param) => {
+    if (params.get(param)) {
+      activeFilters[map[param]] = params.get(param).split(',').filter(Boolean);
+    }
+  });
+  if (params.get('state') !== null && params.get('state') !== '') {
+    activeFilters['state'] = params.get('state');
+  }
+  const clear = document.querySelector('#clear-filters');
+  if (clear && (activeFilters['categories'].length || activeFilters['members'].length || activeFilters['payments'].length || activeFilters['state'] !== '')) {
+    clear.classList.remove('hide');
+  }
+}
 
 function toggleSubMenu(subMenu) {
   var subMenu = document.getElementById("filter-" + subMenu);
@@ -1005,114 +863,6 @@ function clearFilters() {
   });
   document.querySelector('#clear-filters').classList.add('hide');
   fetchSubscriptions(null, null, "clearfilters");
-}
-
-let currentActions = null;
-
-document.addEventListener('click', function (event) {
-  // Check if click was outside currentActions
-  if (currentActions && !currentActions.contains(event.target)) {
-    // Click was outside currentActions, close currentActions
-    currentActions.classList.remove('is-open');
-    currentActions = null;
-  }
-});
-
-// A flipped card shows its back face via a CSS 3D transform while the front
-// stays in the DOM (and vice versa when unflipped) -- backface-visibility
-// only hides a face visually, it doesn't remove it from the tab order. The
-// `inert` attribute is what actually keeps focus (and assistive tech) out of
-// whichever face is currently turned away from the user.
-function setCardFlipped(card, flipped) {
-  card.classList.toggle('flipped', flipped);
-  const back = card.querySelector('.subscription-back');
-  const front = card.querySelector('.subscription-main');
-  if (back) {
-    back.inert = !flipped;
-  }
-  if (front) {
-    front.inert = flipped;
-  }
-}
-
-function unflipCard(subscriptionId) {
-  const card = document.querySelector(`.subscription[data-id="${subscriptionId}"]`);
-  if (card) {
-    setCardFlipped(card, false);
-  }
-}
-
-function expandActions(event, subscriptionId) {
-  event.stopPropagation();
-  event.preventDefault();
-  const subscriptionDiv = document.querySelector(`.subscription[data-id="${subscriptionId}"]`);
-
-  // Grid view: flip the card over instead of opening the dropdown
-  if (subscriptionDiv.closest('.subscriptions.grid-view')) {
-    document.querySelectorAll('.subscription.flipped').forEach((card) => {
-      if (card !== subscriptionDiv) {
-        setCardFlipped(card, false);
-      }
-    });
-    setCardFlipped(subscriptionDiv, !subscriptionDiv.classList.contains('flipped'));
-    return;
-  }
-
-  const actions = subscriptionDiv.querySelector('.actions');
-
-  // Close all other open actions
-  const allActions = document.querySelectorAll('.actions.is-open');
-  allActions.forEach((openAction) => {
-    if (openAction !== actions) {
-      openAction.classList.remove('is-open');
-      openAction.classList.remove('open-above');
-    }
-  });
-
-  // Toggle the clicked actions
-  actions.classList.toggle('is-open');
-
-  if (actions.classList.contains('is-open')) {
-    actions.classList.remove('open-above');
-    const rect = actions.getBoundingClientRect();
-    if (rect.bottom > window.innerHeight) {
-      actions.classList.add('open-above');
-    }
-    currentActions = actions;
-  } else {
-    actions.classList.remove('open-above');
-    currentActions = null;
-  }
-}
-
-function swipeHintAnimation() {
-  // The swipe hint only exists in list view: no swipe actions in grid view.
-  if (!window.mobileNavigation || !window.matchMedia('(max-width: 768px)').matches) {
-    return;
-  }
-
-  const firstElement = document.querySelector('.subscription');
-  if (!firstElement || firstElement.closest('.subscriptions.grid-view')) {
-    return;
-  }
-
-  const maxAnimations = 3;
-  const cookieName = 'swipeHintCount';
-  let count = parseInt(getCookie(cookieName)) || 0;
-  if (count >= maxAnimations) {
-    return;
-  }
-
-  firstElement.style.transition = 'transform 0.3s ease';
-  firstElement.style.transform = 'translateX(-80px)';
-
-  setTimeout(() => {
-    firstElement.style.transform = 'translateX(0px)';
-    firstElement.style.zIndex = '1';
-  }, 600);
-
-  count++;
-  document.cookie = `${cookieName}=${count}; expires=Fri, 31 Dec 9999 23:59:59 GMT; path=/; SameSite=Lax`;
 }
 
 function toggleOneTimeCycleUI(isOneTime) {
@@ -1249,8 +999,3 @@ function applyNotesMarkdown(action) {
   }
 }
 
-window.addEventListener('load', () => {
-  if (document.querySelector('.subscription')) {
-    swipeHintAnimation();
-  }
-});

@@ -1082,13 +1082,6 @@ function setUpcomingPaymentsLimit() {
   storeSettingsOnDB('upcoming_payments_limit', value);
 }
 
-function setMobileNavigation() {
-  const mobileNavigationCheckbox = document.querySelector("#mobilenavigation");
-  const value = mobileNavigationCheckbox.checked;
-
-  storeSettingsOnDB('mobile_navigation', value);
-}
-
 function setShowSubscriptionProgress() {
   const showSubscriptionProgressCheckbox = document.querySelector("#showsubscriptionprogress");
   const value = showSubscriptionProgressCheckbox.checked;

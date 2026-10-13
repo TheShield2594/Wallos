@@ -2,7 +2,7 @@
 /*
   frankfurter.dev, the exchange rate provider that needs no account.
 
-  Both providers Wallos had before are reached with a key the user has to
+  Both providers Tally had before are reached with a key the user has to
   register for. Until somebody does, a household running one subscription in
   CHF and one in EUR has no converted total at all: the rate rows keep whatever
   they were seeded with, and the statistics quietly add francs to euros.
@@ -176,7 +176,7 @@ function frankfurter_refused_codes($decoded)
  *
  * Measured 2026-09-13: a single malformed code answers 422 and takes the whole
  * request with it - `quotes=USD,XX!` returns nothing at all, not USD. A
- * currency in Wallos is three free-text fields, so an invented code is accepted
+ * currency in Tally is three free-text fields, so an invented code is accepted
  * and stored, and one of those would otherwise stop every other currency in the
  * same account from refreshing. So the malformed codes are held back before the
  * request rather than being allowed to refuse it.

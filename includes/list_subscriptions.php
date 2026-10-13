@@ -2,6 +2,7 @@
 
 require_once 'i18n/getlang.php';
 require_once __DIR__ . '/currency_rates.php';
+require_once __DIR__ . '/ui_helpers.php';
 
 function getBillingCycle($cycle, $frequency, $i18n)
 {
@@ -149,244 +150,144 @@ function formatDate($date, $lang = 'en')
     return $formattedDate;
 }
 
-function printSubscriptions($subscriptions, $sort, $categories, $members, $i18n, $colorTheme, $imagePath, $disabledToBottom, $mobileNavigation, $showSubscriptionProgress, $currencies, $lang)
+/*
+  Extra fields the list rows need on top of the display values each caller
+  already computes: the raw dates, and the monthly cost in the main currency
+  for the section footers (independent of the display-price settings).
+*/
+function addListRowFields(&$printRow, $subscription, $mainCurrencyId, $db)
+{
+    $printRow['next_payment_raw'] = $subscription['next_payment'];
+    $printRow['start_date'] = $subscription['start_date'] ?? '';
+    $printRow['cycle'] = (int) $subscription['cycle'];
+    $monthly = getPricePerMonth((int) $subscription['cycle'], (int) $subscription['frequency'], floatval($subscription['price']));
+    if ($subscription['currency_id'] != $mainCurrencyId) {
+        $monthly = getPriceConverted($monthly, $subscription['currency_id'], $db);
+    }
+    $printRow['monthly_main'] = $monthly;
+}
+
+function listRowSubtitle($subscription, $i18n, $lang)
+{
+    $cycle = $subscription['billing_cycle'];
+    if ($subscription['inactive']) {
+        $disabledLabel = translate('disabled', $i18n);
+        return [mb_strtoupper(mb_substr($disabledLabel, 0, 1)) . mb_substr($disabledLabel, 1) . ' · ' . $cycle, ''];
+    }
+    if ($subscription['one_time']) {
+        return [translate('lifetime', $i18n) . ' · ' . sprintf(translate('paid_on', $i18n), formatDate($subscription['next_payment_raw'], $lang)), ''];
+    }
+    $isOverdue = $subscription['auto_renew'] != 1 && $subscription['next_payment_raw'] < date('Y-m-d');
+    if ($isOverdue) {
+        return [translate('overdue', $i18n) . ' · ' . sprintf(translate('was_due', $i18n), formatDate($subscription['next_payment_raw'], $lang)), 'danger'];
+    }
+    return [$cycle . ' · ' . formatDate($subscription['next_payment_raw'], $lang), ''];
+}
+
+/*
+  Prints the subscriptions as grouped lists. With the default sorts the groups
+  are Active / Lifetime purchases / Disabled; sorting by category, member or
+  payment method groups by that instead (lifetime purchases still go last).
+*/
+function printSubscriptions($subscriptions, $sort, $categories, $members, $i18n, $settings, $currencies, $mainCurrencyId, $lang)
 {
     if ($sort === "price") {
         usort($subscriptions, function ($a, $b) {
             return $a['price'] < $b['price'] ? 1 : -1;
         });
-        if ($disabledToBottom === 'true') {
-            usort($subscriptions, function ($a, $b) {
-                return $a['inactive'] - $b['inactive'];
-            });
-        }
     }
 
-    // One-time purchases always go to the bottom regardless of sort order
-    usort($subscriptions, fn($a, $b) => ($a['one_time'] ? 1 : 0) - ($b['one_time'] ? 1 : 0));
-
-    $currentCategory = 0;
-    $currentPayerUserId = 0;
-    $currentPaymentMethodId = 0;
-    $oneTimeSectionShown = false;
+    $groupByField = in_array($sort, ['category_id', 'payer_user_id', 'payment_method_id'], true);
+    $groups = [];
     foreach ($subscriptions as $subscription) {
-        if ($subscription['one_time'] && !$oneTimeSectionShown) {
-            ?>
-            <div class="subscription-list-title">
-                <?= translate('lifetime_purchases', $i18n) ?>
-            </div>
-            <?php
-            $oneTimeSectionShown = true;
+        if ($subscription['one_time'] && !$subscription['inactive']) {
+            $key = 'lifetime';
+            $title = translate('lifetime_purchases', $i18n);
+        } elseif ($groupByField) {
+            $key = $sort . '-' . $subscription[$sort];
+            if ($sort === 'category_id') {
+                $title = $subscription['category_id'] == 1 ? translate('no_category', $i18n) : ($categories[$subscription['category_id']]['name'] ?? '');
+            } elseif ($sort === 'payer_user_id') {
+                $title = $members[$subscription['payer_user_id']]['name'] ?? '';
+            } else {
+                $title = $subscription['payment_method_name'];
+            }
+        } elseif ($subscription['inactive']) {
+            $key = 'disabled';
+            $title = translate('disabled', $i18n);
+        } else {
+            $key = 'active';
+            $title = translate('active', $i18n);
         }
-        if ($sort == "category_id" && $subscription['category_id'] != $currentCategory) {
-            ?>
-            <div class="subscription-list-title">
+        if (!isset($groups[$key])) {
+            $groups[$key] = ['title' => $title, 'rows' => []];
+        }
+        $groups[$key]['rows'][] = $subscription;
+    }
+
+    // Fixed order for the state groups; field groups keep the sorted order.
+    $order = ['active' => 0, 'disabled' => 2, 'lifetime' => 3];
+    uksort($groups, function ($a, $b) use ($order, $groups) {
+        $orderA = $order[$a] ?? 1;
+        $orderB = $order[$b] ?? 1;
+        if ($orderA === $orderB) {
+            return array_search($a, array_keys($groups)) - array_search($b, array_keys($groups));
+        }
+        return $orderA - $orderB;
+    });
+
+    $showProgress = ($settings['showSubscriptionProgress'] ?? 'false') === 'true';
+    $mainCurrencyCode = $currencies[$mainCurrencyId]['code'] ?? 'EUR';
+
+    foreach ($groups as $key => $group) {
+        ?>
+        <section class="group" data-group="<?= htmlspecialchars($key) ?>">
+            <h2 class="group-title"><?= htmlspecialchars(htmlspecialchars_decode($group['title'])) ?></h2>
+            <div class="group-list">
                 <?php
-                if ($subscription['category_id'] == 1) {
-                    echo translate('no_category', $i18n);
-                } else {
-                    echo $categories[$subscription['category_id']]['name'];
+                foreach ($group['rows'] as $subscription) {
+                    [$subtitle, $tone] = listRowSubtitle($subscription, $i18n, $lang);
+                    $trailingSub = '';
+                    if (isset($subscription['original_price']) && $subscription['original_price'] != $subscription['price']) {
+                        $trailingSub = formatPrice($subscription['original_price'], $subscription['original_currency_code'], $currencies);
+                    }
+                    echo render_list_row([
+                        'id' => $subscription['id'],
+                        'name' => $subscription['name'],
+                        'logo' => $subscription['logo'],
+                        'logo_variant' => $subscription['logo_variant'] ?? null,
+                        'logo_text_color' => $subscription['logo_text_color'] ?? null,
+                        'subtitle' => $subtitle,
+                        'subtitle_tone' => $tone,
+                        'trailing' => formatPrice($subscription['price'], $subscription['currency_code'], $currencies),
+                        'trailing_sub' => $trailingSub,
+                        'dim' => (bool) $subscription['inactive'],
+                        'progress' => ($showProgress && !$subscription['inactive'] && !$subscription['one_time']) ? min(100, $subscription['progress']) : null,
+                    ]);
                 }
                 ?>
             </div>
             <?php
-            $currentCategory = $subscription['category_id'];
-        }
-        if ($sort == "payer_user_id" && $subscription['payer_user_id'] != $currentPayerUserId) {
-            ?>
-            <div class="subscription-list-title">
-                <?= $members[$subscription['payer_user_id']]['name'] ?>
-            </div>
-            <?php
-            $currentPayerUserId = $subscription['payer_user_id'];
-        }
-        if ($sort == "payment_method_id" && $subscription['payment_method_id'] != $currentPaymentMethodId) {
-            ?>
-            <div class="subscription-list-title">
-                <?= $subscription['payment_method_name'] ?>
-            </div>
-            <?php
-            $currentPaymentMethodId = $subscription['payment_method_id'];
-        }
-        ?>
-        <div class="subscription-container">
-            <?php
-            if ($mobileNavigation === 'true') {
+            $footer = '';
+            if ($key === 'active') {
+                $monthlyTotal = array_sum(array_column($group['rows'], 'monthly_main'));
+                $footer = sprintf(
+                    translate('active_footer', $i18n),
+                    count($group['rows']),
+                    CurrencyFormatter::format($monthlyTotal, $mainCurrencyCode)
+                );
+            } elseif ($key === 'lifetime') {
+                $footer = translate('lifetime_footer', $i18n);
+            } elseif ($key === 'disabled') {
+                $footer = translate('disabled_footer', $i18n);
+            }
+            if ($footer !== '') {
                 ?>
-                <div class="mobile-actions" data-id="<?= $subscription['id'] ?>">
-                    <button class="mobile-action-clone"></button>
-                    <button class="mobile-action-clone" onClick="cloneSubscription(event, <?= $subscription['id'] ?>)">
-                        <?php include $imagePath . "images/siteicons/svg/mobile-menu/clone.php"; ?>
-                        Clone
-                    </button>
-                    <button class="mobile-action-delete" onClick="deleteSubscription(event, <?= $subscription['id'] ?>)">
-                        <?php include $imagePath . "images/siteicons/svg/mobile-menu/delete.php"; ?>
-                        Delete
-                    </button>
-                    <?php
-                    if ($subscription['auto_renew'] != 1 && !$subscription['one_time']) {
-                        ?>
-                        <button class="mobile-action-renew" onClick="renewSubscription(event, <?= $subscription['id'] ?>)">
-                            <?php include $imagePath . "images/siteicons/svg/mobile-menu/renew.php"; ?>
-                            Renew
-                        </button>
-                        <?php
-                    }
-                    ?>
-                    <button class="mobile-action-edit" onClick="openEditSubscription(event, <?= $subscription['id'] ?>)">
-                        <?php include $imagePath . "images/siteicons/svg/mobile-menu/edit.php"; ?>
-                        Edit
-                    </button>
-                </div>
-                <?php
-            }
-
-            $subscriptionExtraClasses = "";
-            if ($subscription['inactive']) {
-                $subscriptionExtraClasses .= " inactive";
-            }
-            if ($subscription['auto_renew'] != 1) {
-                $subscriptionExtraClasses .= " manual";
-            }
-
-            $hasLogo = false;
-            if ($subscription['logo'] != "") {
-                $hasLogo = true;
-            }
-
-            ?>
-
-            <div class="subscription<?= $subscriptionExtraClasses ?>"
-                onClick="showSubscriptionDetails(event, <?= $subscription['id'] ?>)" data-id="<?= $subscription['id'] ?>"
-                data-name="<?= $subscription['name'] ?>">
-                <div class="subscription-main">
-                    <span class="logo <?= !$hasLogo ? 'hideOnMobile' : '' ?>">
-                        <?php
-                        if ($hasLogo) {
-                            echo renderThemedLogoImg($subscription['logo'], $subscription['logo_variant'] ?? null, $subscription['logo_text_color'] ?? null);
-                        } else {
-                            include $imagePath . "images/siteicons/svg/logo.php";
-                        }
-                        ?>
-                    </span>
-                    <span class="name <?= $hasLogo ? 'hideOnMobile' : '' ?>"><?= $subscription['name'] ?></span>
-                    <span class="cycle"
-                        title="<?= $subscription['one_time'] ? $subscription['billing_cycle'] : ($subscription['auto_renew'] ? translate("automatically_renews", $i18n) : translate("manual_renewal", $i18n)) ?>">
-                        <?php
-                        if (!$subscription['one_time']) {
-                            if ($subscription['auto_renew']) {
-                                include $imagePath . "images/siteicons/svg/automatic.php";
-                            } else {
-                                include $imagePath . "images/siteicons/svg/manual.php";
-                            }
-                        }
-                        ?>
-                        <?= $subscription['billing_cycle'] ?>
-                    </span>
-                    <span class="next"><?= formatDate($subscription['next_payment'], $lang) ?></span>
-                    <span class="price">
-                        <span class="value">
-                            <?= formatPrice($subscription['price'], $subscription['currency_code'], $currencies) ?>
-                            <?php
-                            if (isset($subscription['original_price']) && $subscription['original_price'] != $subscription['price']) {
-                                ?>
-                                <span
-                                    class="original_price">(<?= formatPrice($subscription['original_price'], $subscription['original_currency_code'], $currencies) ?>)</span>
-                                <?php
-                            }
-                            ?>
-                        </span>
-
-                    </span>
-                    <span class="payment_method">
-                        <img src="<?= $subscription['payment_method_icon'] ?>"
-                            title="<?= translate('payment_method', $i18n) ?>: <?= $subscription['payment_method_name'] ?>" />
-                    </span>
-                    <?php
-                    $desktopMenuButtonClass = ""; {
-                    }
-                    if ($mobileNavigation === "true") {
-                        $desktopMenuButtonClass = "mobileNavigationHideOnMobile";
-                    }
-                    ?>
-                    <button type="button" class="actions-expand <?= $desktopMenuButtonClass ?>"
-                        onClick="expandActions(event, <?= $subscription['id'] ?>)">
-                        <i class="fas fa-ellipsis-v"></i>
-                    </button>
-                    <ul class="actions">
-                        <li class="edit" title="<?= translate('edit_subscription', $i18n) ?>"
-                            onClick="openEditSubscription(event, <?= $subscription['id'] ?>)">
-                            <i class="fa-solid fa-pen-to-square"></i>
-                            <?= translate('edit_subscription', $i18n) ?>
-                        </li>
-                        <li class="delete" title="<?= translate('delete', $i18n) ?>"
-                            onClick="deleteSubscription(event, <?= $subscription['id'] ?>)">
-                            <i class="fa-solid fa-trash-can"></i>
-                            <?= translate('delete', $i18n) ?>
-                        </li>
-                        <li class="clone" title="<?= translate('clone', $i18n) ?>"
-                            onClick="cloneSubscription(event, <?= $subscription['id'] ?>)">
-                            <i class="fa-solid fa-copy"></i>
-                            <?= translate('clone', $i18n) ?>
-                        </li>
-                        <?php
-                        if ($subscription['auto_renew'] != 1 && !$subscription['one_time']) {
-                            ?>
-                            <li class="renew" title="<?= translate('renew', $i18n) ?>"
-                                onClick="renewSubscription(event, <?= $subscription['id'] ?>)">
-                                <i class="fa-solid fa-rotate-right"></i>
-                                <?= translate('renew', $i18n) ?>
-                            </li>
-                            <?php
-                        }
-                        ?>
-                    </ul>
-                </div>
-                <div class="subscription-back" inert>
-                    <button type="button" class="subscription-back-close"
-                        onClick="event.stopPropagation(); unflipCard(<?= $subscription['id'] ?>)"
-                        title="<?= translate('cancel', $i18n) ?>">
-                        <i class="fa-solid fa-xmark"></i>
-                    </button>
-                    <button type="button" class="back-action"
-                        onClick="unflipCard(<?= $subscription['id'] ?>); openEditSubscription(event, <?= $subscription['id'] ?>)">
-                        <i class="fa-solid fa-pen-to-square"></i>
-                        <?= translate('edit_subscription', $i18n) ?>
-                    </button>
-                    <button type="button" class="back-action"
-                        onClick="unflipCard(<?= $subscription['id'] ?>); cloneSubscription(event, <?= $subscription['id'] ?>)">
-                        <i class="fa-solid fa-copy"></i>
-                        <?= translate('clone', $i18n) ?>
-                    </button>
-                    <?php
-                    if ($subscription['auto_renew'] != 1 && !$subscription['one_time']) {
-                        ?>
-                        <button type="button" class="back-action"
-                            onClick="unflipCard(<?= $subscription['id'] ?>); renewSubscription(event, <?= $subscription['id'] ?>)">
-                            <i class="fa-solid fa-rotate-right"></i>
-                            <?= translate('renew', $i18n) ?>
-                        </button>
-                        <?php
-                    }
-                    ?>
-                    <button type="button" class="back-action delete"
-                        onClick="unflipCard(<?= $subscription['id'] ?>); deleteSubscription(event, <?= $subscription['id'] ?>)">
-                        <i class="fa-solid fa-trash-can"></i>
-                        <?= translate('delete', $i18n) ?>
-                    </button>
-                </div>
-            </div>
-            <?php
-            if ($showSubscriptionProgress === 'true' && !$subscription['inactive']) {
-                $progress = $subscription['progress'] > 100 ? 100 : $subscription['progress'];
-                ?>
-                <div class="subscription-progress-container">
-                    <span class="subscription-progress" style="width: <?= $progress ?>%;"></span>
-                </div>
+                <p class="group-footer"><?= htmlspecialchars($footer) ?></p>
                 <?php
             }
             ?>
-        </div>
+        </section>
         <?php
     }
 }

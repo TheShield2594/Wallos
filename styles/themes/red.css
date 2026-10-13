@@ -1,8 +1,9 @@
+/* Red accent: light appearance, then the lighter tint used in dark. */
 :root {
-    --main-color: #f45a40;
-    --main-color-rgb: 244, 90, 64;
-    --accent-color: #f79988;
-    --accent-color-rgb: 239, 134, 116;
-    --hover-color: #c73f29;
-    --hover-color-rgb: 199, 63, 41;
+    --tint-l: #DC2626;
+    --tint-l-rgb: 220, 38, 38;
+    --tint-l-hover: #B91C1C;
+    --tint-d: #F26B6B;
+    --tint-d-rgb: 242, 107, 107;
+    --tint-d-hover: #DC2626;
 }

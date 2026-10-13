@@ -2,7 +2,7 @@
 /*
 This API Endpoint accepts POST requests only.
 It receives the following parameters:
-- api_key: the API key of the user (for Wallos authentication).
+- api_key: the API key of the user (for Tally authentication).
 - dark_theme: (optional) '0' (light), '1' (dark), or '2' (automatic).
 - color_theme: (optional) 'blue', 'green', 'red', 'yellow', 'purple', or 'custom'.
 - monthly_price: (optional) '1' or '0' (show monthly prices).

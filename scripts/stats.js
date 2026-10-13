@@ -1,4 +1,5 @@
-const CHART_PALETTE = ['#008FFB','#00E396','#FEB019','#FF4560','#775DD0','#546E7A','#26a69a','#D10CE8'];
+// Apple-style system colours, in the order iOS charts use them.
+const CHART_PALETTE = ['#0A84FF','#30D158','#FF9F0A','#FF453A','#BF5AF2','#64D2FF','#FFD60A','#FF375F'];
 
 function _chartTheme() {
     const cs = getComputedStyle(document.documentElement);
@@ -6,7 +7,7 @@ function _chartTheme() {
     const text   = cs.getPropertyValue('--text-color').trim()   || '#202020';
     const border = cs.getPropertyValue('--box-border-color').trim() || '#E8E8E8';
     const dark   = document.body.classList.contains('dark');
-    const font   = "Barlow, 'Helvetica Neue', Helvetica, sans-serif";
+    const font   = cs.getPropertyValue('--font').trim() || 'system-ui, sans-serif';
     return { main, text, border, dark, font };
 }
 

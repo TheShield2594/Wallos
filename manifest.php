@@ -18,11 +18,11 @@ $theme = sanitize_theme_mode($_COOKIE['theme'] ?? null);
 if ($theme === 'automatic') {
     $theme = sanitize_resolved_theme($_COOKIE['inUseTheme'] ?? null);
 }
-$themeColor = $theme === 'light' ? '#FFFFFF' : '#12151C';
+$themeColor = $theme === 'light' ? '#FFFFFF' : '#171A20';
 
 $manifest = [
-    'short_name' => 'Wallos',
-    'name' => 'Wallos - Subscription Tracker',
+    'short_name' => 'Tally',
+    'name' => 'Tally - Subscription Tracker',
     'icons' => [
         [
             'src' => 'images/icon/android-chrome-192x192.png',
@@ -98,7 +98,7 @@ $manifest = [
         [
             'name' => 'About',
             'short_name' => 'About',
-            'description' => 'More info about Wallos',
+            'description' => 'More info about Tally',
             'url' => 'about.php',
             'icons' => [
                 ['src' => 'images/siteicons/pwa/about.png', 'type' => 'image/png', 'sizes' => '96x96'],
@@ -122,7 +122,7 @@ $manifest = [
     'display' => 'standalone',
     'scope' => '/',
     'theme_color' => $themeColor,
-    'description' => 'Wallos is a personal subscription tracker that helps you keep track of your subscriptions and save money.',
+    'description' => 'Tally is a personal subscription tracker that helps you keep track of your subscriptions and save money.',
     'orientation' => 'portrait-primary',
     'display_override' => ['window-controls-overlay'],
 ];

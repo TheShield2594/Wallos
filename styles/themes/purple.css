@@ -1,8 +1,9 @@
+/* Purple accent: light appearance, then the lighter tint used in dark. */
 :root {
-    --main-color: #6d4aff;
-    --main-color-rgb: 109, 74, 255;
-    --accent-color: #b086ff;
-    --accent-color-rgb: 176, 134, 255;
-    --hover-color: #5e42cd;
-    --hover-color-rgb: 50, 48, 108;
+    --tint-l: #7C3AED;
+    --tint-l-rgb: 124, 58, 237;
+    --tint-l-hover: #6D28D9;
+    --tint-d: #A07CF5;
+    --tint-d-rgb: 160, 124, 245;
+    --tint-d-hover: #7C3AED;
 }

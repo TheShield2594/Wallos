@@ -41,7 +41,7 @@ if ($action === 'generate') {
 
 
     $secret = base32_encode(bin2hex(random_bytes(20)));
-    $qrCodeUrl = "otpauth://totp/Wallos:" . rawurlencode($_SESSION['username']) . "?secret=" . $secret . "&issuer=Wallos";
+    $qrCodeUrl = "otpauth://totp/Tally:" . rawurlencode($_SESSION['username']) . "?secret=" . $secret . "&issuer=Tally";
 
     echo json_encode([
         "success" => true,
@@ -147,7 +147,7 @@ if ($action === 'verify') {
             if (!$enrolled || $db->exec('COMMIT') === false) {
                 $db->exec('ROLLBACK');
 
-                error_log('Wallos: could not enable 2FA for user ' . (int) $userId
+                error_log('Tally: could not enable 2FA for user ' . (int) $userId
                     . ', nothing was changed: ' . $db->lastErrorMsg());
 
                 die(json_encode([

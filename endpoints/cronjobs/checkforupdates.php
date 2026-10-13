@@ -2,14 +2,15 @@
 
 require_once 'validate.php';
 require_once __DIR__ . '/../../includes/connect_endpoint_crontabs.php';
+require_once __DIR__ . '/../../includes/version.php';
 
 $options = [
     'http' => [
-        'header' => "User-Agent: Wallos\r\n"
+        'header' => "User-Agent: Tally\r\n"
     ]
 ];
 
-$repository = 'ellite/Wallos'; // Change this to your repository if you fork Wallos
+$repository = $githubRepository; // set in includes/version.php
 $url = "https://api.github.com/repos/$repository/releases/latest";
 
 $context = stream_context_create($options);
@@ -30,7 +31,6 @@ $db->exec("UPDATE admin SET latest_version = '$latestVersion'");
 
 
 if (php_sapi_name() !== 'cli') {
-    include __DIR__ . '/../../includes/version.php';
     if (version_compare($latestVersion, $version) > 0) {
         echo "New version available: $latestVersion";
     } else {

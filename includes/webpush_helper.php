@@ -3,7 +3,7 @@
 /*
   Web Push (RFC 8030 / RFC 8291 / RFC 8292): standard browser push
   notifications, sent directly to the browser vendor's own push service
-  (Chrome's, Firefox's, Apple's, ...) with no account of Wallos's own -
+  (Chrome's, Firefox's, Apple's, ...) with no account of Tally's own -
   unlike Pushover, Gotify or ntfy, which all need the user to register
   somewhere else first.
 
@@ -20,7 +20,7 @@
       push service is never able to decrypt it.
 
   Both need elliptic-curve Diffie-Hellman, which ext-openssl only exposed a
-  plain function for (openssl_pkey_derive()) starting in PHP 8.1. Wallos
+  plain function for (openssl_pkey_derive()) starting in PHP 8.1. Tally
   targets PHP 8.3, so this is written directly against ext-openssl - no
   Composer package, the way every other vendored helper in this codebase is
   (see includes/frankfurter.php for the same approach applied to an HTTP API
@@ -321,7 +321,7 @@ function webpush_generate_vapid_keypair()
  * first time anything needs it.
  *
  * Stored on the admin row alongside the other instance-wide settings that
- * already live there (smtp_*, server_url) - it identifies the Wallos
+ * already live there (smtp_*, server_url) - it identifies the Tally
  * installation as a whole to the push services it talks to, not any one
  * user, the same way the instance's own SMTP identity is not per-user.
  *

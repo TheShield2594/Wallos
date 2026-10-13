@@ -1,32 +1,32 @@
 """
-Regenerates the README screenshots against a running Wallos instance.
+Regenerates the README screenshots against a running Tally instance.
 
 Requires: pip install playwright && playwright install chromium
 
 Usage:
-    WALLOS_URL=http://172.26.64.1/wallos \
-    WALLOS_USERNAME=ellite \
-    WALLOS_PASSWORD=screenshots \
+    TALLY_URL=http://172.26.64.1/tally \
+    TALLY_USERNAME=ellite \
+    TALLY_PASSWORD=screenshots \
     python3 capture_screenshots.py
 
-WALLOS_URL defaults to http://172.26.64.1/wallos, which is the default
+TALLY_URL defaults to http://172.26.64.1/tally, which is the default
 gateway address XAMPP on Windows is reachable at from WSL2.
 
 Expects a test account with curated subscriptions (including one named
-"Vodafone") and logos/display settings already set up the way we want
-them screenshotted.
+"Vodafone") and display settings already set up the way we want them
+screenshotted.
 """
 
 import os
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
-BASE = os.environ.get("WALLOS_URL", "http://172.26.64.1/wallos")
-USERNAME = os.environ["WALLOS_USERNAME"]
-PASSWORD = os.environ["WALLOS_PASSWORD"]
+BASE = os.environ.get("TALLY_URL", "http://172.26.64.1/tally")
+USERNAME = os.environ["TALLY_USERNAME"]
+PASSWORD = os.environ["TALLY_PASSWORD"]
 OUT = Path(__file__).resolve().parent
 
-DESKTOP_VIEWPORT = {"width": 1280, "height": 1100}
+DESKTOP_VIEWPORT = {"width": 1360, "height": 900}
 
 
 def login(page):
@@ -44,15 +44,6 @@ def set_theme(page, which):
     page.wait_for_timeout(800)
 
 
-def set_view(page, which):
-    """which: 'list' or 'grid'. Persisted via cookie, so it carries over
-    to the mobile context through storage_state."""
-    page.goto(f"{BASE}/subscriptions.php")
-    page.wait_for_load_state('networkidle')
-    page.click(f'#view-{which}-button')
-    page.wait_for_timeout(500)
-
-
 def shot(page, path):
     page.wait_for_timeout(300)
     page.screenshot(path=str(OUT / path))
@@ -62,8 +53,7 @@ def shot(page, path):
 def open_vodafone_popup(page):
     page.goto(f"{BASE}/subscriptions.php")
     page.wait_for_load_state('networkidle')
-    card = page.locator('.subscription', has_text="Vodafone").first
-    card.click(position={"x": 20, "y": 20})
+    page.locator('.list-row[data-name="Vodafone"]').first.click()
     page.wait_for_timeout(500)
 
 
@@ -75,7 +65,7 @@ def close_popup(page):
 def open_add_form(page):
     page.goto(f"{BASE}/subscriptions.php")
     page.wait_for_load_state('networkidle')
-    page.click('button[onclick="addSubscription()"]')
+    page.click('.page-toolbar .btn-new')
     page.wait_for_timeout(500)
     page.fill('#name', 'HBO Max')
     page.fill('#price', '9.99')
@@ -86,28 +76,28 @@ def capture_desktop(page, dark):
 
     page.goto(f"{BASE}/index.php")
     page.wait_for_load_state('networkidle')
-    shot(page, f"wallos-dashboard-{suffix}.png")
+    shot(page, f"tally-dashboard-{suffix}.png")
 
     page.goto(f"{BASE}/subscriptions.php")
     page.wait_for_load_state('networkidle')
-    shot(page, f"wallos-subscriptions-{suffix}.png")
+    shot(page, f"tally-subscriptions-{suffix}.png")
 
     if not dark:
         page.goto(f"{BASE}/stats.php")
         page.wait_for_load_state('networkidle')
         page.evaluate("window.scrollTo(0, 200)")
         page.wait_for_timeout(200)
-        shot(page, "wallos-stats.png")
+        shot(page, "tally-stats.png")
 
         page.goto(f"{BASE}/calendar.php")
         page.wait_for_load_state('networkidle')
-        shot(page, "wallos-calendar.png")
+        shot(page, "tally-calendar.png")
 
         open_add_form(page)
-        shot(page, "wallos-form.png")
+        shot(page, "tally-form.png")
 
         open_vodafone_popup(page)
-        shot(page, "wallos-subscriptions-popup.png")
+        shot(page, "tally-subscriptions-popup.png")
         close_popup(page)
 
 
@@ -116,16 +106,16 @@ def capture_mobile(page, dark):
 
     page.goto(f"{BASE}/subscriptions.php")
     page.wait_for_load_state('networkidle')
-    shot(page, f"wallos-subscriptions-mobile-{suffix}.png")
+    shot(page, f"tally-subscriptions-mobile-{suffix}.png")
 
     if not dark:
         open_vodafone_popup(page)
-        shot(page, "wallos-subscriptions-mobile-sheet.png")
+        shot(page, "tally-subscriptions-mobile-sheet.png")
         close_popup(page)
 
     page.goto(f"{BASE}/index.php")
     page.wait_for_load_state('networkidle')
-    shot(page, f"wallos-dashboard-mobile-{suffix}.png")
+    shot(page, f"tally-dashboard-mobile-{suffix}.png")
 
 
 def main():
@@ -145,19 +135,8 @@ def main():
                 original_theme = name
         print("original theme:", original_theme)
 
-        # find current view (list/grid) selection to restore later
-        dpage.goto(f"{BASE}/subscriptions.php")
-        dpage.wait_for_load_state('networkidle')
-        grid_classes = dpage.locator("#view-grid-button").get_attribute("class") or ""
-        original_view = "grid" if "selected" in grid_classes else "list"
-        print("original view:", original_view)
-
         iphone = dict(p.devices["iPhone 14 Pro Max"])
         iphone["viewport"] = {"width": 430, "height": 932}
-
-        # Screenshots use grid view throughout; the cookie this sets carries
-        # over to the mobile context below via storage_state.
-        set_view(dpage, "grid")
 
         # ---------- LIGHT ----------
         set_theme(dpage, "light")
@@ -179,10 +158,9 @@ def main():
         capture_mobile(mpage, dark=True)
         mobile_ctx.close()
 
-        # ---------- restore original theme/view ----------
+        # ---------- restore original theme ----------
         if original_theme:
             set_theme(dpage, original_theme)
-        set_view(dpage, original_view)
 
         desktop_ctx.close()
         browser.close()

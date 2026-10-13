@@ -1,4 +1,6 @@
 </main>
+    </div>
+  </div>
 
 <div class="toast" id="errorToast">
   <div class="toast-content">

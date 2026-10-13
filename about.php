@@ -10,7 +10,9 @@ if (!is_null($settings['latest_version'])) {
 }
 ?>
 
-<section class="contain">
+<?php page_toolbar_start(translate('about', $i18n)); ?>
+<?php page_toolbar_end(); ?>
+<section class="contain settings">
 
     <section class="account-section">
         <header>
@@ -19,11 +21,11 @@ if (!is_null($settings['latest_version'])) {
         <div class="credits-list">
             <div>
                 <h3>
-                    Wallos <?= $version ?> <?= $demoMode ? "Demo" : "" ?>
+                    Tally <?= $version ?> <?= $demoMode ? "Demo" : "" ?>
                 </h3>
                 <span>
                     <?= translate('release_notes', $i18n) ?>
-                    <a href="https://github.com/ellite/Wallos/releases/tag/<?= $version ?>" target="_blank"
+                    <a href="https://github.com/<?= htmlspecialchars($githubRepository) ?>/releases/tag/<?= $version ?>" target="_blank"
                         title="<?= translate('external_url', $i18n) ?>" rel="noreferrer">
                         <i class="fa-solid fa-arrow-up-right-from-square"></i>
                     </a>
@@ -37,7 +39,7 @@ if (!is_null($settings['latest_version'])) {
                     </h3>
                     <span>
                         <?= translate('release_notes', $i18n) ?>
-                        <a href="https://github.com/ellite/Wallos/releases/tag/<?= $latestVersion ?>" target="_blank"
+                        <a href="https://github.com/<?= htmlspecialchars($githubRepository) ?>/releases/tag/<?= $latestVersion ?>" target="_blank"
                             title="<?= translate('external_url', $i18n) ?>" rel="noreferrer">
                             <i class="fa-solid fa-arrow-up-right-from-square"></i>
                         </a>
@@ -58,23 +60,29 @@ if (!is_null($settings['latest_version'])) {
                 <h3><?= translate('issues_and_requests', $i18n) ?></h3>
                 <span>
                     GitHub
-                    <a href="https://github.com/ellite/Wallos/issues" target="_blank"
+                    <a href="https://github.com/<?= htmlspecialchars($githubRepository) ?>/issues" target="_blank"
                         title="<?= translate('external_url', $i18n) ?>" rel="noreferrer">
                         <i class="fa-solid fa-arrow-up-right-from-square"></i>
                     </a>
                 </span>
             </div>
             <div>
-                <h3><?= translate('the_author', $i18n) ?></h3>
+                <h3><?= translate('based_on_wallos', $i18n) ?></h3>
                 <span>
-                    https://henrique.pt
+                    <?= translate('based_on_wallos_info', $i18n) ?>
+                    <a href="https://github.com/ellite/Wallos" target="_blank" title="<?= translate('external_url', $i18n) ?>"
+                        rel="noreferrer">
+                        <i class="fa-solid fa-arrow-up-right-from-square"></i>
+                    </a>
+                </span>
+                <span>
+                    <?= translate('the_author', $i18n) ?>: https://henrique.pt
                     <a href="https://henrique.pt/" target="_blank" title="<?= translate('external_url', $i18n) ?>"
                         rel="noreferrer">
                         <i class="fa-solid fa-arrow-up-right-from-square"></i>
                     </a>
                 </span>
             </div>
-
         </div>
     </section>
 

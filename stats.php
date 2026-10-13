@@ -25,25 +25,9 @@ $upcomingCancellationsCount = count($upcomingCancellations);
 $potentialMonthlySavings = get_upcoming_cancellations_monthly_value($upcomingCancellations, $db, $userId);
 
 ?>
-<section class="contain">
-  <?php
-  if ($showCantConverErrorMessage) {
-    ?>
-    <div class="error-box">
-      <div class="error-message">
-        <i class="fa-solid fa-exclamation-circle"></i>
-        <?= translate('cant_convert_currency', $i18n) ?>
-      </div>
-    </div>
-    <?php
-  }
-  ?>
-  <div class="split-header">
-    <h2>
-      <?= translate('general_statistics', $i18n) ?> <span class="header-subtitle"><?= $statsSubtitle ?></span>
-    </h2>
+<?php page_toolbar_start(translate('stats', $i18n), $statsSubtitle !== '' ? trim($statsSubtitle, '()') : translate('general_statistics', $i18n)); ?>
     <div class="filtermenu">
-      <button class="button secondary-button" id="filtermenu-button" title="<?= translate("filter", $i18n) ?>">
+      <button type="button" class="btn btn-icon" id="filtermenu-button" title="<?= translate("filter", $i18n) ?>" aria-label="<?= translate("filter", $i18n) ?>">
         <i class="fa-solid fa-filter"></i>
       </button>
       <div class="filtermenu-content">
@@ -149,9 +133,21 @@ $potentialMonthlySavings = get_upcoming_cancellations_monthly_value($upcomingCan
         ?>
       </div>
     </div>
-  </div>
-  </div>
-  </div>
+<?php page_toolbar_end(); ?>
+
+<section class="contain">
+  <?php
+  if ($showCantConverErrorMessage) {
+    ?>
+    <div class="error-box">
+      <div class="error-message">
+        <i class="fa-solid fa-exclamation-circle"></i>
+        <?= translate('cant_convert_currency', $i18n) ?>
+      </div>
+    </div>
+    <?php
+  }
+  ?>
   <?php
   // Graph datasets for the split views
   $categoryDataPoints = [];

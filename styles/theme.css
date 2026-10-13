@@ -1,44 +1,95 @@
+/*
+  Design tokens. Light appearance lives here; dark-theme.css swaps the
+  neutrals and picks the dark variant of the accent. Each colour theme
+  (styles/themes/*.css) only sets the --tint-* values below, so one accent
+  works in both appearances.
+
+  New code should use the short tokens (--bg, --surface, --text2, ...).
+  The long names (--box-background-color, --main-color, ...) are kept as
+  aliases for older rules and for user custom CSS.
+*/
 :root {
-    --main-color: #2563EB;
-    --main-color-rgb: 37, 99, 235;
-    --accent-color: #93C5FD;
-    --accent-color-rgb: 147, 197, 253;
-    --hover-color: #1D4ED8;
-    --hover-color-rgb: 29, 78, 216;
-    --error-color: #EF4444;
-    --error-color-rgb: 239, 68, 68;
-    --success-color: #16A34A;
-    --success-color-rgb: 22, 163, 74;
-    --warning-color: #B45309;
-    --warning-color-rgb: 180, 83, 9;
-    --background-color: #F2F4F8;
-    --background-color-rgb: 242, 244, 248;
-    --header-background-color: #FFFFFF;
+    /* Accent: Blue (default). */
+    --tint-l: #2563EB;
+    --tint-l-rgb: 37, 99, 235;
+    --tint-l-hover: #1D4ED8;
+    --tint-d: #5B8DEF;
+    --tint-d-rgb: 91, 141, 239;
+    --tint-d-hover: #2563EB;
+
+    --font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-display: "SF Pro Display", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI Variable Display", "Segoe UI", "Inter Display", Inter, Roboto, sans-serif;
+    --font-rounded: ui-rounded, "SF Pro Rounded", system-ui, -apple-system, "Segoe UI Variable Display", "Segoe UI", Roboto, sans-serif;
+
+    --page: #E4E6EB;
+    --bg: #F5F6F8;
+    --surface: #FFFFFF;
+    --surface-raised: #FFFFFF;
+    --border: rgba(16, 24, 40, 0.1);
+    --border-strong: rgba(16, 24, 40, 0.16);
+    --text: #16181D;
+    --text2: #5B616E;
+    --text3: #9AA0AA;
+    --hover: rgba(16, 24, 40, 0.04);
+    --fill: rgba(16, 24, 40, 0.07);
+    --danger: #C8241B;
+    --danger-rgb: 200, 36, 27;
+    --success: #15803D;
+    --success-rgb: 21, 128, 61;
+    --warning: #B45309;
+    --warning-rgb: 180, 83, 9;
+    --scrim: rgba(16, 24, 40, 0.32);
+    --toast-bg: #16181D;
+    --toast-ink: #FFFFFF;
+    --shadow-pop: 0 0 0 1px var(--border), 0 12px 32px rgba(16, 24, 40, 0.16);
+    --shadow-panel: -16px 0 40px rgba(0, 0, 0, 0.14);
+
+    --tint: var(--main-color);
+    --tint-rgb: var(--main-color-rgb);
+    --tint-hover: var(--hover-color);
+    --sel: rgba(var(--main-color-rgb), 0.08);
+
+    --radius-sm: 6px;
+    --radius: 8px;
+    --radius-lg: 12px;
+    --radius-xl: 14px;
+
+    /* Legacy aliases */
+    --main-color: var(--tint-l);
+    --main-color-rgb: var(--tint-l-rgb);
+    --hover-color: var(--tint-l-hover);
+    --hover-color-rgb: var(--tint-l-rgb);
+    --accent-color: var(--tint-d);
+    --accent-color-rgb: var(--tint-d-rgb);
+    --error-color: var(--danger);
+    --error-color-rgb: var(--danger-rgb);
+    --success-color: var(--success);
+    --success-color-rgb: var(--success-rgb);
+    --warning-color: var(--warning);
+    --warning-color-rgb: var(--warning-rgb);
+    --background-color: var(--bg);
+    --background-color-rgb: 245, 246, 248;
+    --header-background-color: var(--surface);
     --header-background-color-rgb: 255, 255, 255;
-    --box-background-color: #FFFFFF;
+    --box-background-color: var(--surface);
     --box-background-color-rgb: 255, 255, 255;
-    --box-border-color: #E7EAF0;
-    --box-border-color-rgb: 231, 234, 240;
-    --box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 10px 30px -18px rgba(15, 23, 42, 0.18);
-    --text-color: #1C2434;
-    --text-color-rgb: 28, 36, 52;
+    --box-border-color: var(--border);
+    --box-shadow: none;
+    --text-color: var(--text);
+    --text-color-rgb: 22, 24, 29;
     --text-color-inverted: #FFFFFF;
     --text-color-inverted-rgb: 255, 255, 255;
-    --input-background-color: #FFFFFF;
+    --input-background-color: var(--surface);
     --input-background-color-rgb: 255, 255, 255;
-    --input-border-color: #D7DCE5;
-    --input-border-color-rgb: 215, 220, 229;
-    --input-disabled-background-color: #F2F4F8;
-    --input-disabled-background-color-rgb: 242, 244, 248;
-    --input-disabled-border-color: #E7EAF0;
-    --input-disabled-border-color-rgb: 231, 234, 240;
-    --negative-box-shadow: 0 -2px 8px rgba(15, 23, 42, 0.06);
-    --surface-hover: #F3F5F9;
-    --surface-hover-rgb: 243, 245, 249;
-    --text-muted: #64748B;
-    --text-muted-rgb: 100, 116, 139;
-    --shadow-pop: 0 2px 6px rgba(15, 23, 42, 0.08), 0 16px 40px -16px rgba(15, 23, 42, 0.28);
-    --focus-ring: 0 0 0 3px rgba(var(--main-color-rgb), 0.18);
+    --input-border-color: var(--border-strong);
+    --input-disabled-background-color: var(--bg);
+    --input-disabled-border-color: var(--border);
+    --negative-box-shadow: none;
+    --surface-hover: var(--hover);
+    --text-muted: var(--text2);
+    --text-muted-rgb: 91, 97, 110;
+    --focus-ring: 0 0 0 3px rgba(var(--main-color-rgb), 0.2);
+    color-scheme: light;
 }
 
 svg .main-color {
@@ -50,5 +101,5 @@ svg .accent-color {
 }
 
 svg .text-color {
-    fill: #1C2434;
+    fill: var(--text);
 }

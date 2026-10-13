@@ -2,7 +2,7 @@
 /*
 This API Endpoint accepts POST requests only.
 It receives the following parameters:
-- api_key: the API key of the user (for Wallos authentication).
+- api_key: the API key of the user (for Tally authentication).
 - fixer_api_key: the Fixer.io or APILayer API key to save (optional; if empty/omitted, clears the key).
   Not read for provider '2', which needs no account.
 - provider: the provider type (optional; '0' for Fixer.io, '1' for APILayer.com, '2' for

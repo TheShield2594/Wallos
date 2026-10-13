@@ -1,5 +1,22 @@
 # Changelog
 
+Tally is a fork of [Wallos](https://github.com/ellite/Wallos). The entries up to and including 5.8.3 are from the Wallos project.
+
+## 1.0.0 (2026-10-13)
+
+First release as Tally, a fork of [Wallos](https://github.com/ellite/Wallos) 5.8.3. Version numbers restart at 1.0.0.
+
+### Features
+
+* Redesigned interface: one responsive layout for phone, tablet and desktop, with a sidebar, bottom tab bar, grouped lists and a details panel
+* Details panel with Mark as paid, Clone, Add to calendar, and payment reminders you can switch on and adjust in place
+* New Tally name, icon and app icons
+* Light and dark appearance, five accent colours, and system fonts on every platform
+
+### Upgrading from Wallos
+
+* Existing Wallos databases work as they are; see the README for moving an install over.
+
 ## [5.8.3](https://github.com/ellite/Wallos/compare/v5.8.2...v5.8.3) (2026-10-01)
 
 

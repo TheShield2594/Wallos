@@ -29,7 +29,7 @@ function ai_log_failure($type, $userId, $reason, $context = [])
         }
     }
 
-    error_log('[Wallos AI] ' . implode(' ', $details));
+    error_log('[Tally AI] ' . implode(' ', $details));
 }
 
 function ai_get_provider_error($replyData)
