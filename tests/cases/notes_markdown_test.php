@@ -118,11 +118,12 @@ wallos_test('a note that ends in a quotation mark survives the escape', function
     }
 });
 
-wallos_test('both notification crons use the shared webhookJsonEscape() helper for notes', function () {
+wallos_test('both notification crons escape notes through the shared webhook helper', function () {
     foreach (['endpoints/cronjobs/sendnotifications.php', 'endpoints/cronjobs/sendcancellationnotifications.php'] as $file) {
         $source = file_get_contents(WALLOS_ROOT . '/' . $file);
 
-        assert_contains('webhookJsonEscape($subscription[\'notes\'])', $source,
+        // webhookFillPayload() runs every value, notes included, through webhookJsonEscape().
+        assert_contains('\'subscription_notes\' => $subscription[\'notes\']', $source,
             $file . ' escapes notes before templating them into the webhook payload');
     }
 });
