@@ -193,7 +193,7 @@ function printSubscriptions($subscriptions, $sort, $categories, $members, $i18n,
 {
     if ($sort === "price") {
         usort($subscriptions, function ($a, $b) {
-            return $a['price'] < $b['price'] ? 1 : -1;
+            return ($b['sort_price'] ?? $b['price']) <=> ($a['sort_price'] ?? $a['price']);
         });
     }
 

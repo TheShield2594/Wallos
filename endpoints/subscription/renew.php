@@ -1,6 +1,7 @@
 <?php
 require_once '../../includes/connect_endpoint.php';
 require_once '../../includes/validate_endpoint.php';
+require_once '../../includes/renewal_dates.php';
 
 $postData = file_get_contents("php://input");
 $data = json_decode($postData, true);
@@ -41,24 +42,14 @@ if ($frequency < 1 || !in_array($cycle, ['Daily', 'Weekly', 'Monthly', 'Yearly']
     ]));
 }
 
-// Calculate the interval to add based on the cycle
-$intervalSpec = "P";
-if ($cycle == 'Daily') {
-    $intervalSpec .= "{$frequency}D";
-} elseif ($cycle === 'Weekly') {
-    $intervalSpec .= "{$frequency}W";
-} elseif ($cycle === 'Monthly') {
-    $intervalSpec .= "{$frequency}M";
-} elseif ($cycle === 'Yearly') {
-    $intervalSpec .= "{$frequency}Y";
-}
-
-$interval = new DateInterval($intervalSpec);
-
-// Add intervals until the next payment date is in the future and after current next payment date
-while ($nextPaymentDate < $currentDate || $nextPaymentDate == new DateTime($subscriptionToRenew['next_payment'])) {
-    $nextPaymentDate->add($interval);
-}
+// Advance at least one cycle, and on until the next payment date is in the
+// future, clamping month and year steps to the end of the month.
+$baseDate = clone $nextPaymentDate;
+$steps = 0;
+do {
+    $steps++;
+    $nextPaymentDate = wallos_renewal_date($baseDate, $cycle, $frequency, $steps);
+} while ($nextPaymentDate < $currentDate);
 
 // Update the subscription's next_payment date
 $updateQuery = "UPDATE subscriptions SET next_payment = :nextPaymentDate WHERE id = :subscriptionId";
