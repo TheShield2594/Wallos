@@ -3,7 +3,8 @@
   "packages": {
     ".": {
       "release-type": "simple",
-      "include-component-in-tag": false,
+      "component": "tally",
+      "include-component-in-tag": true,
       "include-v-in-tag": true,
       "extra-files": ["includes/version.php"]
     }
