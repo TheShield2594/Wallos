@@ -207,6 +207,7 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
     $print[$id]['url'] = $subscription['url'] ?? "";
     $print[$id]['notes'] = $subscription['notes'] ?? "";
     $print[$id]['replacement_subscription_id'] = $subscription['replacement_subscription_id'];
+    addListRowFields($print[$id], $subscription, $mainCurrencyId, $db);
 
     if (isset($settings['convertCurrency']) && $settings['convertCurrency'] === 'true' && $currencyId != $mainCurrencyId) {
       $print[$id]['price'] = getPriceConverted($print[$id]['price'], $currencyId, $db);
@@ -245,20 +246,15 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
   }
 
   if (isset($print)) {
-    printSubscriptions($print, $sort, $categories, $members, $i18n, $colorTheme, "../../", $settings['disabledToBottom'], $settings['mobileNavigation'], $settings['showSubscriptionProgress'], $currencies, $lang);
+    printSubscriptions($print, $sort, $categories, $members, $i18n, $settings, $currencies, $mainCurrencyId, $lang);
   }
 
   if (count($subscriptions) == 0) {
     ?>
-    <div class="no-matching-subscriptions">
-      <p>
-        <?= translate('no_matching_subscriptions', $i18n) ?>
-      </p>
-      <button class="button" onClick="clearFilters()">
-        <span clasS="fa-solid fa-minus-circle"></span>
-        <?= translate('clear_filters', $i18n) ?>
-      </button>
-      <img src="images/siteimages/empty.png" alt="<?= translate('empty_page', $i18n) ?>" />
+    <div class="empty-state no-matching-subscriptions">
+      <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+      <p class="empty-state-title"><?= translate('no_matching_subscriptions', $i18n) ?></p>
+      <button type="button" class="btn" onClick="clearFilters()"><?= translate('clear_filters', $i18n) ?></button>
     </div>
     <?php
   }

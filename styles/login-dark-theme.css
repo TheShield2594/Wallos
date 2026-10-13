@@ -1,79 +1,42 @@
-body {
-    background-color: #0F1218;
-    color: #E4E8F1;
-}
+/* Dark appearance for the sign-in pages: same tokens as dark-theme.css. */
+:root {
+    --page: #0A0B0E;
+    --bg: #0F1115;
+    --surface: #171A20;
+    --surface-raised: #1E2229;
+    --border: rgba(255, 255, 255, 0.09);
+    --border-strong: rgba(255, 255, 255, 0.16);
+    --text: #ECEEF2;
+    --text2: #A3A9B4;
+    --text3: #6B7280;
+    --hover: rgba(255, 255, 255, 0.05);
+    --fill: rgba(255, 255, 255, 0.1);
+    --danger: #FF7A70;
+    --danger-rgb: 255, 122, 112;
+    --success: #4ADE80;
+    --success-rgb: 74, 222, 128;
+    --warning: #F5B14A;
+    --warning-rgb: 245, 177, 74;
+    --scrim: rgba(0, 0, 0, 0.5);
+    --toast-bg: #ECEEF2;
+    --toast-ink: #16181D;
+    --shadow-pop: 0 0 0 1px var(--border), 0 12px 32px rgba(0, 0, 0, 0.5);
+    --shadow-panel: -16px 0 40px rgba(0, 0, 0, 0.45);
+    --sel: rgba(var(--main-color-rgb), 0.16);
 
-svg .text-color {
-    fill: #E4E8F1;
-}
-
-.container {
-    background-color: #171B23;
-    border: 1px solid #262C38;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 10px 30px -18px rgba(0, 0, 0, 0.55);
-}
-
-@media (max-width: 899px) {
-    .container {
-        background-color: transparent;
-        border: none;
-        box-shadow: none;
-    }
-}
-
-input[type="text"],
-input[type="email"],
-input[type="password"],
-select {
-    background-color: #1F2530;
-    border: 1px solid #38404F;
-    color: #E4E8F1;
-}
-
-input[type="checkbox"]+label::before {
-    background-color: #1F2530;
-    border-color: #38404F;
-}
-
-.password-field .password-toggle {
-    color: #8B94A7;
-}
-
-input[type="text"]::placeholder,
-input[type="email"]::placeholder,
-input[type="password"]::placeholder {
-    color: #7E8797;
-}
-
-input {
+    --main-color: var(--tint-d);
+    --main-color-rgb: var(--tint-d-rgb);
+    --hover-color: var(--tint-d-hover);
+    --hover-color-rgb: var(--tint-d-rgb);
+    --accent-color: var(--tint-d);
+    --accent-color-rgb: var(--tint-d-rgb);
+    --background-color-rgb: 15, 17, 21;
+    --header-background-color-rgb: 23, 26, 32;
+    --box-background-color-rgb: 23, 26, 32;
+    --text-color-rgb: 236, 238, 242;
+    --input-background-color: #1E2229;
+    --input-background-color-rgb: 30, 34, 41;
+    --text-muted-rgb: 163, 169, 180;
+    --focus-ring: 0 0 0 3px rgba(var(--main-color-rgb), 0.35);
     color-scheme: dark;
-}
-
-select {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%238B94A7' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-}
-
-input[type="button"].secondary-button,
-button.button.secondary-button,
-a.button.secondary-button {
-    background-color: #171B23;
-    border-color: #38404F;
-}
-
-input[type="button"].secondary-button:hover,
-button.button.secondary-button:hover,
-a.button.secondary-button:hover {
-    background-color: #1F2530;
-    border-color: var(--main-color);
-}
-
-.theme-toggle {
-    background-color: #1F2530;
-    border-color: #38404F;
-    color: #8B94A7;
-}
-
-.theme-toggle:hover {
-    color: var(--main-color);
-    border-color: var(--main-color);
 }

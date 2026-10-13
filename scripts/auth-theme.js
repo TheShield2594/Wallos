@@ -21,7 +21,7 @@ function toggleAuthTheme() {
 
   const themeColorMetaTag = document.querySelector('meta[name="theme-color"]');
   if (themeColorMetaTag) {
-    themeColorMetaTag.setAttribute('content', next === 'dark' ? '#12151C' : '#FFFFFF');
+    themeColorMetaTag.setAttribute('content', next === 'dark' ? '#171A20' : '#FFFFFF');
   }
 
   applyAuthThemeIcon();

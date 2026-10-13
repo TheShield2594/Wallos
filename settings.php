@@ -46,6 +46,9 @@ $upcomingPaymentsLimit = normalize_upcoming_payments_limit($settings['upcoming_p
         margin-bottom: 0;
         line-height: 1.2;
     }
+    .period-budget-controls .period-budget-field {
+        gap: 6px !important;
+    }
 
     .period-budget-controls .period-budget-save {
         flex: 0 0 auto;
@@ -53,8 +56,8 @@ $upcomingPaymentsLimit = normalize_upcoming_payments_limit($settings['upcoming_p
 
     .period-budget-controls #budget_period_anchor_date {
         display: block;
-        height: 50px;
-        min-height: 50px;
+        height: 40px;
+        min-height: 40px;
     }
 
     @media (min-width: 421px) and (max-width: 768px) {
@@ -79,6 +82,8 @@ $upcomingPaymentsLimit = normalize_upcoming_payments_limit($settings['upcoming_p
         }
     }
 </style>
+<?php page_toolbar_start(translate('settings', $i18n)); ?>
+<?php page_toolbar_end(); ?>
 <section class="contain settings">
 
     <section class="account-section">
@@ -1709,15 +1714,6 @@ $upcomingPaymentsLimit = normalize_upcoming_payments_limit($settings['upcoming_p
                 </div>
             </div>
             <h3><?= translate('experience', $i18n) ?></h3>
-            <div>
-                <div class="form-group-inline">
-                    <input type="checkbox" id="mobilenavigation" name="mobilenavigation"
-                        onChange="setMobileNavigation()" <?= $settings['mobile_nav'] ? 'checked' : '' ?>>
-                    <label for="mobilenavigation"><?= translate('use_mobile_navigation_bar', $i18n) ?></label>
-                </div>
-                <div class="mobile-nav-image">
-                </div>
-            </div>
             <div>
                 <div class="form-group-inline">
                     <input type="checkbox" id="showsubscriptionprogress" name="showsubscriptionprogress"

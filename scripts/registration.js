@@ -180,7 +180,7 @@ function checkThemeNeedsUpdate() {
     darkThemeCss.disabled = themePreference === 'light';
     document.body.className = themePreference;
     const themeColorMetaTag = document.querySelector('meta[name="theme-color"]');
-    themeColorMetaTag.setAttribute('content', themePreference === 'dark' ? '#12151C' : '#FFFFFF');
+    themeColorMetaTag.setAttribute('content', themePreference === 'dark' ? '#171A20' : '#FFFFFF');
   }
 }
 

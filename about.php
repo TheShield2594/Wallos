@@ -10,7 +10,9 @@ if (!is_null($settings['latest_version'])) {
 }
 ?>
 
-<section class="contain">
+<?php page_toolbar_start(translate('about', $i18n)); ?>
+<?php page_toolbar_end(); ?>
+<section class="contain settings">
 
     <section class="account-section">
         <header>

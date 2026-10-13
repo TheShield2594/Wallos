@@ -1,8 +1,9 @@
+/* Yellow accent: light appearance, then the lighter tint used in dark. */
 :root {
-    --main-color: #ffae00;
-    --main-color-rgb: 255, 174, 0;
-    --accent-color: #faea8f;
-    --accent-color-rgb: 250, 234, 143;
-    --hover-color: #cd930c;
-    --hover-color-rgb: 179, 124, 0;
+    --tint-l: #A16207;
+    --tint-l-rgb: 161, 98, 7;
+    --tint-l-hover: #854D0E;
+    --tint-d: #E0A82E;
+    --tint-d-rgb: 224, 168, 46;
+    --tint-d-hover: #A16207;
 }

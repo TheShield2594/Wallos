@@ -20,6 +20,8 @@ while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
         content: '<?= translate('upload_logo', $i18n) ?>';
     }
 </style>
+<?php page_toolbar_start(translate('profile', $i18n)); ?>
+<?php page_toolbar_end(); ?>
 <section class="contain settings">
     <section class="account-section">
         <header>

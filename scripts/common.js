@@ -1,4 +1,3 @@
-let isDropdownOpen = false;
 
 // Shared loading/empty/error states for the logo & payment icon search popups
 function showSearchState(container, state) {
@@ -22,10 +21,45 @@ function showSearchState(container, state) {
   container.appendChild(stateElement);
 }
 
-function toggleDropdown() {
-  const dropdown = document.querySelector('.dropdown');
-  dropdown.classList.toggle('is-open');
-  isDropdownOpen = !isDropdownOpen;
+function toggleAccountMenu(event) {
+  const menu = document.querySelector('#account-menu');
+  if (!menu) {
+    return;
+  }
+  event.stopPropagation();
+  const trigger = event.currentTarget;
+  const opening = !menu.classList.contains('is-open');
+  document.querySelectorAll('[aria-controls="account-menu"]').forEach(function (button) {
+    button.setAttribute('aria-expanded', 'false');
+  });
+  if (!opening) {
+    menu.classList.remove('is-open');
+    return;
+  }
+  // Anchor the menu to whichever button opened it (sidebar user row or the
+  // avatar in the phone toolbar).
+  const rect = trigger.getBoundingClientRect();
+  const fromSidebar = trigger.classList.contains('sidebar-user');
+  menu.style.left = fromSidebar ? rect.left + 'px' : '';
+  menu.style.right = fromSidebar ? '' : (window.innerWidth - rect.right) + 'px';
+  menu.style.top = fromSidebar ? '' : (rect.bottom + 6) + 'px';
+  menu.style.bottom = fromSidebar ? (window.innerHeight - rect.top + 6) + 'px' : '';
+  menu.classList.add('is-open');
+  trigger.setAttribute('aria-expanded', 'true');
+  const first = menu.querySelector('a');
+  if (first && event.detail === 0) {
+    first.focus();
+  }
+}
+
+function closeAccountMenu() {
+  const menu = document.querySelector('#account-menu');
+  if (menu && menu.classList.contains('is-open')) {
+    menu.classList.remove('is-open');
+    document.querySelectorAll('[aria-controls="account-menu"]').forEach(function (button) {
+      button.setAttribute('aria-expanded', 'false');
+    });
+  }
 }
 
 function showErrorMessage(message) {
@@ -107,21 +141,20 @@ document.addEventListener('DOMContentLoaded', function () {
 
     document.cookie = `inUseTheme=${themePreference}; expires=Fri, 31 Dec 9999 23:59:59 GMT; SameSite=Lax`;
     const themeColorMetaTag = document.querySelector('meta[name="theme-color"]');
-    themeColorMetaTag.setAttribute('content', themePreference === 'dark' ? '#12151C' : '#FFFFFF');
+    themeColorMetaTag.setAttribute('content', themePreference === 'dark' ? '#171A20' : '#FFFFFF');
   }
 
-  document.addEventListener('mousedown', function (event) {
-    var dropdown = document.querySelector('.dropdown');
-    var dropdownContent = document.querySelector('.dropdown-content');
-
-    if (!dropdown.contains(event.target) && isDropdownOpen) {
-      dropdown.classList.remove('is-open');
-      isDropdownOpen = false;
+  document.addEventListener('click', function (event) {
+    const menu = document.querySelector('#account-menu');
+    if (menu && !menu.contains(event.target)) {
+      closeAccountMenu();
     }
   });
 
-  document.querySelector('.dropdown-content').addEventListener('focus', function () {
-    isDropdownOpen = true;
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape') {
+      closeAccountMenu();
+    }
   });
 });
 

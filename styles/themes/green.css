@@ -1,8 +1,9 @@
+/* Green accent: light appearance, then the lighter tint used in dark. */
 :root {
-    --main-color: #6B8E23; /* Dark Olive Green */
-    --main-color-rgb: 107, 142, 35;
-    --accent-color: #9ACD32; /* Yellow-Green */
-    --accent-color-rgb: 154, 205, 50;
-    --hover-color: #556B2F; /* Olive Drab */
-    --hover-color-rgb: 85, 107, 47;
+    --tint-l: #15803D;
+    --tint-l-rgb: 21, 128, 61;
+    --tint-l-hover: #166534;
+    --tint-d: #3FB96F;
+    --tint-d-rgb: 63, 185, 111;
+    --tint-d-hover: #15803D;
 }

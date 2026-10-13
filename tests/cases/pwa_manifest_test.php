@@ -45,15 +45,15 @@ wallos_test('theme_color and background_color track the theme cookie', function 
 
     assert_same('#FFFFFF', $light['theme_color'], 'light theme is white');
     assert_same('#FFFFFF', $light['background_color'], 'and the background matches it');
-    assert_same('#12151C', $dark['theme_color'], 'dark theme is dark, matching the header meta tag value');
-    assert_same('#12151C', $dark['background_color'], 'and the background matches it');
+    assert_same('#171A20', $dark['theme_color'], 'dark theme is dark, matching the header meta tag value');
+    assert_same('#171A20', $dark['background_color'], 'and the background matches it');
 });
 
 wallos_test('automatic mode resolves from the inUseTheme cookie, not just "not light"', function () {
     $resolvedDark = render_manifest(['theme' => 'automatic', 'inUseTheme' => 'dark']);
     $resolvedLight = render_manifest(['theme' => 'automatic', 'inUseTheme' => 'light']);
 
-    assert_same('#12151C', $resolvedDark['theme_color'], 'automatic + resolved dark is dark');
+    assert_same('#171A20', $resolvedDark['theme_color'], 'automatic + resolved dark is dark');
     assert_same('#FFFFFF', $resolvedLight['theme_color'], 'automatic + resolved light is light');
 });
 

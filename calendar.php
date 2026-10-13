@@ -109,6 +109,38 @@ if ($weekStartsSunday) {
 }
 ?>
 
+<?php page_toolbar_start(translate('month-' . $calendarMonth, $i18n) . ' ' . $calendarYear, translate('calendar', $i18n)); ?>
+  <div class="calendar-nav">
+    <button class="btn btn-icon" id="prev" onclick="prevMonth(<?= $calendarMonth ?>, <?= $calendarYear ?>)"
+      <?= $sameAsCurrent ? 'disabled' : '' ?> aria-label="<?= translate('previous_month', $i18n) ?>">
+      <i class="fa-solid fa-chevron-left" aria-hidden="true"></i>
+    </button>
+    <?php if (!$sameAsCurrent) { ?>
+      <button class="btn" onClick="currentMoth()" title="<?= translate('reset', $i18n) ?>"><?= translate('today', $i18n) ?></button>
+    <?php } ?>
+    <button class="btn btn-icon" id="next" onclick="nextMonth(<?= $calendarMonth ?>, <?= $calendarYear ?>)"
+      aria-label="<?= translate('next_month', $i18n) ?>">
+      <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+    </button>
+  </div>
+  <button class="btn export-ical" onClick="showExportPopup()" title="<?= translate('export_icalendar', $i18n) ?>">
+    <i class="fa-solid fa-calendar-plus" aria-hidden="true"></i>
+    <span class="compact-hide"><?= translate('export_icalendar', $i18n) ?></span>
+  </button>
+<?php page_toolbar_end(); ?>
+
+    <div id="subscriptions_calendar" class="subscription-modal">
+        <div class="modal-header">
+            <h3><?= translate('export_icalendar', $i18n) ?></h3>
+            <button type="button" class="close-modal" onclick="closePopup()" aria-label="<?= translate('close', $i18n) ?>"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+        </div>
+        <div class="form-group-inline">
+            <input id="iCalendarUrl" type="text" value="" readonly>
+            <input type="hidden" id="apiKey" value="<?= $userData['api_key'] ?>">
+            <button onclick="copyToClipboard()" class="button tiny"> <?= translate('copy_to_clipboard', $i18n) ?> </button>
+        </div>
+    </div>
+
 <section class="contain">
   <?php
   if ($showCantConverErrorMessage) {
@@ -122,45 +154,6 @@ if ($weekStartsSunday) {
     <?php
   }
   ?>
-  <div class="split-header">
-    <div class="calendar-title">
-      <h2><?= translate('month-' . $calendarMonth, $i18n) ?> <?= $calendarYear ?></h2>
-      <div class="calendar-nav">
-        <button class="button secondary-button" id="prev"
-          onclick="prevMonth(<?= $calendarMonth ?>, <?= $calendarYear ?>)" <?= $sameAsCurrent ? 'disabled' : '' ?>>
-          <i class="fa-solid fa-chevron-left"></i>
-        </button>
-        <button class="button secondary-button" id="next"
-          onclick="nextMonth(<?= $calendarMonth ?>, <?= $calendarYear ?>)">
-          <i class="fa-solid fa-chevron-right"></i>
-        </button>
-        <?php
-        if (!$sameAsCurrent) {
-          ?>
-          <button class="button secondary-button" onClick="currentMoth()" title="<?= translate('reset', $i18n) ?>">
-            <i class="fa-solid fa-calendar-day"></i>
-          </button>
-          <?php
-        }
-        ?>
-      </div>
-    </div>
-    <button class="button secondary-button export-ical" onClick="showExportPopup()"
-      title="<?= translate('export_icalendar', $i18n) ?>" aria-label="<?= translate('export_icalendar', $i18n) ?>">
-      <?php require_once 'images/siteicons/svg/export_ical.php'; ?>
-    </button>
-    <div id="subscriptions_calendar" class="subscription-modal">
-        <div class="modal-header">
-            <h3><?= translate('export_icalendar', $i18n) ?></h3>
-            <span class="fa-solid fa-xmark close-modal" onclick="closePopup()"></span>
-        </div>
-        <div class="form-group-inline">
-            <input id="iCalendarUrl" type="text" value="" readonly>
-            <input type="hidden" id="apiKey" value="<?= $userData['api_key'] ?>">
-            <button onclick="copyToClipboard()" class="button tiny"> <?= translate('copy_to_clipboard', $i18n) ?> </button>
-        </div>
-    </div>
-  </div>
   <div>
     <?php
     $daysInMonth = cal_days_in_month(CAL_GREGORIAN, $calendarMonth, $calendarYear);

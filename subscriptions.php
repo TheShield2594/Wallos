@@ -5,6 +5,7 @@ require_once 'includes/getdbkeys.php';
 require_once 'includes/logo_theme_variant.php';
 
 include_once 'includes/list_subscriptions.php';
+require_once 'includes/ui_helpers.php';
 
 $sort = "next_payment";
 $sortOrder = $sort;
@@ -146,9 +147,93 @@ if ($sortOrder == "payment_method_id") {
   });
 }
 
-$headerClass = count($subscriptions) > 0 ? "main-actions" : "main-actions hidden";
+$hasSubscriptions = count($subscriptions) > 0;
 
-$subscriptionsView = (isset($_COOKIE['subscriptionsView']) && $_COOKIE['subscriptionsView'] === 'grid') ? 'grid' : 'list';
+// Toolbar title: a single category picked from the sidebar names the page.
+$pageTitle = translate('subscriptions', $i18n);
+if (isset($_GET['category']) && ctype_digit((string) $_GET['category']) && isset($categories[(int) $_GET['category']])) {
+  $pageTitle = (int) $_GET['category'] === 1 ? translate('no_category', $i18n) : htmlspecialchars_decode($categories[(int) $_GET['category']]['name']);
+}
+
+$formatter = new IntlDateFormatter(
+  'en', // Force English locale
+  IntlDateFormatter::SHORT,
+  IntlDateFormatter::NONE,
+  null,
+  null,
+  'MMM d, yyyy'
+);
+
+$print = [];
+foreach ($subscriptions as $subscription) {
+  if ($subscription['inactive'] == 1 && isset($settings['hideDisabledSubscriptions']) && $settings['hideDisabledSubscriptions'] === 'true') {
+    continue;
+  }
+  $id = $subscription['id'];
+  $print[$id]['id'] = $id;
+  $print[$id]['logo'] = $subscription['logo'] != "" ? "images/uploads/logos/" . $subscription['logo'] : "";
+  $print[$id]['logo_text_color'] = $subscription['logo_text_color'] ?? null;
+  $print[$id]['logo_variant'] = !empty($subscription['logo_variant']) ? "images/uploads/logos/" . $subscription['logo_variant'] : null;
+  $print[$id]['name'] = $subscription['name'];
+  $cycle = $subscription['cycle'];
+  $frequency = $subscription['frequency'];
+  $print[$id]['billing_cycle'] = getBillingCycle($cycle, $frequency, $i18n);
+  $print[$id]['one_time'] = ($cycle == 5);
+  $paymentMethodId = $subscription['payment_method_id'];
+  $print[$id]['currency_code'] = $currencies[$subscription['currency_id']]['code'];
+  $currencyId = $subscription['currency_id'];
+  $print[$id]['auto_renew'] = $subscription['auto_renew'];
+  $print[$id]['next_payment'] = $formatter->format(strtotime($subscription['next_payment']));
+  $print[$id]['payment_method_name'] = $payment_methods[$paymentMethodId]['name'];
+  $print[$id]['payment_method_id'] = $paymentMethodId;
+  $print[$id]['category_id'] = $subscription['category_id'];
+  $print[$id]['payer_user_id'] = $subscription['payer_user_id'];
+  $print[$id]['price'] = floatval($subscription['price']);
+  $print[$id]['progress'] = getSubscriptionProgress($cycle, $frequency, $subscription['next_payment']);
+  $print[$id]['inactive'] = $subscription['inactive'];
+  addListRowFields($print[$id], $subscription, $mainCurrencyId, $db);
+
+  if (isset($settings['convertCurrency']) && $settings['convertCurrency'] === 'true' && $currencyId != $mainCurrencyId) {
+    $print[$id]['price'] = getPriceConverted($print[$id]['price'], $currencyId, $db);
+    $print[$id]['currency_code'] = $currencies[$mainCurrencyId]['code'];
+  }
+  if (isset($settings['showMonthlyPrice']) && $settings['showMonthlyPrice'] === 'true') {
+    $print[$id]['price'] = getPricePerMonth($cycle, $frequency, $print[$id]['price']);
+  }
+  if (isset($settings['showOriginalPrice']) && $settings['showOriginalPrice'] === 'true') {
+    $print[$id]['original_price'] = floatval($subscription['price']);
+    $print[$id]['original_currency_code'] = $currencies[$subscription['currency_id']]['code'];
+  }
+}
+
+if ($sortOrder == "alphanumeric") {
+  usort($print, function ($a, $b) {
+    return strnatcmp(strtolower($a['name']), strtolower($b['name']));
+  });
+}
+
+$activeMonthlyTotal = 0;
+foreach ($print as $printRow) {
+  if (!$printRow['inactive'] && !$printRow['one_time']) {
+    $activeMonthlyTotal += $printRow['monthly_main'];
+  }
+}
+$pageSubtitle = sprintf(
+  translate('subscriptions_subtitle', $i18n),
+  count($print),
+  CurrencyFormatter::format($activeMonthlyTotal, $currencies[$mainCurrencyId]['code'])
+);
+
+$googleSearchEnabled = false;
+if ($db->querySingle("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='google_search'") > 0) {
+  $googleSearchStmt = $db->prepare("SELECT COUNT(*) AS count FROM google_search WHERE user_id = :userId AND api_key != ''");
+  $googleSearchStmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
+  $googleSearchResult = $googleSearchStmt->execute();
+  if ($googleSearchResult) {
+    $googleSearchRow = $googleSearchResult->fetchArray(SQLITE3_ASSOC);
+    $googleSearchEnabled = $googleSearchRow && $googleSearchRow['count'] > 0;
+  }
+}
 ?>
 <style>
   .logo-preview:after {
@@ -156,147 +241,44 @@ $subscriptionsView = (isset($_COOKIE['subscriptionsView']) && $_COOKIE['subscrip
   }
 </style>
 
-<section class="contain">
-  <header class="<?= $headerClass ?>" id="main-actions">
-    <button class="button" onClick="addSubscription()">
-      <i class="fa-solid fa-circle-plus"></i>
-      <?= translate('new_subscription', $i18n) ?>
-    </button>
-    <div class="top-actions">
-      <button class="button secondary-button mobile-search-toggle" id="mobile-search-toggle"
-        title="<?= translate('search', $i18n) ?>" onClick="toggleMobileSearch()">
-        <i class="fa-solid fa-magnifying-glass"></i>
+<?php page_toolbar_start($pageTitle, $hasSubscriptions ? $pageSubtitle : ''); ?>
+  <?php if ($hasSubscriptions) { ?>
+    <label class="search-field" id="search-field">
+      <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+      <input type="search" autocomplete="off" name="search" id="search" placeholder="<?= translate('search', $i18n) ?>"
+        aria-label="<?= translate('search', $i18n) ?>" oninput="searchSubscriptions()" />
+      <kbd class="compact-hide">/</kbd>
+    </label>
+    <div class="filtermenu">
+      <button type="button" class="btn btn-icon" id="filtermenu-button" title="<?= translate("filter", $i18n) ?>"
+        aria-label="<?= translate("filter", $i18n) ?>">
+        <i class="fa-solid fa-filter" aria-hidden="true"></i>
       </button>
-      <div class="search">
-        <input type="text" autocomplete="off" name="search" id="search" placeholder="<?= translate('search', $i18n) ?>"
-          onkeyup="searchSubscriptions()" />
-        <span class="fa-solid fa-magnifying-glass search-icon"></span>
-        <span class="fa-solid fa-xmark clear-search" onClick="clearSearch()"></span>
-      </div>
-
-      <div class="filtermenu on-dashboard">
-        <button class="button secondary-button" id="filtermenu-button" title="<?= translate("filter", $i18n) ?>">
-          <i class="fa-solid fa-filter"></i>
-        </button>
-        <?php include 'includes/filters_menu.php'; ?>
-      </div>
-
-      <div class="sort-container">
-        <button class="button secondary-button" value="Sort" onClick="toggleSortOptions()" id="sort-button"
-          title="<?= translate('sort', $i18n) ?>">
-          <i class="fa-solid fa-arrow-down-wide-short"></i>
-        </button>
-        <?php include 'includes/sort_options.php'; ?>
-      </div>
-
-      <div class="view-toggle" id="view-toggle">
-        <button type="button" class="view-toggle-button<?= $subscriptionsView === 'list' ? ' selected' : '' ?>"
-          id="view-list-button" title="<?= translate('list_view', $i18n) ?>" onClick="setSubscriptionsView('list')">
-          <i class="fa-solid fa-list"></i>
-        </button>
-        <button type="button" class="view-toggle-button<?= $subscriptionsView === 'grid' ? ' selected' : '' ?>"
-          id="view-grid-button" title="<?= translate('grid_view', $i18n) ?>" onClick="setSubscriptionsView('grid')">
-          <i class="fa-solid fa-table-cells-large"></i>
-        </button>
-      </div>
+      <?php include 'includes/filters_menu.php'; ?>
     </div>
-  </header>
-  <div class="subscriptions<?= $subscriptionsView === 'grid' ? ' grid-view' : '' ?>" id="subscriptions">
+    <?php include 'includes/sort_options.php'; ?>
+  <?php } ?>
+  <button type="button" class="btn btn-primary btn-new" onClick="addSubscription()"
+    aria-label="<?= translate('new_subscription', $i18n) ?>">
+    <i class="fa-solid fa-plus" aria-hidden="true"></i>
+    <span class="btn-new-label"><?= translate('new_subscription', $i18n) ?></span>
+  </button>
+<?php page_toolbar_end(); ?>
+
+<div class="subs-layout<?= $hasSubscriptions ? '' : ' is-empty' ?>">
+  <div class="subs-list">
+  <div class="subscriptions" id="subscriptions">
     <?php
-    $formatter = new IntlDateFormatter(
-      'en', // Force English locale
-      IntlDateFormatter::SHORT,
-      IntlDateFormatter::NONE,
-      null,
-      null,
-      'MMM d, yyyy'
-    );
-
-    $print = [];
-    foreach ($subscriptions as $subscription) {
-      if ($subscription['inactive'] == 1 && isset($settings['hideDisabledSubscriptions']) && $settings['hideDisabledSubscriptions'] === 'true') {
-        continue;
-      }
-      $id = $subscription['id'];
-      $print[$id]['id'] = $id;
-      $print[$id]['logo'] = $subscription['logo'] != "" ? "images/uploads/logos/" . $subscription['logo'] : "";
-      $print[$id]['logo_text_color'] = $subscription['logo_text_color'] ?? null;
-      $print[$id]['logo_variant'] = !empty($subscription['logo_variant']) ? "images/uploads/logos/" . $subscription['logo_variant'] : null;
-      $print[$id]['name'] = $subscription['name'];
-      $cycle = $subscription['cycle'];
-      $frequency = $subscription['frequency'];
-      $print[$id]['billing_cycle'] = getBillingCycle($cycle, $frequency, $i18n);
-      $print[$id]['one_time'] = ($cycle == 5);
-      $paymentMethodId = $subscription['payment_method_id'];
-      $print[$id]['currency_code'] = $currencies[$subscription['currency_id']]['code'];
-      $currencyId = $subscription['currency_id'];
-      $print[$id]['auto_renew'] = $subscription['auto_renew'];
-      $next_payment_timestamp = strtotime($subscription['next_payment']);
-      $formatted_date = $formatter->format($next_payment_timestamp);
-      $print[$id]['next_payment'] = $formatted_date;
-      $paymentIconFolder = (strpos($payment_methods[$paymentMethodId]['icon'], 'images/uploads/icons/') !== false) ? "" : "images/uploads/logos/";
-      $print[$id]['payment_method_icon'] = $paymentIconFolder . $payment_methods[$paymentMethodId]['icon'];
-      $print[$id]['payment_method_name'] = $payment_methods[$paymentMethodId]['name'];
-      $print[$id]['payment_method_id'] = $paymentMethodId;
-      $print[$id]['category_id'] = $subscription['category_id'];
-      $print[$id]['payer_user_id'] = $subscription['payer_user_id'];
-      $print[$id]['price'] = floatval($subscription['price']);
-      $print[$id]['progress'] = getSubscriptionProgress($cycle, $frequency, $subscription['next_payment']);
-      $print[$id]['inactive'] = $subscription['inactive'];
-      $print[$id]['url'] = $subscription['url'];
-      $print[$id]['notes'] = $subscription['notes'];
-      $print[$id]['replacement_subscription_id'] = $subscription['replacement_subscription_id'];
-
-      if (isset($settings['convertCurrency']) && $settings['convertCurrency'] === 'true' && $currencyId != $mainCurrencyId) {
-        $print[$id]['price'] = getPriceConverted($print[$id]['price'], $currencyId, $db);
-        $print[$id]['currency_code'] = $currencies[$mainCurrencyId]['code'];
-      }
-      if (isset($settings['showMonthlyPrice']) && $settings['showMonthlyPrice'] === 'true') {
-        $print[$id]['price'] = getPricePerMonth($cycle, $frequency, $print[$id]['price']);
-      }
-      if (isset($settings['showOriginalPrice']) && $settings['showOriginalPrice'] === 'true') {
-        $print[$id]['original_price'] = floatval($subscription['price']);
-        $print[$id]['original_currency_code'] = $currencies[$subscription['currency_id']]['code'];
-      }
+    if (!empty($print)) {
+      printSubscriptions($print, $sort, $categories, $members, $i18n, $settings, $currencies, $mainCurrencyId, $lang);
     }
 
-    if ($sortOrder == "alphanumeric") {
-      usort($print, function ($a, $b) {
-        return strnatcmp(strtolower($a['name']), strtolower($b['name']));
-      });
-      if ($settings['disabledToBottom'] === 'true') {
-        usort($print, function ($a, $b) {
-          return $a['inactive'] - $b['inactive'];
-        });
-      }
-    }
-
-    if (isset($print)) {
-      printSubscriptions($print, $sort, $categories, $members, $i18n, $colorTheme, "", $settings['disabledToBottom'], $settings['mobileNavigation'], $settings['showSubscriptionProgress'], $currencies, $lang);
-    }
-
-    $googleSearchEnabled = false;
-    if ($db->querySingle("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='google_search'") > 0) {
-      $googleSearchStmt = $db->prepare("SELECT COUNT(*) AS count FROM google_search WHERE user_id = :userId AND api_key != ''");
-      $googleSearchStmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
-      $googleSearchResult = $googleSearchStmt->execute();
-      if ($googleSearchResult) {
-        $googleSearchRow = $googleSearchResult->fetchArray(SQLITE3_ASSOC);
-        $googleSearchEnabled = $googleSearchRow && $googleSearchRow['count'] > 0;
-      }
-    }
-
-    $db->close();
-
-    if (count($subscriptions) == 0) {
+    if (!$hasSubscriptions) {
       ?>
-      <div class="empty-page">
-        <img src="images/siteimages/empty.png" alt="<?= translate('empty_page', $i18n) ?>" />
-        <p>
-          <?= translate('no_subscriptions_yet', $i18n) ?>
-        </p>
-        <button class="button" onClick="addSubscription()">
-          <i class="fa-solid fa-circle-plus"></i>
+      <div class="empty-state empty-page">
+        <i class="fa-solid fa-receipt" aria-hidden="true"></i>
+        <p class="empty-state-title"><?= translate('no_subscriptions_yet', $i18n) ?></p>
+        <button type="button" class="btn btn-primary" onClick="addSubscription()">
           <?= translate('add_first_subscription', $i18n) ?>
         </button>
       </div>
@@ -304,11 +286,22 @@ $subscriptionsView = (isset($_COOKIE['subscriptionsView']) && $_COOKIE['subscrip
     }
     ?>
   </div>
-</section>
-<section class="subscription-form" id="subscription-form">
-  <header>
+  <div class="empty-state hide" id="search-no-results" role="status">
+    <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+    <p class="empty-state-title"><?= translate('no_results', $i18n) ?></p>
+    <p><?= translate('no_results_hint', $i18n) ?></p>
+  </div>
+  </div>
+  <?php require_once 'includes/subscription_details_popup.php'; ?>
+</div>
+
+<div class="sheet-backdrop" id="subscription-form-backdrop" onClick="closeAddSubscription()"></div>
+<section class="subscription-form sheet" id="subscription-form" role="dialog" aria-modal="true" aria-labelledby="form-title">
+  <header class="sheet-header">
     <h3 id="form-title"><?= translate('add_subscription', $i18n) ?></h3>
-    <span class="fa-solid fa-xmark close-form" onClick="closeAddSubscription()"></span>
+    <button type="button" class="sheet-close close-form" onClick="closeAddSubscription()" aria-label="<?= translate('cancel', $i18n) ?>">
+      <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+    </button>
   </header>
   <form action="endpoints/subscription/add.php" method="post" id="subs-form">
 
@@ -576,13 +569,20 @@ $subscriptionsView = (isset($_COOKIE['subscriptionsView']) && $_COOKIE['subscrip
   </form>
 </section>
 
-<?php require_once 'includes/subscription_details_popup.php'; ?>
 <script src="scripts/subscriptions.js?<?= $version ?>"></script>
 <?php
 if (isset($_GET['add'])) {
   ?>
   <script>
     addSubscription();
+  </script>
+  <?php
+} elseif (isset($_GET['edit']) && ctype_digit((string) $_GET['edit'])) {
+  ?>
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      openEditSubscription(new Event('open'), <?= (int) $_GET['edit'] ?>);
+    });
   </script>
   <?php
 }

@@ -18,7 +18,7 @@ $theme = sanitize_theme_mode($_COOKIE['theme'] ?? null);
 if ($theme === 'automatic') {
     $theme = sanitize_resolved_theme($_COOKIE['inUseTheme'] ?? null);
 }
-$themeColor = $theme === 'light' ? '#FFFFFF' : '#12151C';
+$themeColor = $theme === 'light' ? '#FFFFFF' : '#171A20';
 
 $manifest = [
     'short_name' => 'Wallos',

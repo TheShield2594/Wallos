@@ -210,7 +210,7 @@ if (isset($_POST['password']) && $_POST['password'] != "" && isset($_POST['confi
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <meta name="theme-color" content="<?= $theme == "light" ? "#FFFFFF" : "#12151C" ?>" />
+    <meta name="theme-color" content="<?= $theme == "light" ? "#FFFFFF" : "#171A20" ?>" />
     <meta name="apple-mobile-web-app-title" content="Wallos">
     <title>Wallos - Subscription Tracker</title>
     <link rel="icon" type="image/png" href="images/icon/favicon.ico" sizes="16x16">
@@ -225,7 +225,6 @@ if (isset($_POST['password']) && $_POST['password'] != "" && isset($_POST['confi
     <link rel="stylesheet" href="styles/themes/yellow.css?<?= $version ?>" id="yellow-theme" <?= $colorTheme != "yellow" ? "disabled" : "" ?>>
     <link rel="stylesheet" href="styles/themes/purple.css?<?= $version ?>" id="purple-theme" <?= $colorTheme != "purple" ? "disabled" : "" ?>>
     <link rel="stylesheet" href="styles/font-awesome.min.css">
-    <link rel="stylesheet" href="styles/barlow.css">
     <link rel="stylesheet" href="styles/login-dark-theme.css?<?= $version ?>" id="dark-theme" <?= $theme == "light" ? "disabled" : "" ?>>
     <script type="text/javascript" src="scripts/auth-theme.js?<?= $version ?>"></script>
     <script type="text/javascript" src="scripts/password-toggle.js?<?= $version ?>"></script>
