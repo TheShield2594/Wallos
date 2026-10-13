@@ -63,6 +63,7 @@ function setDarkTheme(theme) {
         automaticThemeButton.classList.remove('selected');
 
         document.cookie = `theme=${themeValue}; expires=Fri, 31 Dec 9999 23:59:59 GMT; SameSite=Lax`;
+        window.update_theme_settings = theme == 2 ? "1" : "";
 
         if (theme == 0) {
           darkThemeCss.disabled = true;

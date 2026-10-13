@@ -29,7 +29,7 @@
     --border-strong: rgba(16, 24, 40, 0.16);
     --text: #16181D;
     --text2: #5B616E;
-    --text3: #9AA0AA;
+    --text3: #6B717D;
     --hover: rgba(16, 24, 40, 0.04);
     --fill: rgba(16, 24, 40, 0.07);
     --danger: #C8241B;
@@ -90,6 +90,16 @@
     --text-muted-rgb: 91, 97, 110;
     --focus-ring: 0 0 0 3px rgba(var(--main-color-rgb), 0.2);
     color-scheme: light;
+}
+
+/* Increase Contrast: stronger secondary text and borders. */
+@media (prefers-contrast: more) {
+    :root {
+        --border: rgba(16, 24, 40, 0.22);
+        --border-strong: rgba(16, 24, 40, 0.4);
+        --text2: #3D424D;
+        --text3: #4D535F;
+    }
 }
 
 svg .main-color {

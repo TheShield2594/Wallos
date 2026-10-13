@@ -14,6 +14,8 @@ function toggleAuthTheme() {
   }
   const next = darkCss.disabled ? 'dark' : 'light';
   darkCss.disabled = next === 'light';
+  // An explicit choice stops the page following the system appearance.
+  window.update_theme_settings = '';
 
   const expirationDate = new Date();
   expirationDate.setFullYear(expirationDate.getFullYear() + 1);

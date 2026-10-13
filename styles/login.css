@@ -591,3 +591,52 @@ a.button.secondary-button:hover {
     background: transparent;
   }
 }
+
+/* Touch screens: hit targets of at least 44x44 (Apple HIG). */
+@media (pointer: coarse) {
+  .theme-toggle {
+    width: 44px;
+    height: 44px;
+  }
+
+  .password-field .password-toggle {
+    inset-inline-end: 0;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* The round close button keeps its look but gets a 44px hit area. */
+  .subscription-modal .close-modal {
+    position: relative;
+  }
+
+  .subscription-modal .close-modal::after {
+    content: "";
+    position: absolute;
+    inset: -7px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* The toast fades in instead of sliding up. */
+  .toast,
+  .toast.active {
+    transform: translate(-50%, 0);
+  }
+
+  .toast {
+    transition: opacity 0.2s, visibility 0s linear 0.2s !important;
+  }
+
+  .toast.active {
+    transition: opacity 0.2s !important;
+  }
+}

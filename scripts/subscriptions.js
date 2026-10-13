@@ -319,7 +319,8 @@ function runLogoSearch(searchTerm) {
       navItem.textContent = source.label;
       navItem.onclick = function () {
         const targetTop = section.getBoundingClientRect().top - logoResults.getBoundingClientRect().top + logoResults.scrollTop;
-        logoResults.scrollTo({ top: targetTop, behavior: 'smooth' });
+        const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        logoResults.scrollTo({ top: targetTop, behavior: reduceMotion ? 'auto' : 'smooth' });
       };
       logoNav.appendChild(navItem);
     }

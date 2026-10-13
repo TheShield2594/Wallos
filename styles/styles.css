@@ -3217,6 +3217,22 @@ input[type="color"]::-moz-color-swatch {
   border-top: 1px solid var(--border);
 }
 
+/* Where the browser can animate to height: auto, do that instead of a
+   max-height guess, so opening and closing take the same, real time. */
+@supports (interpolate-size: allow-keywords) {
+  .account-notification-section-settings {
+    interpolate-size: allow-keywords;
+    height: 0;
+    max-height: none;
+    transition: height 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  .account-notification-section-settings.is-open {
+    height: auto;
+    max-height: none;
+  }
+}
+
 .account-notification-section-settings>div:first-of-type {
   margin-top: 16px;
 }
@@ -4167,11 +4183,150 @@ input[type="color"]::-moz-color-swatch {
   }
 }
 
+/* Touch screens: hit targets of at least 44x44 (Apple HIG). */
+@media (pointer: coarse) {
+  input[type="submit"],
+  input[type="button"],
+  button.button,
+  .btn-small,
+  .search-field,
+  .toolbar-select,
+  .select-compact,
+  input[type="text"],
+  input[type="search"],
+  input[type="email"],
+  input[type="password"],
+  input[type="date"],
+  input[type="number"],
+  input[type="url"],
+  input[type="tel"],
+  select {
+    min-height: 44px;
+  }
+
+  /* Keep iOS from zooming the page when a field gets focus. */
+  input[type="text"],
+  input[type="search"],
+  input[type="email"],
+  input[type="password"],
+  input[type="date"],
+  input[type="number"],
+  input[type="url"],
+  input[type="tel"],
+  select,
+  textarea {
+    font-size: 16px;
+  }
+
+  .btn-icon,
+  .btn-new,
+  .calendar-nav .button,
+  .calendar-nav .btn {
+    min-width: 44px;
+  }
+
+  .image-button,
+  .notes-toolbar-button,
+  .theme-preview {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .sidebar-category,
+  .filtermenu-content .filter-item {
+    min-height: 44px;
+  }
+
+  .password-field .password-toggle {
+    inset-inline-end: 0;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* Small round close buttons keep their look but get a 44px hit area. */
+  .sheet-close,
+  .close-form,
+  .subscription-modal .close-modal {
+    position: relative;
+  }
+
+  .sheet-close::after,
+  .close-form::after,
+  .subscription-modal .close-modal::after,
+  .close-logo-search::after,
+  .close-icon-search::after {
+    content: "";
+    position: absolute;
+    inset: -7px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* Things that slide in fade in instead, so changes still read as changes. */
+  .detail-panel,
+  .rtl .detail-panel {
+    transform: none;
+    opacity: 0;
+    transition: opacity 0.2s, visibility 0s linear 0.2s !important;
+  }
+
+  .detail-panel.is-open {
+    opacity: 1;
+    transition: opacity 0.2s !important;
+  }
+
+  @media (min-width: 1100px) {
+    /* Wide screens show details inline, with nothing to fade. */
+    .subs-layout .detail-panel {
+      opacity: 1;
+      transition: none !important;
+    }
+  }
+
+  .details-backdrop,
+  .icon-search-backdrop {
+    transition: opacity 0.2s, visibility 0s linear 0.2s !important;
+  }
+
+  .details-backdrop.is-open,
+  .icon-search-backdrop.is-open {
+    transition: opacity 0.2s !important;
+  }
+
+  .toast,
+  .toast.active {
+    transform: translate(-50%, 0);
+  }
+
+  .toast {
+    transition: opacity 0.2s, visibility 0s linear 0.2s !important;
+  }
+
+  .toast.active {
+    transition: opacity 0.2s !important;
+  }
+
+  .subscription-form.is-open,
+  .subscription-modal.is-open {
+    animation: fade-in 0.2s !important;
+  }
+
+  /* A loading spinner is status, not decoration: keep it turning. */
+  .spinner {
+    animation-duration: 0.9s !important;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
   }
 }
