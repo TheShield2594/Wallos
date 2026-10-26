@@ -14,6 +14,11 @@ function addFolderToZip($dir, $zipArchive, $zipdir = '')
                 if ($file == "." || $file == "..") {
                     continue;
                 }
+                // SQLite's WAL and shared-memory files belong to the live
+                // database; the WAL is checkpointed into wallos.db below.
+                if (preg_match('/-(wal|shm|journal)$/', $file)) {
+                    continue;
+                }
                 //If it's a folder, run the function again!
                 if (is_dir($dir . $file)) {
                     $newdir = $dir . $file . '/';
@@ -55,6 +60,8 @@ if ($zip->open($zipname, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== TRUE) {
     ]));
 }
 
+// Fold the write-ahead log into wallos.db so the archived file is complete
+$db->exec('PRAGMA wal_checkpoint(TRUNCATE)');
 addFolderToZip('../../db/', $zip);
 addFolderToZip('../../images/uploads/', $zip);
 

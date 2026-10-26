@@ -197,16 +197,21 @@ self.addEventListener('activate', function (event) {
 // Message: prefetch pages after login
 self.addEventListener('message', function (event) {
     if (event.data && event.data.type === 'PREFETCH_PAGES') {
-        caches.open(PAGES_CACHE).then(cache => {
-            pagesToPrefetch.forEach(url => {
-                fetch(url).then(response => {
+        // One page at a time: fetching them all at once right after login
+        // ties up PHP workers and SQLite with a burst of heavy page loads.
+        event.waitUntil(caches.open(PAGES_CACHE).then(async cache => {
+            for (const url of pagesToPrefetch) {
+                try {
+                    const response = await fetch(url);
                     // Only cache if user is actually logged in (no redirect)
                     if (response.ok && !response.redirected) {
-                        cache.put(url, response);
+                        await cache.put(url, response);
                     }
-                }).catch(() => {});
-            });
-        });
+                } catch (error) {
+                    // Offline or failed: skip this page, try the next
+                }
+            }
+        }));
     }
 });
 

@@ -217,8 +217,21 @@ function page_toolbar_end()
   <script>
     if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
       if (!sessionStorage.getItem('sw_prefetched')) {
-        navigator.serviceWorker.controller.postMessage({ type: 'PREFETCH_PAGES' });
         sessionStorage.setItem('sw_prefetched', '1');
+        // Wait until this page has loaded and gone idle, so the prefetch
+        // doesn't compete with the requests the user is waiting on
+        window.addEventListener('load', function () {
+          const prefetch = function () {
+            if (navigator.serviceWorker.controller) {
+              navigator.serviceWorker.controller.postMessage({ type: 'PREFETCH_PAGES' });
+            }
+          };
+          if ('requestIdleCallback' in window) {
+            requestIdleCallback(prefetch, { timeout: 5000 });
+          } else {
+            setTimeout(prefetch, 2000);
+          }
+        });
       }
     }
   </script>

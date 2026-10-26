@@ -72,6 +72,13 @@ if (isset($_FILES['file'])) {
             if (file_exists('../../db/wallos.db')) {
                 unlink('../../db/wallos.db');
             }
+            // A WAL left over from the old database would be replayed onto
+            // the restored one and corrupt it
+            foreach (['-wal', '-shm'] as $suffix) {
+                if (file_exists('../../db/wallos.db' . $suffix)) {
+                    unlink('../../db/wallos.db' . $suffix);
+                }
+            }
             rename('../../.tmp/restore/wallos.db', '../../db/wallos.db');
 
             $db = new SQLite3('../../db/wallos.db');
