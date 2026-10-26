@@ -89,20 +89,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (file_exists('../../.tmp/restore/wallos.db')) {
                 $db->close();
 
+                // A WAL left over from the old database would be replayed
+                // onto the imported one and corrupt it. Removed first, so a
+                // failure stops the import while the old database is in place.
+                foreach (['-wal', '-shm'] as $suffix) {
+                    if (file_exists('../../db/wallos.db' . $suffix) && !unlink('../../db/wallos.db' . $suffix)) {
+                        emptyRestoreFolder();
+                        die(json_encode([
+                            "success" => false,
+                            "message" => "Failed to remove the existing database's wallos.db" . $suffix
+                        ]));
+                    }
+                }
+
                 if (file_exists('../../db/wallos.db') && !unlink('../../db/wallos.db')) {
                     emptyRestoreFolder();
                     die(json_encode([
                         "success" => false,
                         "message" => "Failed to remove existing database"
                     ]));
-                }
-
-                // A WAL left over from the old database would be replayed
-                // onto the imported one and corrupt it
-                foreach (['-wal', '-shm'] as $suffix) {
-                    if (file_exists('../../db/wallos.db' . $suffix)) {
-                        unlink('../../db/wallos.db' . $suffix);
-                    }
                 }
 
                 if (!rename('../../.tmp/restore/wallos.db', '../../db/wallos.db')) {

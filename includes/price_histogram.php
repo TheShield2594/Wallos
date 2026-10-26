@@ -31,12 +31,30 @@ function wallos_histogram_nice_width($width)
 }
 
 /**
+ * Decimal places that keep boundaries a given width apart distinct, at
+ * least 2 so ordinary prices still read like money.
+ */
+function wallos_histogram_decimals($width)
+{
+    return max(2, (int) ceil(-log10($width)) + 1);
+}
+
+/**
+ * @param float[] $prices monthly prices in the main currency
+ * @return float[]
+ */
+function wallos_histogram_prices(array $prices)
+{
+    return array_values(array_filter(array_map('floatval', $prices), fn($price) => $price >= 0));
+}
+
+/**
  * @param float[] $prices monthly prices in the main currency
  * @return float[] ascending upper bounds of every bucket but the open last one
  */
 function wallos_price_histogram_boundaries(array $prices)
 {
-    $prices = array_values(array_filter(array_map('floatval', $prices), fn($price) => $price >= 0));
+    $prices = wallos_histogram_prices($prices);
     sort($prices);
     $count = count($prices);
 
@@ -56,9 +74,11 @@ function wallos_price_histogram_boundaries(array $prices)
     // below it and holds the most expensive tenth or so
     $width = wallos_histogram_nice_width($top / $buckets);
 
+    // Sub-cent widths (crypto main currencies) keep enough decimals to stay apart
+    $decimals = wallos_histogram_decimals($width);
     $boundaries = [];
     for ($index = 1; $index < $buckets; $index++) {
-        $boundaries[] = round($width * $index, 2);
+        $boundaries[] = round($width * $index, $decimals);
     }
 
     return $boundaries;
@@ -70,6 +90,7 @@ function wallos_price_histogram_boundaries(array $prices)
  */
 function wallos_price_histogram_data_points(array $prices)
 {
+    $prices = wallos_histogram_prices($prices);
     $boundaries = wallos_price_histogram_boundaries($prices);
     if ($boundaries === []) {
         return [];
@@ -87,8 +108,9 @@ function wallos_price_histogram_data_points(array $prices)
         $counts[$bucketIndex]++;
     }
 
-    $format = function ($value) {
-        return rtrim(rtrim(number_format($value, 2, '.', ''), '0'), '.');
+    $decimals = wallos_histogram_decimals($boundaries[0]);
+    $format = function ($value) use ($decimals) {
+        return rtrim(rtrim(number_format($value, $decimals, '.', ''), '0'), '.');
     };
 
     $dataPoints = [];

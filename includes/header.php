@@ -217,12 +217,14 @@ function page_toolbar_end()
   <script>
     if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
       if (!sessionStorage.getItem('sw_prefetched')) {
-        sessionStorage.setItem('sw_prefetched', '1');
         // Wait until this page has loaded and gone idle, so the prefetch
         // doesn't compete with the requests the user is waiting on
         window.addEventListener('load', function () {
           const prefetch = function () {
             if (navigator.serviceWorker.controller) {
+              // Set only once the message goes out, so leaving the page
+              // before it's idle doesn't skip the prefetch for the session
+              sessionStorage.setItem('sw_prefetched', '1');
               navigator.serviceWorker.controller.postMessage({ type: 'PREFETCH_PAGES' });
             }
           };

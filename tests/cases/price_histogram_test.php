@@ -46,3 +46,19 @@ wallos_test('price buckets handle no prices and all-zero prices', function () {
     $dataPoints = wallos_price_histogram_data_points([0, 0, 0]);
     assert_same(3, price_histogram_total($dataPoints), 'free subscriptions are still counted');
 });
+
+wallos_test('sub-cent price buckets keep distinct boundaries', function () {
+    $dataPoints = wallos_price_histogram_data_points([0.0002, 0.0004, 0.0005, 0.0009]);
+
+    assert_same(
+        ['0–0.0002', '0.0002–0.0004', '0.0004+'],
+        array_column($dataPoints, 'label'),
+        'crypto-sized prices get their own buckets instead of 0–0'
+    );
+});
+
+wallos_test('negative prices are left out of the price buckets', function () {
+    $dataPoints = wallos_price_histogram_data_points([-1, 1, 2, 3]);
+
+    assert_same(3, price_histogram_total($dataPoints), 'a negative price is not counted in a 0– bucket');
+});
