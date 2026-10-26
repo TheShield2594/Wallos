@@ -206,14 +206,29 @@ jobs:
         with:
           images: ${{ steps.images.outputs.list }}
           tags: ${{ needs.release.outputs.tag_patterns }}
+      # Overlapping runs on main (e.g. the weekly rebuild and a push) can finish
+      # out of order. Only the run for main's current head publishes :main, so
+      # an older run can't overwrite a newer image. Releases always publish.
+      - name: Check this run is for main's current head
+        id: fresh
+        if: github.ref == 'refs/heads/main' && needs.release.outputs.release_created != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          head=$(gh api "repos/${{ github.repository }}/commits/main" --jq .sha)
+          if [ "$head" != "$GITHUB_SHA" ]; then
+            echo "main is now at $head, not $GITHUB_SHA; skipping publication."
+            echo "stale=true" >> "$GITHUB_OUTPUT"
+          fi
       - name: Create manifest list and push to Docker Hub
-        if: env.IMAGE_NAME != ''
+        if: env.IMAGE_NAME != '' && steps.fresh.outputs.stale != 'true'
         working-directory: /tmp/digests
         run: |
           docker buildx imagetools create \
             $(jq -cr '.tags | map(select(startswith("${{ env.REGISTRY }}")) | "-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(printf '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@sha256:%s ' *)
       - name: Create manifest list and push to GHCR
+        if: steps.fresh.outputs.stale != 'true'
         working-directory: /tmp/digests
         run: |
           docker buildx imagetools create \
