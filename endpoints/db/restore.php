@@ -67,6 +67,15 @@ if (isset($_FILES['file'])) {
         }
 
         if (file_exists('../../.tmp/restore/wallos.db')) {
+            // Wait for every other request and cron job to let go of the database,
+            // and keep new ones out until the swap and migrations are done
+            if (!wallos_db_lock_exclusive('../../db')) {
+                emptyRestoreFolder();
+                die(json_encode([
+                    "success" => false,
+                    "message" => "The database is busy. Try again in a moment."
+                ]));
+            }
             $db->close();
 
             // A WAL left over from the old database would be replayed onto
@@ -92,6 +101,7 @@ if (isset($_FILES['file'])) {
             ob_start();
             require_once __DIR__ . '/../../includes/run_migrations.php';
             ob_end_clean();
+            wallos_db_lock_release_exclusive();
 
             if (file_exists('../../.tmp/restore/logos/')) {
                 $dir = '../../images/uploads/logos/';

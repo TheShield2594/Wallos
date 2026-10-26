@@ -15,8 +15,9 @@ function addFolderToZip($dir, $zipArchive, $zipdir = '')
                     continue;
                 }
                 // The live database and its WAL and shared-memory files are
-                // replaced by a consistent snapshot below
-                if ($zipdir === '' && preg_match('/^wallos\.db(-wal|-shm|-journal)?$/', $file)) {
+                // replaced by a consistent snapshot below; the lock file
+                // belongs to this install only
+                if ($zipdir === '' && preg_match('/^wallos\.(db(-wal|-shm|-journal)?|lock)$/', $file)) {
                     continue;
                 }
                 //If it's a folder, run the function again!

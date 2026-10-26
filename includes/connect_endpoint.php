@@ -1,6 +1,16 @@
 <?php
 
 $databaseFile = '../../db/wallos.db';
+
+require_once __DIR__ . '/db_lock.php';
+if (!wallos_db_lock_shared(dirname($databaseFile))) {
+    http_response_code(503);
+    die(json_encode([
+        "success" => false,
+        "message" => "The database is being restored. Try again in a moment."
+    ]));
+}
+
 $db = new SQLite3($databaseFile);
 $db->busyTimeout(5000);
 // WAL lets readers carry on while a write is in progress; in the default
