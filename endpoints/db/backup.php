@@ -14,6 +14,11 @@ function addFolderToZip($dir, $zipArchive, $zipdir = '')
                 if ($file == "." || $file == "..") {
                     continue;
                 }
+                // The live database and its WAL and shared-memory files are
+                // replaced by a consistent snapshot below
+                if ($zipdir === '' && preg_match('/^wallos\.db(-wal|-shm|-journal)?$/', $file)) {
+                    continue;
+                }
                 //If it's a folder, run the function again!
                 if (is_dir($dir . $file)) {
                     $newdir = $dir . $file . '/';
@@ -55,10 +60,35 @@ if ($zip->open($zipname, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== TRUE) {
     ]));
 }
 
+// Copy the database with SQLite's online backup rather than the live file:
+// it includes changes still in the WAL and can't catch a write half-done.
+$snapshotFile = tempnam(sys_get_temp_dir(), 'wallos_snapshot_');
+$snapshot = $snapshotFile !== false ? new SQLite3($snapshotFile) : null;
+$snapshotTaken = $snapshot !== null && $db->backup($snapshot);
+if ($snapshot !== null) {
+    $snapshot->close();
+}
+if (!$snapshotTaken) {
+    $zip->close();
+    @unlink($zipname);
+    if ($snapshotFile !== false) {
+        @unlink($snapshotFile);
+    }
+    die(json_encode([
+        "success" => false,
+        "message" => "Failed to copy the database for the backup"
+    ]));
+}
+
+$zip->addFile($snapshotFile, 'wallos.db');
 addFolderToZip('../../db/', $zip);
 addFolderToZip('../../images/uploads/', $zip);
 
-if ($zip->close() === false) {
+// ZipArchive reads added files when it closes, so the snapshot goes after
+$zipClosed = $zip->close();
+@unlink($snapshotFile);
+
+if ($zipClosed === false) {
     @unlink($zipname);
     die(json_encode([
         "success" => false,

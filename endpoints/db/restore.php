@@ -69,6 +69,19 @@ if (isset($_FILES['file'])) {
         if (file_exists('../../.tmp/restore/wallos.db')) {
             $db->close();
 
+            // A WAL left over from the old database would be replayed onto
+            // the restored one and corrupt it. Removed first, so a failure
+            // stops the restore while the old database is still in place.
+            foreach (['-wal', '-shm'] as $suffix) {
+                if (file_exists('../../db/wallos.db' . $suffix) && !unlink('../../db/wallos.db' . $suffix)) {
+                    emptyRestoreFolder();
+                    die(json_encode([
+                        "success" => false,
+                        "message" => "Failed to remove the existing database's wallos.db" . $suffix
+                    ]));
+                }
+            }
+
             if (file_exists('../../db/wallos.db')) {
                 unlink('../../db/wallos.db');
             }
