@@ -42,7 +42,9 @@ while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
         'Category' => str_replace(',', ' ', $categories[$row['category_id']]['name'] ?? ''),
         'Payment Method' => str_replace(',', ' ', $payment_methods[$row['payment_method_id']]['name'] ?? ''),
         'Paid By' => str_replace(',', ' ', $members[$row['payer_user_id']]['name'] ?? ''),
-        'Price' => ($currencies[$row['currency_id']]['symbol'] ?? '') . $row['price'],
+        // Amount and currency are separate so spreadsheets read Price as a number
+        'Price' => (float) $row['price'],
+        'Currency' => $currencies[$row['currency_id']]['code'] ?? '',
         'Notes' => str_replace(',', ' ', $row['notes'] ?? ''),
         'URL' => $row['url'],
         'State' => $row['inactive'] ? 'Disabled' : 'Enabled',

@@ -345,7 +345,9 @@ function exportAsCsv() {
                 const csv = subscriptions.map(subscription => Object.values(subscription).map(csvField).join(',')).join('\n');
                 const csvWithHeader = header + '\n' + csv;
                 const element = document.createElement('a');
-                element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(csvWithHeader));
+                // The BOM makes Excel read the file as UTF-8 instead of
+                // Windows-1252, which otherwise turns "£" into "Â£".
+                element.setAttribute('href', 'data:text/csv;charset=utf-8,' + encodeURIComponent('\uFEFF' + csvWithHeader));
                 element.setAttribute('download', 'subscriptions.csv');
                 element.style.display = 'none';
                 document.body.appendChild(element);
