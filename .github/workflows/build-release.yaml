@@ -165,6 +165,11 @@ jobs:
       DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
     needs: [release, build]
     if: github.event_name != 'pull_request'
+    # Publish one run per branch at a time, so the head check below and the
+    # pushes after it can't interleave with another run's.
+    concurrency:
+      group: publish-${{ github.ref }}
+      cancel-in-progress: false
     steps:
       - name: Download digests
         uses: actions/download-artifact@v4
@@ -208,31 +213,37 @@ jobs:
           tags: ${{ needs.release.outputs.tag_patterns }}
       # Overlapping runs on main (e.g. the weekly rebuild and a push) can finish
       # out of order. Only the run for main's current head publishes :main, so
-      # an older run can't overwrite a newer image. Releases always publish.
+      # an older run can't overwrite a newer image. Other tags, such as a
+      # release's version tag, are still published.
       - name: Check this run is for main's current head
         id: fresh
-        if: github.ref == 'refs/heads/main' && needs.release.outputs.release_created != 'true'
+        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           head=$(gh api "repos/${{ github.repository }}/commits/main" --jq .sha)
           if [ "$head" != "$GITHUB_SHA" ]; then
-            echo "main is now at $head, not $GITHUB_SHA; skipping publication."
+            echo "main is now at $head, not $GITHUB_SHA; not publishing :main."
             echo "stale=true" >> "$GITHUB_OUTPUT"
           fi
       - name: Create manifest list and push to Docker Hub
-        if: env.IMAGE_NAME != '' && steps.fresh.outputs.stale != 'true'
+        if: env.IMAGE_NAME != ''
         working-directory: /tmp/digests
+        env:
+          STALE: ${{ steps.fresh.outputs.stale }}
         run: |
-          docker buildx imagetools create \
-            $(jq -cr '.tags | map(select(startswith("${{ env.REGISTRY }}")) | "-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+          tags=$(jq -cr --arg stale "$STALE" '.tags | map(select(startswith("${{ env.REGISTRY }}")) | select($stale != "true" or (endswith(":main") | not)) | "-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          if [ -z "$tags" ]; then echo "No tags to publish."; exit 0; fi
+          docker buildx imagetools create $tags \
             $(printf '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@sha256:%s ' *)
       - name: Create manifest list and push to GHCR
-        if: steps.fresh.outputs.stale != 'true'
         working-directory: /tmp/digests
+        env:
+          STALE: ${{ steps.fresh.outputs.stale }}
         run: |
-          docker buildx imagetools create \
-            $(jq -cr '.tags | map(select(startswith("ghcr.io")) | "-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+          tags=$(jq -cr --arg stale "$STALE" '.tags | map(select(startswith("ghcr.io")) | select($stale != "true" or (endswith(":main") | not)) | "-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          if [ -z "$tags" ]; then echo "No tags to publish."; exit 0; fi
+          docker buildx imagetools create $tags \
             $(printf '${{ env.GHCR_IMAGE }}@sha256:%s ' *)
       - name: Send notification to Discord
         if: needs.release.outputs.release_created == 'true' && env.DISCORD_WEBHOOK != ''
