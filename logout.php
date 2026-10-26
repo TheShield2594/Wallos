@@ -19,6 +19,7 @@ if (isset($_SESSION['from_oidc']) && $_SESSION['from_oidc'] === true) {
     $oidcConfiguration = wallos_get_effective_oidc_configuration($db);
     $oidcSettings = $oidcConfiguration['settings'];
     $logoutUrl = $oidcSettings['logout_url'] ?? '';
+    $oidcIdToken = $_SESSION['oidc_id_token'] ?? '';
 }
 
 // get token from cookie to remove from DB
@@ -56,8 +57,19 @@ setcookie('wallos_login', '', $cookieExpire);
 $db->close();
 
 if ($logoutOIDC && !empty($logoutUrl)) {
-    $returnTo = urlencode($oidcSettings['redirect_url'] ?? '');
-    header("Location: $logoutUrl?post_logout_redirect_uri=$returnTo");
+    // Keycloak, Authentik and others only honor post_logout_redirect_uri
+    // (or skip their confirmation page) when id_token_hint or client_id is sent.
+    $logoutParams = [
+        'post_logout_redirect_uri' => $oidcSettings['redirect_url'] ?? '',
+    ];
+    if (!empty($oidcSettings['client_id'])) {
+        $logoutParams['client_id'] = $oidcSettings['client_id'];
+    }
+    if (is_string($oidcIdToken) && $oidcIdToken !== '') {
+        $logoutParams['id_token_hint'] = $oidcIdToken;
+    }
+    $separator = strpos($logoutUrl, '?') === false ? '?' : '&';
+    header('Location: ' . $logoutUrl . $separator . http_build_query($logoutParams));
     exit();
 }
 
