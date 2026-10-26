@@ -3,6 +3,8 @@
 // Requires stats_calculations.php to have run first ($subscriptions, $db, $userId, $userData, $i18n, $lang).
 // All monetary values are converted to the main currency. Lifetime figures assume current prices.
 
+require_once __DIR__ . '/price_histogram.php';
+
 $monthLabelFormatter = null;
 try {
     $monthLabelFormatter = new IntlDateFormatter($lang, IntlDateFormatter::SHORT, IntlDateFormatter::NONE, null, null, 'MMM yy');
@@ -199,25 +201,7 @@ foreach ($currencySpend as $currencyCode => $spend) {
 usort($currencyDataPoints, fn($a, $b) => $b['y'] <=> $a['y']);
 $showCurrencyGraph = count($currencyDataPoints) > 1;
 
-$histogramBoundaries = [5, 10, 20, 50];
-$histogramCounts = array_fill(0, count($histogramBoundaries) + 1, 0);
-foreach ($activeMonthlyPrices as $monthlyPrice) {
-    $bucketIndex = count($histogramBoundaries);
-    foreach ($histogramBoundaries as $index => $boundary) {
-        if ($monthlyPrice < $boundary) {
-            $bucketIndex = $index;
-            break;
-        }
-    }
-    $histogramCounts[$bucketIndex]++;
-}
-$histogramDataPoints = [];
-$previousBoundary = 0;
-foreach ($histogramBoundaries as $index => $boundary) {
-    $histogramDataPoints[] = ['label' => "{$previousBoundary}–{$boundary}", 'y' => $histogramCounts[$index]];
-    $previousBoundary = $boundary;
-}
-$histogramDataPoints[] = ['label' => "{$previousBoundary}+", 'y' => $histogramCounts[count($histogramBoundaries)]];
+$histogramDataPoints = wallos_price_histogram_data_points($activeMonthlyPrices);
 $showHistogramGraph = count($activeMonthlyPrices) >= 3;
 
 ksort($newSubscriptionsPerYear);
