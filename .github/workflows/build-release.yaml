@@ -6,6 +6,11 @@ on:
   pull_request:
     branches:
       - main
+  # Rebuild weekly so the image picks up Alpine security fixes even when
+  # nothing in the repository changes.
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
 permissions:
   contents: write
   pull-requests: write
@@ -130,6 +135,10 @@ jobs:
           context: .
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Always re-pull the base image and rerun the final apk upgrade layer.
+          pull: true
+          build-args: |
+            APK_CACHE_BUST=${{ github.run_id }}-${{ github.run_attempt }}
           outputs: type=image,"name=${{ steps.images.outputs.csv }}",push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
           # Scope cache per platform to prevent architecture-mismatched layers
           cache-from: type=gha,scope=${{ github.workflow }}-${{ matrix.platform }}
