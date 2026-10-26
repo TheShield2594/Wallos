@@ -26,11 +26,24 @@ if (isset($_GET['code']) && isset($_GET['state'])) {
     ) {
         unset($_SESSION['oidc_state']);
         $db->close();
-        header("Location: login.php?error=oidc_invalid_state");
+
+        // A retried or duplicate callback (browser retry, prefetch) arrives
+        // after the first request already consumed the state. If that first
+        // request signed the user in, send them on instead of showing an error.
+        if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+            header("Location: .");
+        } else {
+            header("Location: login.php?error=oidc_invalid_state");
+        }
         exit();
     }
 
+    // Consume the state and write the session back right away. The token
+    // exchange below is slow; without this, a retried callback still sees the
+    // state, redeems the same code a second time and the IdP rejects it.
     unset($_SESSION['oidc_state']);
+    session_write_close();
+    session_start();
 
     require_once 'includes/oidc/handle_oidc_callback.php';
 
@@ -78,4 +91,4 @@ if (isset($_GET['code']) && isset($_GET['state'])) {
 }
 
 
-?>
+?>
