@@ -88,7 +88,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if (file_exists('../../.tmp/restore/wallos.db')) {
                 // Wait for every other request and cron job to let go of the database,
-                // and keep new ones out until the swap and migrations are done
+                // and keep new ones out until the swap and migrations are done. The
+                // connection is closed first: upgrading the lock drops the shared one
+                // while it waits, and nothing would cover a connection left open.
+                $db->close();
                 if (!wallos_db_lock_exclusive('../../db')) {
                     emptyRestoreFolder();
                     die(json_encode([
@@ -96,7 +99,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         "message" => "The database is busy. Try again in a moment."
                     ]));
                 }
-                $db->close();
 
                 // A WAL left over from the old database would be replayed
                 // onto the imported one and corrupt it. Removed first, so a

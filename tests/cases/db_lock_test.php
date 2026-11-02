@@ -89,3 +89,26 @@ wallos_test('a lock file this user cannot write is still usable', function () {
     assert_true(wallos_db_lock_open($directory) !== false, 'falls back to a read-only handle, which flock() accepts');
     db_lock_test_cleanup($directory);
 });
+
+wallos_test('two restores at once take turns instead of swapping together', function () {
+    $directory = db_lock_test_directory();
+
+    // Both restore requests connected before either asked for the swap
+    $secondRestore = wallos_db_lock_open($directory);
+    flock($secondRestore, LOCK_SH);
+    assert_true(wallos_db_lock_shared($directory, 1), 'the first restore connects');
+
+    // Upgrading drops each one's shared lock while it waits, so neither
+    // gets in while the other still holds the database
+    assert_same(false, flock($secondRestore, LOCK_EX | LOCK_NB), 'the second restore cannot swap while the first is connected');
+    assert_true(wallos_db_lock_exclusive($directory, 1), 'the first restore takes the database once the second let go');
+    assert_same(false, flock($secondRestore, LOCK_EX | LOCK_NB), 'the second restore waits through the first swap');
+
+    // The first restore finishes and its request ends
+    fclose($GLOBALS['wallos_db_lock']);
+    unset($GLOBALS['wallos_db_lock']);
+    assert_true(flock($secondRestore, LOCK_EX | LOCK_NB), 'the second restore swaps after the first is done');
+
+    fclose($secondRestore);
+    db_lock_test_cleanup($directory);
+});
