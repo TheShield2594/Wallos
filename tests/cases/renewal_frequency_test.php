@@ -30,6 +30,7 @@ function renewal_cron_sandbox()
         copy(WALLOS_ROOT . '/endpoints/cronjobs/' . $file, $root . '/endpoints/cronjobs/' . $file);
     }
     copy(WALLOS_ROOT . '/includes/connect_endpoint_crontabs.php', $root . '/includes/connect_endpoint_crontabs.php');
+    copy(WALLOS_ROOT . '/includes/db_lock.php', $root . '/includes/db_lock.php');
     copy(WALLOS_ROOT . '/includes/renewal_dates.php', $root . '/includes/renewal_dates.php');
     foreach (glob(WALLOS_ROOT . '/includes/i18n/*.php') as $file) {
         copy($file, $root . '/includes/i18n/' . basename($file));
