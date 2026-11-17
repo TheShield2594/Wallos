@@ -238,90 +238,134 @@ function wallos_shared_subscriptions(SQLite3 $db, $userId, $activeOnly = false)
         $row['shared_owner_id'] = (int) $row['user_id'];
         $row['access'] = $access;
         $row['shared_original_price'] = (float) $row['price'];
-        $rows[] = wallos_household_localize_currency($db, $row, $viewerCurrencies);
+        $localized = wallos_household_localize_currency($db, $row, $viewerCurrencies, $userId);
+        if ($localized !== null) {
+            $rows[] = $localized;
+        }
     }
 
     return $rows;
 }
 
 /**
- * @return array ['by_code' => code => id, 'main_id' => int, 'main_code' => string]
+ * @return array ['by_code' => code => id, 'rate_by_code' => code => rate, 'main_id' => int, 'main_code' => string]
  */
 function wallos_household_viewer_currencies(SQLite3 $db, $userId)
 {
     $byCode = [];
-    $stmt = $db->prepare('SELECT id, code FROM currencies WHERE user_id = :userId');
+    $rateByCode = [];
+    $stmt = $db->prepare('SELECT id, code, rate FROM currencies WHERE user_id = :userId');
     $stmt->bindValue(':userId', (int) $userId, SQLITE3_INTEGER);
     $result = $stmt->execute();
     while ($result && ($row = $result->fetchArray(SQLITE3_ASSOC))) {
         $byCode[$row['code']] = (int) $row['id'];
+        $rateByCode[$row['code']] = (float) $row['rate'];
     }
     $stmt = $db->prepare('SELECT u.main_currency, c.code FROM user u LEFT JOIN currencies c ON c.id = u.main_currency WHERE u.id = :userId');
     $stmt->bindValue(':userId', (int) $userId, SQLITE3_INTEGER);
     $result = $stmt->execute();
     $main = $result ? $result->fetchArray(SQLITE3_ASSOC) : false;
 
-    return ['by_code' => $byCode, 'main_id' => (int) ($main['main_currency'] ?? 0), 'main_code' => $main['code'] ?? null];
+    return ['by_code' => $byCode, 'rate_by_code' => $rateByCode, 'main_id' => (int) ($main['main_currency'] ?? 0), 'main_code' => $main['code'] ?? null];
 }
 
 /**
- * Points a shared row at the viewer's currency with the owner's currency
- * code. Without one, the price is converted to the owner's main currency
- * and, failing that too, shown as it is in the viewer's main currency.
+ * Where an amount in one of the owner's currencies lands for a viewer.
+ *
+ *   - The viewer has a currency of the same code: that one, unchanged.
+ *   - Otherwise the amount is converted, with the owner's rates, into the
+ *     owner's main currency; when the viewer has that code it is shown there.
+ *   - Otherwise it goes on, through a currency code both accounts hold, into
+ *     the viewer's main currency (rates are units per main currency, all from
+ *     the same exchange-rate source).
+ *
+ * @return array{currency_id: int, factor: float}|null null when there is no
+ *         conversion path: the row is then left out rather than mislabelled
  */
-function wallos_household_localize_currency(SQLite3 $db, array $row, array $viewerCurrencies)
+function wallos_household_currency_mapping(SQLite3 $db, $viewerId, $ownerCurrencyId, ?array $viewerCurrencies = null)
 {
-    $code = $row['shared_currency_code'] ?? null;
-    if ($code !== null && isset($viewerCurrencies['by_code'][$code])) {
-        $row['currency_id'] = $viewerCurrencies['by_code'][$code];
-        return $row;
+    $viewerCurrencies = $viewerCurrencies ?? wallos_household_viewer_currencies($db, $viewerId);
+    $stmt = $db->prepare('SELECT code, rate, user_id FROM currencies WHERE id = :id');
+    $stmt->bindValue(':id', (int) $ownerCurrencyId, SQLITE3_INTEGER);
+    $result = $stmt->execute();
+    $currency = $result ? $result->fetchArray(SQLITE3_ASSOC) : false;
+    if ($currency === false) {
+        return null;
+    }
+    if (isset($viewerCurrencies['by_code'][$currency['code']])) {
+        return ['currency_id' => $viewerCurrencies['by_code'][$currency['code']], 'factor' => 1.0];
+    }
+    $rate = (float) $currency['rate'];
+    if ($rate <= 0) {
+        return null;
     }
 
-    // Convert into the owner's main currency (rates are units per main currency).
-    $rate = (float) ($row['shared_currency_rate'] ?? 0);
+    // The owner's rates by code, and their main currency's code.
+    $ownerRates = [];
+    $stmt = $db->prepare('SELECT code, rate FROM currencies WHERE user_id = :ownerId');
+    $stmt->bindValue(':ownerId', (int) $currency['user_id'], SQLITE3_INTEGER);
+    $result = $stmt->execute();
+    while ($result && ($row = $result->fetchArray(SQLITE3_ASSOC))) {
+        $ownerRates[$row['code']] = (float) $row['rate'];
+    }
     $stmt = $db->prepare('SELECT c.code FROM user u JOIN currencies c ON c.id = u.main_currency WHERE u.id = :ownerId');
-    $stmt->bindValue(':ownerId', (int) $row['user_id'], SQLITE3_INTEGER);
+    $stmt->bindValue(':ownerId', (int) $currency['user_id'], SQLITE3_INTEGER);
     $result = $stmt->execute();
     $ownerMain = $result ? $result->fetchArray(SQLITE3_ASSOC) : false;
     $ownerMainCode = $ownerMain['code'] ?? null;
-    $factor = $rate > 0 ? 1 / $rate : 1;
-    foreach (['price', 'intro_price'] as $priceColumn) {
-        if (isset($row[$priceColumn]) && $row[$priceColumn] !== null) {
-            $row[$priceColumn] = (float) $row[$priceColumn] * $factor;
+
+    $toOwnerMain = 1 / $rate;
+    if ($ownerMainCode !== null && isset($viewerCurrencies['by_code'][$ownerMainCode])) {
+        return ['currency_id' => $viewerCurrencies['by_code'][$ownerMainCode], 'factor' => $toOwnerMain];
+    }
+
+    // Through a code both hold, the viewer's main currency first.
+    $candidates = array_unique(array_filter(array_merge([$viewerCurrencies['main_code']], array_keys($viewerCurrencies['rate_by_code']))));
+    foreach ($candidates as $code) {
+        $ownerRate = $ownerRates[$code] ?? 0;
+        $viewerRate = $viewerCurrencies['rate_by_code'][$code] ?? 0;
+        if ($ownerRate > 0 && $viewerRate > 0) {
+            return ['currency_id' => $viewerCurrencies['main_id'], 'factor' => $toOwnerMain * $ownerRate / $viewerRate];
         }
     }
-    $row['currency_id'] = $ownerMainCode !== null && isset($viewerCurrencies['by_code'][$ownerMainCode])
-        ? $viewerCurrencies['by_code'][$ownerMainCode]
-        : $viewerCurrencies['main_id'];
+
+    return null;
+}
+
+/**
+ * Shows a shared row in the viewer's currencies (see
+ * wallos_household_currency_mapping()).
+ *
+ * @return array|null null when its amount cannot be expressed for the viewer
+ */
+function wallos_household_localize_currency(SQLite3 $db, array $row, array $viewerCurrencies, $viewerId = null)
+{
+    $mapping = wallos_household_currency_mapping($db, $viewerId, $row['currency_id'], $viewerCurrencies);
+    if ($mapping === null) {
+        return null;
+    }
+    foreach (['price', 'intro_price'] as $priceColumn) {
+        if (isset($row[$priceColumn]) && $row[$priceColumn] !== null) {
+            $row[$priceColumn] = (float) $row[$priceColumn] * $mapping['factor'];
+        }
+    }
+    $row['currency_id'] = $mapping['currency_id'];
 
     return $row;
 }
 
 /**
- * How an amount in the owner's currency is shown to a viewer: 1.0 when the
- * viewer has a currency of the same code (shown as it is), otherwise the
- * factor that converts it into the owner's main currency (see
- * wallos_household_localize_currency()). Dividing by it turns an amount the
- * viewer entered back into the owner's currency.
+ * How an amount in the owner's currency is shown to a viewer: the factor of
+ * wallos_household_currency_mapping() (1.0 for the same code). Dividing by it
+ * turns an amount the viewer entered back into the owner's currency.
  *
  * @return float
  */
 function wallos_household_display_factor(SQLite3 $db, $viewerId, $ownerCurrencyId)
 {
-    $stmt = $db->prepare('SELECT code, rate FROM currencies WHERE id = :id');
-    $stmt->bindValue(':id', (int) $ownerCurrencyId, SQLITE3_INTEGER);
-    $result = $stmt->execute();
-    $currency = $result ? $result->fetchArray(SQLITE3_ASSOC) : false;
-    if ($currency === false) {
-        return 1.0;
-    }
-    $viewerCurrencies = wallos_household_viewer_currencies($db, $viewerId);
-    if (isset($viewerCurrencies['by_code'][$currency['code']])) {
-        return 1.0;
-    }
-    $rate = (float) $currency['rate'];
+    $mapping = wallos_household_currency_mapping($db, $viewerId, $ownerCurrencyId);
 
-    return $rate > 0 ? 1 / $rate : 1.0;
+    return $mapping === null || $mapping['factor'] <= 0 ? 1.0 : $mapping['factor'];
 }
 
 /**

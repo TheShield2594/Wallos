@@ -191,6 +191,27 @@ wallos_test('households: shared rows show in the viewer currency of the same cod
     $db->close();
 });
 
+wallos_test('households: a viewer without the owner currencies gets the amount converted into their own main currency', function () {
+    $db = households_fixture();
+    $shared = households_add_subscription($db, 1, 'Streaming', true);
+    // alice: EUR (main), USD 1.1, GBP 0.85; the subscription costs 11 USD = 10 EUR.
+    $db->exec('UPDATE subscriptions SET price = 11, currency_id = ' . wallos_test_currency_id(1, 1) . " WHERE id = $shared");
+    $db->exec("INSERT INTO currencies (id, name, symbol, code, rate, user_id) VALUES (9800, 'Pound', 'GBP', 'GBP', 0.85, 1)");
+    // bob holds only GBP (main) and JPY: neither USD nor EUR.
+    $db->exec('DELETE FROM currencies WHERE user_id = 2');
+    $db->exec("INSERT INTO currencies (id, name, symbol, code, rate, user_id) VALUES (9801, 'Pound', 'GBP', 'GBP', 1, 2), (9802, 'Yen', 'JPY', 'JPY', 190, 2)");
+    $db->exec('UPDATE user SET main_currency = 9801 WHERE id = 2');
+
+    $row = wallos_shared_subscriptions($db, 2)[0];
+    assert_same(9801, $row['currency_id'], "shown in bob's main currency");
+    assert_equals(8.5, round($row['price'], 6), '11 USD = 10 EUR = 8.50 GBP, not 10 relabelled as GBP');
+
+    // No currency in common at all: the row is left out rather than mislabelled.
+    $db->exec('DELETE FROM currencies WHERE id = 9800');
+    assert_same([], wallos_shared_subscriptions($db, 2), 'no conversion path, no row');
+    $db->close();
+});
+
 wallos_test('households: every subscription endpoint checks access through the shared helper', function () {
     foreach ([
         'endpoints/subscription/get.php' => 'wallos_load_accessible_subscription(',
