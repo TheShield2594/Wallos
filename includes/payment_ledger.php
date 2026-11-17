@@ -409,12 +409,14 @@ function wallos_undo_paid_locked(SQLite3 $db, array $subscription, $dueDate)
  * Whether saving a subscription keeps its stored payments_made instead of
  * counting the scheduled dates since its start date.
  *
- * Counting is for a subscription with no payment history yet: a new one, or
- * one whose dates are still being set up. Once a payment is recorded, the
- * stored count is the authority. Payments may have restarted the cycle
- * (even if that option was turned off since), so the history need not sit
- * on any schedule that could be counted. The same holds when the schedule
- * was not changed at all.
+ * Counting is for setting a subscription up: a new one, or an edit that
+ * redefines where its schedule starts (start date, cycle or frequency) while
+ * no payment has been recorded and payments do not restart the cycle.
+ * Everything else keeps the stored count, which is the authority once it
+ * exists: moving next_payment, an unchanged schedule, a recorded payment
+ * (even one deleted from the history since: deleting a history row does not
+ * undo a payment), and payments that restart the cycle, whose history need
+ * not sit on any schedule that could be counted.
  *
  * @param array|null $existing the stored row, or null for a new subscription
  * @param array      $new      next_payment, start_date, cycle and frequency being saved
@@ -428,11 +430,10 @@ function wallos_keep_payments_made_on_save(SQLite3 $db, $existing, array $new)
     if ((int) ($existing['renew_from_action'] ?? 0) === 1) {
         return true;
     }
-    $unchanged = (string) $existing['next_payment'] === (string) $new['next_payment']
-        && (string) $existing['start_date'] === (string) $new['start_date']
-        && (int) $existing['cycle'] === (int) $new['cycle']
-        && (int) $existing['frequency'] === (int) $new['frequency'];
-    if ($unchanged) {
+    $redefined = (string) $existing['start_date'] !== (string) $new['start_date']
+        || (int) $existing['cycle'] !== (int) $new['cycle']
+        || (int) $existing['frequency'] !== (int) $new['frequency'];
+    if (!$redefined) {
         return true;
     }
     $history = $db->prepare('SELECT 1 FROM subscription_payments WHERE subscription_id = :id LIMIT 1');

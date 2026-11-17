@@ -419,10 +419,20 @@ wallos_test('review fixes: once payments are recorded, edits keep the stored cou
     assert_same(1, $fields['payments_made'], 'still one payment made');
     assert_same('2026-05-20', $fields['end_date'], 'two left: Apr 20 and May 20');
 
-    // Without any history, a changed schedule is counted from the start date.
+    // Deleting the history row afterwards does not undo the payment: moving
+    // the next payment still keeps the count.
+    foreach (ledger_rows($db, $plan) as $row) {
+        wallos_ledger_delete($db, 1, $row['id']);
+    }
+    assert_same(0, count(ledger_rows($db, $plan)), 'the history is empty');
+    assert_true(wallos_keep_payments_made_on_save($db, $plan, $edit), 'moving next_payment never recounts');
+
+    // Without any history, redefining where the schedule starts is counted.
     $fresh = ledger_subscription($db, ['next_payment' => '2026-03-15', 'start_date' => '2026-01-15']);
-    assert_true(!wallos_keep_payments_made_on_save($db, $fresh, ['next_payment' => '2026-04-15', 'start_date' => '2026-01-15', 'cycle' => 3, 'frequency' => 1]),
-        'no history: the dates are counted');
+    assert_true(!wallos_keep_payments_made_on_save($db, $fresh, ['next_payment' => '2026-03-15', 'start_date' => '2025-12-15', 'cycle' => 3, 'frequency' => 1]),
+        'no history and a new start date: the dates are counted');
+    assert_true(wallos_keep_payments_made_on_save($db, $fresh, ['next_payment' => '2026-04-15', 'start_date' => '2026-01-15', 'cycle' => 3, 'frequency' => 1]),
+        'moving next_payment alone keeps the count');
     assert_true(wallos_keep_payments_made_on_save($db, $fresh, ['next_payment' => '2026-03-15', 'start_date' => '2026-01-15', 'cycle' => 3, 'frequency' => 1]),
         'an unchanged schedule keeps the count');
     assert_true(!wallos_keep_payments_made_on_save($db, null, $edit), 'a new subscription is counted');
