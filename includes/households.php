@@ -383,7 +383,7 @@ function wallos_household_create(SQLite3 $db, $userId, $name)
     // cannot make the account a member and an owner at once (the accept
     // refuses an account that owns a household; see wallos_household_respond()).
     $outcome = ['success' => false, 'error' => 'write_failed'];
-    wallos_household_transaction($db, function () use ($db, $userId, $name, &$outcome) {
+    $committed = wallos_household_transaction($db, function () use ($db, $userId, $name, &$outcome) {
         $stmt = $db->prepare("INSERT INTO households (name, owner_user_id)
             SELECT :name, :ownerId
             WHERE NOT EXISTS (SELECT 1 FROM households WHERE owner_user_id = :ownerId)
@@ -401,13 +401,19 @@ function wallos_household_create(SQLite3 $db, $userId, $name)
         // Invites the owner had pending are void now.
         $stmt = $db->prepare("DELETE FROM household_members WHERE user_id = :userId AND status = 'pending'");
         $stmt->bindValue(':userId', (int) $userId, SQLITE3_INTEGER);
-        if ($stmt->execute() === false) {
+        if (@$stmt->execute() === false) {
             return false;
         }
         $outcome = ['success' => true, 'household_id' => $householdId];
 
         return true;
     });
+
+    // Success only once the transaction committed; a failed commit rolled
+    // the household back.
+    if (!$committed && $outcome['success']) {
+        return ['success' => false, 'error' => 'write_failed'];
+    }
 
     return $outcome;
 }
@@ -519,15 +525,24 @@ function wallos_household_set_role(SQLite3 $db, $ownerId, $memberUserId, $role)
  * Takes an account out of a household and makes its subscriptions shared
  * there private again.
  */
+/**
+ * @return string 'removed', 'not_member' (nothing to remove) or 'write_failed'
+ *                (nothing was changed)
+ */
 function wallos_household_drop_member(SQLite3 $db, $householdId, $memberUserId)
 {
     // One transaction: a member is never removed while their subscriptions
     // still name the household (a later rejoin would share them again).
-    return wallos_household_transaction($db, function () use ($db, $householdId, $memberUserId) {
+    $status = 'write_failed';
+    $committed = wallos_household_transaction($db, function () use ($db, $householdId, $memberUserId, &$status) {
         $stmt = $db->prepare('DELETE FROM household_members WHERE household_id = :householdId AND user_id = :userId');
         $stmt->bindValue(':householdId', (int) $householdId, SQLITE3_INTEGER);
         $stmt->bindValue(':userId', (int) $memberUserId, SQLITE3_INTEGER);
-        if ($stmt->execute() === false || $db->changes() === 0) {
+        if (@$stmt->execute() === false) {
+            return false;
+        }
+        if ($db->changes() === 0) {
+            $status = 'not_member';
             return false;
         }
 
@@ -535,8 +550,13 @@ function wallos_household_drop_member(SQLite3 $db, $householdId, $memberUserId)
         $stmt->bindValue(':userId', (int) $memberUserId, SQLITE3_INTEGER);
         $stmt->bindValue(':householdId', (int) $householdId, SQLITE3_INTEGER);
 
-        return $stmt->execute() !== false;
+        return @$stmt->execute() !== false;
     });
+    if ($committed) {
+        return 'removed';
+    }
+
+    return $status === 'not_member' ? 'not_member' : 'write_failed';
 }
 
 /**
@@ -575,8 +595,9 @@ function wallos_household_remove_member(SQLite3 $db, $ownerId, $memberUserId)
         return ['success' => false, 'error' => 'not_owner'];
     }
 
-    return wallos_household_drop_member($db, $membership['id'], $memberUserId)
-        ? ['success' => true] : ['success' => false, 'error' => 'not_member'];
+    $status = wallos_household_drop_member($db, $membership['id'], $memberUserId);
+
+    return $status === 'removed' ? ['success' => true] : ['success' => false, 'error' => $status];
 }
 
 /**
@@ -593,8 +614,9 @@ function wallos_household_leave(SQLite3 $db, $userId)
     if ($membership['role'] === 'owner') {
         return ['success' => false, 'error' => 'owner_cannot_leave'];
     }
-    return wallos_household_drop_member($db, $membership['id'], $userId)
-        ? ['success' => true] : ['success' => false, 'error' => 'write_failed'];
+    $status = wallos_household_drop_member($db, $membership['id'], $userId);
+
+    return $status === 'removed' ? ['success' => true] : ['success' => false, 'error' => $status];
 }
 
 /**

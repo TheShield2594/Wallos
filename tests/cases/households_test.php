@@ -163,6 +163,41 @@ wallos_test('households: creating a household and accepting an invite cannot bot
     $db->close();
 });
 
+wallos_test('households: a failed commit on create reports a failure and leaves nothing behind', function () {
+    $db = households_fixture();
+    // A deferred foreign-key violation passes every statement and fails only
+    // at COMMIT, the path the create must not report as a success.
+    $db->exec('PRAGMA foreign_keys = ON');
+    $db->exec('CREATE TABLE commit_guard (household_id INTEGER REFERENCES households(id) DEFERRABLE INITIALLY DEFERRED)');
+    $db->exec('CREATE TRIGGER force_commit_failure AFTER INSERT ON households BEGIN INSERT INTO commit_guard VALUES (-1); END');
+
+    $outcome = @wallos_household_create($db, 5, 'Erin home');
+    assert_same(['success' => false, 'error' => 'write_failed'], $outcome, 'the failed commit is reported');
+    assert_same(0, $db->querySingle('SELECT COUNT(*) FROM households WHERE owner_user_id = 5'), 'no household remains');
+
+    $db->exec('DROP TRIGGER force_commit_failure');
+    assert_true(wallos_household_create($db, 5, 'Erin home')['success'], 'it works once the failure is gone');
+    assert_same('already_in_household', wallos_household_create($db, 2, 'Bob home')['error'] ?? null, 'already_in_household is still reported');
+    $db->close();
+});
+
+wallos_test('households: a failed sharing reset rolls the removal back and is reported as a write failure', function () {
+    $db = households_fixture();
+    $shared = households_add_subscription($db, 2, 'Spotify Family', true);
+    $householdId = wallos_household_membership($db, 1)['id'];
+    $db->exec("CREATE TRIGGER force_reset_failure BEFORE UPDATE OF shared_household_id ON subscriptions BEGIN SELECT RAISE(ABORT, 'forced'); END");
+
+    assert_same(['success' => false, 'error' => 'write_failed'], wallos_household_remove_member($db, 1, 2), 'the owner sees a write failure');
+    assert_same(['success' => false, 'error' => 'write_failed'], wallos_household_leave($db, 2), 'so does the member leaving');
+    assert_same($householdId, wallos_household_membership($db, 2)['id'] ?? null, 'bob is still a member: the removal was rolled back');
+    assert_same($householdId, $db->querySingle("SELECT shared_household_id FROM subscriptions WHERE id = $shared"), 'and his item is still shared');
+
+    $db->exec('DROP TRIGGER force_reset_failure');
+    assert_same(['success' => false, 'error' => 'not_member'], wallos_household_remove_member($db, 1, 5), 'someone not in the household is "not a member"');
+    assert_true(wallos_household_remove_member($db, 1, 2)['success'], 'without the failure the removal goes through');
+    $db->close();
+});
+
 wallos_test('households: amounts a member enters are kept in the owner currency', function () {
     $db = households_fixture();
     // alice pays in USD (rate 1.1 per EUR); bob has no USD, so he sees EUR.
