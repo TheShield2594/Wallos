@@ -324,12 +324,15 @@ function clearFilters() {
     window.location.href = 'stats.php';
 }
 // "Custom" period: shows the date range form under the toolbar.
-function toggleCustomRange() {
+function toggleCustomRange(button) {
   const form = document.getElementById("stats-custom-range");
   if (!form) {
     return;
   }
   form.classList.toggle("hide");
+  if (button) {
+    button.setAttribute("aria-expanded", form.classList.contains("hide") ? "false" : "true");
+  }
   if (!form.classList.contains("hide")) {
     const from = form.querySelector('input[name="from"]');
     if (from) {

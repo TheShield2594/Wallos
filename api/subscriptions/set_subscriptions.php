@@ -1063,11 +1063,14 @@ switch ($action) {
         $priceChangeReason = ($_POST['price_change_reason'] ?? 'tier') === 'provider' ? 'provider' : 'tier';
 
         $updated = api_save_atomically($db, function () use ($db, $stmtUpdate, $subscriptionId, $subscription, $userId, $price, $currencyId, $cycle, $frequency, $tierName, $priceChangeReason) {
+            // The price before this edit, read under the write lock so a
+            // concurrent edit can't make both record the same old price.
+            $priceBefore = wallos_price_snapshot($db, $userId, $subscriptionId) ?? $subscription;
             if ($stmtUpdate->execute() === false) {
                 return false;
             }
             // The old price goes into the price history (includes/price_changes.php).
-            $recorded = wallos_record_price_change($db, $userId, $subscriptionId, $subscription, [
+            $recorded = wallos_record_price_change($db, $userId, $subscriptionId, $priceBefore, [
                 'price' => $price,
                 'currency_id' => $currencyId,
                 'cycle' => $cycle,
@@ -1125,30 +1128,30 @@ switch ($action) {
             exit;
         }
 
-        // Delete
-        $sqlDelete = "DELETE FROM subscriptions WHERE id = :subId AND user_id = :userId";
-        $stmtDelete = $db->prepare($sqlDelete);
-        $stmtDelete->bindParam(':subId', $subscriptionId, SQLITE3_INTEGER);
-        $stmtDelete->bindParam(':userId', $userId, SQLITE3_INTEGER);
+        // Delete the row, its payment and price history and the references to
+        // it as one unit: if any part fails, nothing is deleted.
+        $deleteStatements = [
+            "DELETE FROM subscriptions WHERE id = :subId AND user_id = :userId",
+            "DELETE FROM subscription_payments WHERE subscription_id = :subId AND user_id = :userId",
+            "DELETE FROM subscription_price_changes WHERE subscription_id = :subId AND user_id = :userId",
+            "UPDATE subscriptions SET replacement_subscription_id = NULL WHERE replacement_subscription_id = :subId AND user_id = :userId",
+        ];
+        $deleted = api_save_atomically($db, function () use ($db, $deleteStatements, $subscriptionId, $userId) {
+            foreach ($deleteStatements as $query) {
+                $stmt = $db->prepare($query);
+                if ($stmt === false) {
+                    return false;
+                }
+                $stmt->bindValue(':subId', $subscriptionId, SQLITE3_INTEGER);
+                $stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
+                if ($stmt->execute() === false) {
+                    return false;
+                }
+            }
+            return (int) $subscriptionId;
+        }, fn() => true, $userId);
 
-        if ($stmtDelete->execute()) {
-            $stmtPayments = $db->prepare("DELETE FROM subscription_payments WHERE subscription_id = :subId AND user_id = :userId");
-            $stmtPayments->bindParam(':subId', $subscriptionId, SQLITE3_INTEGER);
-            $stmtPayments->bindParam(':userId', $userId, SQLITE3_INTEGER);
-            $stmtPayments->execute();
-
-            $stmtPriceChanges = $db->prepare("DELETE FROM subscription_price_changes WHERE subscription_id = :subId AND user_id = :userId");
-            $stmtPriceChanges->bindParam(':subId', $subscriptionId, SQLITE3_INTEGER);
-            $stmtPriceChanges->bindParam(':userId', $userId, SQLITE3_INTEGER);
-            $stmtPriceChanges->execute();
-
-            // Nullify replacement_subscription_id references pointing to this subscription
-            $queryCascade = "UPDATE subscriptions SET replacement_subscription_id = NULL WHERE replacement_subscription_id = :subId AND user_id = :userId";
-            $stmtCascade = $db->prepare($queryCascade);
-            $stmtCascade->bindParam(':subId', $subscriptionId, SQLITE3_INTEGER);
-            $stmtCascade->bindParam(':userId', $userId, SQLITE3_INTEGER);
-            $stmtCascade->execute();
-
+        if ($deleted !== false) {
             echo json_encode([
                 'success' => true,
                 'title' => 'Subscription deleted',

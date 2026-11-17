@@ -109,7 +109,8 @@ $actualYearOverYear = $actualLastYear > 0 ? ($actualThisYear - $actualLastYear) 
         if ($periodValue === 'custom') {
           ?>
           <button type="button" class="segmented-option<?= $isCurrentPeriod ? ' is-selected' : '' ?>" aria-pressed="<?= $isCurrentPeriod ? 'true' : 'false' ?>"
-            aria-controls="stats-custom-range" onClick="toggleCustomRange()"><?= translate($periodLabelKey, $i18n) ?></button>
+            aria-controls="stats-custom-range" aria-expanded="<?= $statsPeriod['period'] === 'custom' || $statsPeriod['error'] ? 'true' : 'false' ?>"
+            onClick="toggleCustomRange(this)"><?= translate($periodLabelKey, $i18n) ?></button>
           <?php
           continue;
         }
@@ -893,7 +894,7 @@ $actualYearOverYear = $actualLastYear > 0 ? ($actualThisYear - $actualLastYear) 
             <span><?= $providerSign ?><?= CurrencyFormatter::format(abs($priceChangeTotals['provider_monthly']), $code) ?></span>
             <div class="title"><?= translate('provider_price_changes', $i18n) ?></div>
             <?php if (abs($priceChangeTotals['provider_accrued']) >= 0.005) { ?>
-              <div class="subtitle"><?= sprintf(translate('since_changes_total', $i18n), $providerSign . CurrencyFormatter::format(abs($priceChangeTotals['provider_accrued']), $code)) ?></div>
+              <div class="subtitle"><?= sprintf(translate('since_changes_total', $i18n), ($priceChangeTotals['provider_accrued'] >= 0 ? '+' : '-') . CurrencyFormatter::format(abs($priceChangeTotals['provider_accrued']), $code)) ?></div>
             <?php } ?>
           </div>
         <?php } ?>

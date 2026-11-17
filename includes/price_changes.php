@@ -45,10 +45,13 @@ function wallos_normalize_tier_name($value)
 
 /**
  * Converts an amount between two of the user's currencies at the stored
- * rates (each rate is per unit of the main currency). A missing rate leaves
- * the amount as it is.
+ * rates (each rate is per unit of the main currency).
  *
- * @return float
+ * Unlike the display conversion, a missing or zero rate gives null rather
+ * than the unconverted amount: a history row is stored once and never
+ * recalculated, so it must not mix two currencies.
+ *
+ * @return float|null
  */
 function wallos_convert_between_currencies($amount, $fromCurrencyId, $toCurrencyId, SQLite3 $db, $userId)
 {
@@ -59,10 +62,28 @@ function wallos_convert_between_currencies($amount, $fromCurrencyId, $toCurrency
     $from = $rates[(int) $fromCurrencyId] ?? null;
     $to = $rates[(int) $toCurrencyId] ?? null;
     if (empty($from) || empty($to)) {
-        return (float) $amount;
+        return null;
     }
 
     return (float) $amount / $from * $to;
+}
+
+/**
+ * The fields of a subscription that a price change compares, read from the
+ * database. Callers read it inside their write transaction, so two edits in
+ * a row each record the price the other one left.
+ *
+ * @return array|null price, currency_id, cycle, frequency, tier_name
+ */
+function wallos_price_snapshot(SQLite3 $db, $userId, $subscriptionId)
+{
+    $stmt = $db->prepare('SELECT price, currency_id, cycle, frequency, tier_name FROM subscriptions WHERE id = :id AND user_id = :userId');
+    $stmt->bindValue(':id', (int) $subscriptionId, SQLITE3_INTEGER);
+    $stmt->bindValue(':userId', (int) $userId, SQLITE3_INTEGER);
+    $result = $stmt->execute();
+    $row = $result ? $result->fetchArray(SQLITE3_ASSOC) : false;
+
+    return $row === false ? null : $row;
 }
 
 /**
@@ -92,7 +113,8 @@ function wallos_price_changed(array $old, array $new)
  * @param array    $new       saved row: the same fields
  * @param string   $reason    'tier' or 'provider'
  * @param string   $changedAt Y-m-d
- * @param callable $convert   fn(float $amount, int $fromCurrencyId, int $toCurrencyId): float
+ * @param callable $convert   fn(float $amount, int $fromCurrencyId, int $toCurrencyId): ?float,
+ *                            null when there is no usable rate (the row then has no monthly amounts)
  * @return array|null
  */
 function wallos_price_change_row(array $old, array $new, $reason, $changedAt, callable $convert)
@@ -107,7 +129,9 @@ function wallos_price_change_row(array $old, array $new, $reason, $changedAt, ca
         (int) $old['currency_id'],
         (int) $new['currency_id']
     );
-    $newMonthly = $isOneTime ? null : wallos_price_per_month($new['cycle'], $new['frequency'], (float) $new['price']);
+    // Without a rate for both currencies the amounts cannot be compared: keep
+    // the prices, store no monthly amounts (the totals skip such rows).
+    $newMonthly = ($isOneTime || $oldMonthly === null) ? null : wallos_price_per_month($new['cycle'], $new['frequency'], (float) $new['price']);
 
     return [
         'changed_at' => $changedAt,

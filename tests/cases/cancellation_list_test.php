@@ -11,6 +11,8 @@ wallos_test('cancel-by dates are grouped this month, next month and later', func
     assert_same('later', wallos_cancel_by_bucket('2026-05-01', '2026-03-20'), 'the month after');
     assert_same('next_month', wallos_cancel_by_bucket('2027-01-15', '2026-12-20'), 'across the year');
     assert_same('none', wallos_cancel_by_bucket(null, '2026-03-20'), 'no date');
+    assert_same('passed', wallos_cancel_by_bucket('2026-03-19', '2026-03-20'), 'a passed deadline is not "no date"');
+    assert_same('this_month', wallos_cancel_by_bucket('2026-03-20', '2026-03-20'), 'today is still this month');
 });
 
 wallos_test('the dashboard window ends with next month', function () {
@@ -29,6 +31,8 @@ wallos_test('sorting by cancel-by date puts rows without one last, in their orde
     ];
     assert_same(['C', 'E', 'B', 'A', 'D'], array_column(wallos_sort_by_cancel_by($rows), 'name'), 'soonest first, stable');
     assert_true(!array_key_exists('__position', wallos_sort_by_cancel_by($rows)[0]), 'no helper field left behind');
+    $raw = [['name' => 'Later', 'raw' => '2026-05-01'], ['name' => 'Passed', 'raw' => '2026-03-01']];
+    assert_same(['Passed', 'Later'], array_column(wallos_sort_by_cancel_by($raw, 'raw'), 'name'), 'sorts on the field given');
 });
 
 wallos_test('the notification filter reads the query and matches shared rows like SQL', function () {

@@ -15,15 +15,25 @@
     reason                      'tier' (the user changed plan) or
                                 'provider' (the provider changed the price).
 
-  Safe to run twice.
+  Safe to run twice: a failed statement throws, so the runner does not
+  record the migration and the next run finishes it.
 */
 
+$migrate = function ($sql) use ($db) {
+    if ($db->exec($sql) === false) {
+        throw new RuntimeException('Migration 000068 failed: ' . $db->lastErrorMsg());
+    }
+};
+
 $columnQuery = $db->query("SELECT * FROM pragma_table_info('subscriptions') WHERE name = 'tier_name'");
+if ($columnQuery === false) {
+    throw new RuntimeException('Migration 000068 failed: ' . $db->lastErrorMsg());
+}
 if ($columnQuery->fetchArray(SQLITE3_ASSOC) === false) {
-    $db->exec("ALTER TABLE subscriptions ADD COLUMN tier_name TEXT DEFAULT NULL");
+    $migrate("ALTER TABLE subscriptions ADD COLUMN tier_name TEXT DEFAULT NULL");
 }
 
-$db->exec("CREATE TABLE IF NOT EXISTS subscription_price_changes (
+$migrate("CREATE TABLE IF NOT EXISTS subscription_price_changes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     subscription_id INTEGER NOT NULL,
     user_id INTEGER NOT NULL,
@@ -43,5 +53,5 @@ $db->exec("CREATE TABLE IF NOT EXISTS subscription_price_changes (
     reason TEXT NOT NULL DEFAULT 'tier' CHECK (reason IN ('tier', 'provider')),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 )");
-$db->exec("CREATE INDEX IF NOT EXISTS idx_price_changes_subscription ON subscription_price_changes (subscription_id, changed_at)");
-$db->exec("CREATE INDEX IF NOT EXISTS idx_price_changes_user ON subscription_price_changes (user_id)");
+$migrate("CREATE INDEX IF NOT EXISTS idx_price_changes_subscription ON subscription_price_changes (subscription_id, changed_at)");
+$migrate("CREATE INDEX IF NOT EXISTS idx_price_changes_user ON subscription_price_changes (user_id)");

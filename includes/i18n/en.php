@@ -710,6 +710,7 @@ $i18n = [
     "cancellation_payload_only" => "cancellation payload only",
     // Cancellation deadlines
     "no_cancel_by_date" => "No cancel-by date",
+    "cancel_by_passed" => "Cancel-by date passed",
     "cancel_by_this_month" => "Cancel by this month",
     "cancel_by_next_month" => "Cancel by next month",
     "cancel_by_later" => "Cancel by later",

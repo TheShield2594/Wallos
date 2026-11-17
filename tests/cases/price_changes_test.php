@@ -28,6 +28,11 @@ wallos_test('a price change row is made only when the cost changed', function ()
     assert_equals(10.0, $yearly['new_monthly'], 'a yearly price compares per month');
     assert_same('tier', $yearly['reason'], 'unknown reason is a plan change');
 
+    $noRate = wallos_price_change_row($old, array_merge($old, ['price' => 12.0, 'currency_id' => 2]), 'tier', '2026-03-01', fn() => null);
+    assert_equals(12.0, $noRate['new_price'], 'the prices are kept without a rate');
+    assert_same(null, $noRate['old_monthly'], 'no old monthly amount without a rate');
+    assert_same(null, $noRate['new_monthly'], 'and no new one, so nothing compares two currencies');
+
     $oneTime = wallos_price_change_row($old, array_merge($old, ['cycle' => 5]), 'tier', '2026-03-01', 'price_change_identity');
     assert_same(null, $oneTime['new_monthly'], 'a one-time purchase has no monthly amount');
 });
@@ -60,6 +65,28 @@ wallos_test('price changes are recorded, listed and converted between currencies
     assert_equals(12.1, round((float) $changes[0]['new_monthly'], 2), 'new monthly in USD');
     assert_same([], wallos_price_changes_list($db, 2, 50), 'another account sees nothing');
 
+    $snapshot = wallos_price_snapshot($db, 1, 50);
+    assert_equals(17.99, $snapshot['price'], 'the snapshot reads the stored price');
+    assert_same(null, wallos_price_snapshot($db, 2, 50), 'not another account\'s subscription');
+
+    $db->close();
+});
+
+wallos_test('a change between currencies without a usable rate stores no monthly amounts', function () {
+    $db = wallos_test_open_database();
+    wallos_test_create_user($db, 1, 'alice');
+    $eur = wallos_test_currency_id(1, 0);
+    $usd = wallos_test_currency_id(1, 1);
+    $db->exec("UPDATE currencies SET rate = 0 WHERE id = $usd");
+    $db->exec("INSERT INTO subscriptions (id, user_id, name, price, currency_id, next_payment, cycle, frequency, inactive)
+        VALUES (51, 1, 'News', 10, $eur, '2026-04-01', 3, 1, 0)");
+
+    assert_same(null, wallos_convert_between_currencies(10, $eur, $usd, $db, 1), 'a zero rate gives no conversion');
+    $old = ['price' => 10.0, 'currency_id' => $eur, 'cycle' => 3, 'frequency' => 1];
+    assert_true(wallos_record_price_change($db, 1, 51, $old, array_merge($old, ['price' => 12.0, 'currency_id' => $usd]), 'provider', '2026-02-01'), 'still recorded');
+    $change = wallos_price_changes_list($db, 1, 51)[0];
+    assert_same(null, $change['old_monthly'], 'no unconverted old amount stored');
+    assert_equals(12.0, $change['new_price'], 'the new price is kept');
     $db->close();
 });
 

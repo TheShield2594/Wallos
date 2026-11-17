@@ -12,10 +12,15 @@
   The yearly cost snapshots (total_yearly_cost) stay amortized whatever the
   setting, so the history chart does not jump.
 
-  Safe to run twice.
+  Safe to run twice: a failed statement throws, so the runner does not
+  record the migration.
 */
 
 $columnQuery = $db->query("SELECT * FROM pragma_table_info('settings') WHERE name = 'monthly_cost_mode'");
-if ($columnQuery->fetchArray(SQLITE3_ASSOC) === false) {
-    $db->exec("ALTER TABLE settings ADD COLUMN monthly_cost_mode TEXT DEFAULT 'amortized'");
+if ($columnQuery === false) {
+    throw new RuntimeException('Migration 000067 failed: ' . $db->lastErrorMsg());
+}
+if ($columnQuery->fetchArray(SQLITE3_ASSOC) === false
+    && $db->exec("ALTER TABLE settings ADD COLUMN monthly_cost_mode TEXT DEFAULT 'amortized'") === false) {
+    throw new RuntimeException('Migration 000067 failed: ' . $db->lastErrorMsg());
 }

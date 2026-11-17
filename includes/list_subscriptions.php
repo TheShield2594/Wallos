@@ -216,6 +216,8 @@ function addListRowFields(&$printRow, $subscription, $mainCurrencyId, $db)
     $printRow['plan_made'] = (int) ($subscription['payments_made'] ?? 0);
     $deadline = wallos_cancel_deadline($subscription);
     $printRow['cancel_by'] = ($deadline !== null && $deadline['cancel_by'] >= date('Y-m-d')) ? $deadline['cancel_by'] : null;
+    // Past deadlines included, for the cancel-by sort and its groups.
+    $printRow['cancel_by_raw'] = $deadline['cancel_by'] ?? null;
     $printRow['locked_until'] = wallos_cancel_locked_until($subscription);
     $printRow['intro_type'] = wallos_intro_active($subscription) ? $subscription['intro_type'] : null;
     $printRow['intro_end_date'] = $printRow['intro_type'] !== null ? $subscription['intro_end_date'] : null;
@@ -308,7 +310,7 @@ function printSubscriptions($subscriptions, $sort, $categories, $members, $i18n,
     // month / Later, with the active rows that have no date after them.
     $groupByCancelBy = $sort === 'cancellation_date';
     if ($groupByCancelBy) {
-        $subscriptions = wallos_sort_by_cancel_by(array_values($subscriptions));
+        $subscriptions = wallos_sort_by_cancel_by(array_values($subscriptions), 'cancel_by_raw');
         $today = date('Y-m-d');
     }
 
@@ -337,7 +339,7 @@ function printSubscriptions($subscriptions, $sort, $categories, $members, $i18n,
             $key = 'disabled';
             $title = translate('disabled', $i18n);
         } elseif ($groupByCancelBy) {
-            $bucket = wallos_cancel_by_bucket($subscription['cancel_by'] ?? null, $today);
+            $bucket = wallos_cancel_by_bucket($subscription['cancel_by_raw'] ?? null, $today);
             $key = $bucket === 'none' ? 'active' : 'cancel-' . $bucket;
             $title = $bucket === 'none' ? translate('no_cancel_by_date', $i18n) : translate('cancel_by_' . $bucket, $i18n);
         } else {
@@ -351,7 +353,7 @@ function printSubscriptions($subscriptions, $sort, $categories, $members, $i18n,
     }
 
     // Fixed order for the state groups; field groups keep the sorted order.
-    $order = ['cancel-this_month' => -3, 'cancel-next_month' => -2, 'cancel-later' => -1, 'active' => 0, 'completed' => 2, 'shared' => 3, 'disabled' => 4, 'lifetime' => 5];
+    $order = ['cancel-passed' => -4, 'cancel-this_month' => -3, 'cancel-next_month' => -2, 'cancel-later' => -1, 'active' => 0, 'completed' => 2, 'shared' => 3, 'disabled' => 4, 'lifetime' => 5];
     uksort($groups, function ($a, $b) use ($order, $groups) {
         $orderA = $order[$a] ?? 1;
         $orderB = $order[$b] ?? 1;

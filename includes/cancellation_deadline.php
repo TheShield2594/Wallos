@@ -401,12 +401,15 @@ function wallos_notification_filter_matches(array $row, array $types)
  *
  * @param string|null $cancelBy Y-m-d
  * @param string      $today    Y-m-d
- * @return string 'this_month', 'next_month', 'later' or 'none'
+ * @return string 'passed', 'this_month', 'next_month', 'later' or 'none'
  */
 function wallos_cancel_by_bucket($cancelBy, $today)
 {
     if (empty($cancelBy)) {
         return 'none';
+    }
+    if ($cancelBy < $today) {
+        return 'passed';
     }
     $thisMonth = substr($today, 0, 7);
     $nextMonth = (new DateTime(substr($today, 0, 7) . '-01'))->modify('+1 month')->format('Y-m');
@@ -434,19 +437,20 @@ function wallos_cancel_window_end($today)
  * Orders list rows by their cancel-by date, soonest first; rows without one
  * keep their order and go last.
  *
- * @param array  $rows each with 'cancel_by' (Y-m-d or null)
+ * @param array  $rows each with $key (Y-m-d or null)
+ * @param string $key  the field holding the date
  * @return array
  */
-function wallos_sort_by_cancel_by(array $rows)
+function wallos_sort_by_cancel_by(array $rows, $key = 'cancel_by')
 {
     $position = 0;
     foreach ($rows as &$row) {
         $row['__position'] = $position++;
     }
     unset($row);
-    usort($rows, function ($a, $b) {
-        $left = $a['cancel_by'] ?? null;
-        $right = $b['cancel_by'] ?? null;
+    usort($rows, function ($a, $b) use ($key) {
+        $left = $a[$key] ?? null;
+        $right = $b[$key] ?? null;
         if ($left === $right || (empty($left) && empty($right))) {
             return $a['__position'] <=> $b['__position'];
         }

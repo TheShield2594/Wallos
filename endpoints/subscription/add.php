@@ -387,8 +387,7 @@ if ($intro['next_payment'] !== null) {
 
 $existingSchedule = [];
 if ($isEdit) {
-    $scheduleStmt = $db->prepare("SELECT id, billing_anchor_day, payments_made, ended_reason, next_payment, start_date, cycle, frequency, renew_from_action,
-            price, currency_id, tier_name
+    $scheduleStmt = $db->prepare("SELECT id, billing_anchor_day, payments_made, ended_reason, next_payment, start_date, cycle, frequency, renew_from_action
         FROM subscriptions WHERE id = :id AND user_id = :userId");
     $scheduleStmt->bindValue(':id', $_POST['id'], SQLITE3_INTEGER);
     $scheduleStmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
@@ -627,6 +626,9 @@ $stmt->bindValue(':tierName', $tierName, $tierName === null ? SQLITE3_NULL : SQL
 // one unit: if any part fails, nothing is saved and the form stays open.
 $saved = @$db->exec('BEGIN IMMEDIATE') !== false;
 if ($saved) {
+    // The price before this edit, read under the write lock so a concurrent
+    // edit can't make both record the same old price.
+    $priceBefore = $isEdit ? wallos_price_snapshot($db, $userId, $_POST['id']) : null;
     $saved = $stmt->execute() !== false;
     if ($saved) {
         $savedId = $isEdit ? $id : $db->lastInsertRowID();
@@ -634,8 +636,8 @@ if ($saved) {
             && wallos_store_intro_fields($db, $savedId, $userId, $intro['fields']);
         // An edit that changed the price, currency, cycle or frequency keeps
         // the old value in the price history.
-        if ($saved && $isEdit && !empty($existingSchedule)) {
-            $saved = wallos_record_price_change($db, $userId, $savedId, $existingSchedule, [
+        if ($saved && $priceBefore !== null) {
+            $saved = wallos_record_price_change($db, $userId, $savedId, $priceBefore, [
                 'price' => $price,
                 'currency_id' => $currencyId,
                 'cycle' => $cycle,
