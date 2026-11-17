@@ -273,6 +273,6 @@ wallos_test('review fixes: an edit between payments keeps the recorded count', f
     assert_same('2026-04-20', $kept['end_date'], 'and the plan still ends on Apr 20');
 
     $add = file_get_contents(WALLOS_ROOT . '/endpoints/subscription/add.php');
-    assert_contains("'keep_payments_made' =>", $add, 'the save endpoint keeps the count unless the schedule changed');
-    assert_contains("renew_from_action'] ?? 0) === 1", $add, 'and always for subscriptions whose payments restart the cycle');
+    assert_contains("'keep_payments_made' => wallos_keep_payments_made_on_save(", $add,
+        'the save endpoint decides through wallos_keep_payments_made_on_save() (tested in payment_ledger_test.php)');
 });

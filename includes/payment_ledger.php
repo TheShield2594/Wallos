@@ -406,6 +406,42 @@ function wallos_undo_paid_locked(SQLite3 $db, array $subscription, $dueDate)
 }
 
 /**
+ * Whether saving a subscription keeps its stored payments_made instead of
+ * counting the scheduled dates since its start date.
+ *
+ * Counting is for a subscription with no payment history yet: a new one, or
+ * one whose dates are still being set up. Once a payment is recorded, the
+ * stored count is the authority. Payments may have restarted the cycle
+ * (even if that option was turned off since), so the history need not sit
+ * on any schedule that could be counted. The same holds when the schedule
+ * was not changed at all.
+ *
+ * @param array|null $existing the stored row, or null for a new subscription
+ * @param array      $new      next_payment, start_date, cycle and frequency being saved
+ * @return bool
+ */
+function wallos_keep_payments_made_on_save(SQLite3 $db, $existing, array $new)
+{
+    if (empty($existing)) {
+        return false;
+    }
+    if ((int) ($existing['renew_from_action'] ?? 0) === 1) {
+        return true;
+    }
+    $unchanged = (string) $existing['next_payment'] === (string) $new['next_payment']
+        && (string) $existing['start_date'] === (string) $new['start_date']
+        && (int) $existing['cycle'] === (int) $new['cycle']
+        && (int) $existing['frequency'] === (int) $new['frequency'];
+    if ($unchanged) {
+        return true;
+    }
+    $history = $db->prepare('SELECT 1 FROM subscription_payments WHERE subscription_id = :id LIMIT 1');
+    $history->bindValue(':id', (int) $existing['id'], SQLITE3_INTEGER);
+
+    return $history->execute()->fetchArray(SQLITE3_NUM) !== false;
+}
+
+/**
  * The most recent ledger rows of one subscription, newest first.
  *
  * @return array[]

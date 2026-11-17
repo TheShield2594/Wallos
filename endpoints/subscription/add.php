@@ -7,7 +7,7 @@ require_once '../../includes/getsettings.php';
 require_once '../../includes/ssrf_helper.php';
 require_once '../../includes/logo_theme_variant.php';
 require_once '../../includes/logo_cleanup.php';
-require_once '../../includes/recurrence.php';
+require_once '../../includes/payment_ledger.php';
 
 if (!file_exists('../../images/uploads/logos')) {
     mkdir('../../images/uploads/logos', 0777, true);
@@ -322,7 +322,7 @@ if ($endsMode === 'count' && (!ctype_digit((string) ($_POST['total_payments'] ??
 
 $existingSchedule = [];
 if ($isEdit) {
-    $scheduleStmt = $db->prepare("SELECT billing_anchor_day, payments_made, ended_reason, next_payment, start_date, cycle, frequency, renew_from_action
+    $scheduleStmt = $db->prepare("SELECT id, billing_anchor_day, payments_made, ended_reason, next_payment, start_date, cycle, frequency, renew_from_action
         FROM subscriptions WHERE id = :id AND user_id = :userId");
     $scheduleStmt->bindValue(':id', $_POST['id'], SQLITE3_INTEGER);
     $scheduleStmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
@@ -340,17 +340,14 @@ $plan = wallos_plan_fields([
     'payments_made' => $existingSchedule['payments_made'] ?? 0,
     // A plan that stays completed keeps the payments it counted.
     'ended_reason' => $inactive ? ($existingSchedule['ended_reason'] ?? null) : null,
-    // payments_made is counted from the start date for a new subscription
-    // or a changed schedule. An edit that leaves the schedule alone keeps the
-    // recorded count, and so does any edit of a subscription whose payments
-    // restart the cycle: its past payments are not on a schedule to count.
-    'keep_payments_made' => $existingSchedule !== [] && (
-        (int) ($existingSchedule['renew_from_action'] ?? 0) === 1
-        || ($existingSchedule['next_payment'] === $nextPayment
-            && (string) $existingSchedule['start_date'] === (string) $startDate
-            && (int) $existingSchedule['cycle'] === $cycle
-            && (int) $existingSchedule['frequency'] === $frequency)
-    ),
+    // Counted from the start date only while there is no payment history
+    // (see wallos_keep_payments_made_on_save()).
+    'keep_payments_made' => wallos_keep_payments_made_on_save($db, $existingSchedule ?: null, [
+        'next_payment' => $nextPayment,
+        'start_date' => $startDate,
+        'cycle' => $cycle,
+        'frequency' => $frequency,
+    ]),
 ], $endsMode, $_POST['end_date'] ?? null, $_POST['total_payments'] ?? null);
 $endDate = $plan['end_date'];
 $totalPayments = $plan['total_payments'];

@@ -393,3 +393,38 @@ wallos_test('review fixes: a repeated payment on the same day is refused, not co
     assert_same('2026-03-15', $after['next_payment'], 'and the schedule to the start');
     $db->close();
 });
+
+wallos_test('review fixes: once payments are recorded, edits keep the stored count', function () {
+    $db = ledger_open_database();
+    // Three-payment plan from Jan 15; the first payment, on Feb 20, restarts the cycle.
+    $plan = ledger_subscription($db, [
+        'next_payment' => '2026-01-15', 'start_date' => '2026-01-15', 'auto_renew' => 0, 'renew_from_action' => 1,
+        'billing_anchor_day' => 15, 'end_date' => '2026-03-15', 'total_payments' => 3, 'plan_mode' => 'count',
+    ]);
+    wallos_mark_paid($db, $plan, new DateTime('2026-02-20'));
+    $plan = ledger_reload($db, $plan);
+    assert_same('2026-03-20', $plan['next_payment'], 'restarted on Feb 20');
+
+    // The user turns the restart option off, then moves the next payment to Apr 20.
+    $db->exec('UPDATE subscriptions SET renew_from_action = 0 WHERE id = ' . (int) $plan['id']);
+    $plan = ledger_reload($db, $plan);
+    $edit = ['next_payment' => '2026-04-20', 'start_date' => '2026-01-15', 'cycle' => 3, 'frequency' => 1];
+    $keep = wallos_keep_payments_made_on_save($db, $plan, $edit);
+    assert_true($keep, 'a recorded payment makes the stored count authoritative');
+
+    $fields = wallos_plan_fields(array_merge($plan, $edit, [
+        'billing_anchor_day' => wallos_anchor_day_for_save($edit['next_payment'], $edit['start_date'], 3, $plan['billing_anchor_day']),
+        'keep_payments_made' => $keep,
+    ]), 'count', null, 3);
+    assert_same(1, $fields['payments_made'], 'still one payment made');
+    assert_same('2026-05-20', $fields['end_date'], 'two left: Apr 20 and May 20');
+
+    // Without any history, a changed schedule is counted from the start date.
+    $fresh = ledger_subscription($db, ['next_payment' => '2026-03-15', 'start_date' => '2026-01-15']);
+    assert_true(!wallos_keep_payments_made_on_save($db, $fresh, ['next_payment' => '2026-04-15', 'start_date' => '2026-01-15', 'cycle' => 3, 'frequency' => 1]),
+        'no history: the dates are counted');
+    assert_true(wallos_keep_payments_made_on_save($db, $fresh, ['next_payment' => '2026-03-15', 'start_date' => '2026-01-15', 'cycle' => 3, 'frequency' => 1]),
+        'an unchanged schedule keeps the count');
+    assert_true(!wallos_keep_payments_made_on_save($db, null, $edit), 'a new subscription is counted');
+    $db->close();
+});
