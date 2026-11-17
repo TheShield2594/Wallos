@@ -315,7 +315,7 @@ if ($result) {
 
                 // Check if it has a replacement subscription and if it was not already counted
                 if ($replacementSubscriptionId && !in_array($replacementSubscriptionId, $replacementSubscriptions)) {
-                    $query = "SELECT price, currency_id, cycle, frequency, active_months FROM subscriptions WHERE id = :replacementSubscriptionId AND user_id = :userId";
+                    $query = "SELECT id, price, currency_id, cycle, frequency, active_months, payer_user_id, reimbursed_percent FROM subscriptions WHERE id = :replacementSubscriptionId AND user_id = :userId";
                     $stmt = $db->prepare($query);
                     $stmt->bindValue(':replacementSubscriptionId', $replacementSubscriptionId, SQLITE3_INTEGER);
                     $stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
@@ -324,6 +324,11 @@ if ($result) {
                     if ($replacementSubscription) {
                         $replacementSubscriptionPrice = getPriceConverted($replacementSubscription['price'], $replacementSubscription['currency_id'], $db, $userId);
                         $replacementSubscriptionPrice = getPricePerMonth($replacementSubscription['cycle'], $replacementSubscription['frequency'], $replacementSubscriptionPrice, wallos_cycle_active_months($replacementSubscription));
+                        // "My cost" compares like with like: the replacement's own share.
+                        if ($statsCostMode === 'net') {
+                            $replacementSubscriptionPrice *= wallos_my_cost_fraction($replacementSubscription,
+                                $costSharesById[(int) $replacementSubscription['id']] ?? [], $selfMemberId);
+                        }
                         $totalCostsInReplacementsPerMonth += $replacementSubscriptionPrice;
                     }
                 }

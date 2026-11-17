@@ -59,7 +59,12 @@ function wallos_price_per_month($cycle, $frequency, $price, $activeMonths = 4095
     }
 
     $activeMonths = is_numeric($activeMonths) ? (int) $activeMonths : 4095;
-    if ($activeMonths < 1 || $activeMonths >= 4095) {
+    // Only schedules that bill at least monthly can skip months (see
+    // wallos_cycle_supports_active_months()); for them every active month is
+    // reached, so the share below is exact for monthly and day-weighted for
+    // daily and weekly plans.
+    $limits = [1 => 31, 2 => 4, 3 => 1];
+    if ($activeMonths < 1 || $activeMonths >= 4095 || $frequency > $limits[(int) $cycle]) {
         return $monthly;
     }
 
@@ -117,13 +122,16 @@ function wallos_subscription_price_per_month(array $subscription, $price = null)
 }
 
 /**
- * The row's active months, every month for yearly and one-time plans.
+ * The row's active months; every month for schedules longer than a month.
  *
  * @return int
  */
 function wallos_cycle_active_months(array $subscription)
 {
-    if (!in_array((int) ($subscription['cycle'] ?? 0), [1, 2, 3], true)) {
+    $cycle = (int) ($subscription['cycle'] ?? 0);
+    $frequency = (int) ($subscription['frequency'] ?? 1);
+    $limits = [1 => 31, 2 => 4, 3 => 1];
+    if (!isset($limits[$cycle]) || $frequency < 1 || $frequency > $limits[$cycle]) {
         return 4095;
     }
     $mask = $subscription['active_months'] ?? 4095;

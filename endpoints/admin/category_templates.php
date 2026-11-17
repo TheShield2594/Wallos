@@ -105,10 +105,22 @@ switch ($action) {
     case 'apply':
         $templates = wallos_category_templates($db);
         $added = 0;
+        $userIds = [];
         $users = $db->query('SELECT id FROM user');
+        while ($users && ($user = $users->fetchArray(SQLITE3_NUM))) {
+            $userIds[] = (int) $user[0];
+        }
         $ok = $db->exec('BEGIN IMMEDIATE') !== false;
-        while ($ok && $users && ($user = $users->fetchArray(SQLITE3_NUM))) {
-            $added += wallos_apply_category_templates($db, (int) $user[0], $templates);
+        foreach ($userIds as $applyUserId) {
+            if (!$ok) {
+                break;
+            }
+            $addedForUser = wallos_apply_category_templates($db, $applyUserId, $templates);
+            if ($addedForUser === false) {
+                $ok = false;
+                break;
+            }
+            $added += $addedForUser;
         }
         $ok = $ok && $db->exec('COMMIT') !== false;
         if (!$ok) {

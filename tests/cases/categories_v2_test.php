@@ -121,3 +121,34 @@ wallos_test('migration 000073 adds parents, template links and the templates tab
     assert_true($db->exec("INSERT INTO category_templates (name) VALUES ('Kids')"), 'templates table');
     $db->close();
 });
+
+wallos_test('No category stays at the top level', function () {
+    $db = categories_v2_db();
+    assert_true(wallos_category_parent_error($db, 2, 20, 22) !== null, 'No category can\'t become a child');
+    $db->close();
+});
+
+wallos_test('a parent change and a delete each happen whole', function () {
+    $db = categories_v2_db();
+    $update = wallos_update_category($db, 2, 22, 'Kids', true, 21);
+    assert_true($update['success'] && $update['parent_changed'], 'Kids moved under Computers');
+    $refused = wallos_update_category($db, 2, 21, 'Computers', true, 22);
+    assert_true(!$refused['success'] && $refused['error'] !== null, 'no cycle');
+    assert_same(null, $db->querySingle('SELECT parent_id FROM categories WHERE id = 21'), 'Computers untouched');
+    assert_true(wallos_delete_category($db, 2, 21), 'delete the parent');
+    assert_same(0, $db->querySingle('SELECT COUNT(*) FROM categories WHERE parent_id = 21'), 'children are top-level');
+    $db->close();
+});
+
+wallos_test('defaults never nest a third level under a category the user moved', function () {
+    $db = categories_v2_db();
+    $db->exec("INSERT INTO category_templates (id, name, parent_template_id, \"order\") VALUES (1, 'Kids', NULL, 1)");
+    wallos_apply_category_templates($db, 2);
+    $kidsId = $db->querySingle('SELECT id FROM categories WHERE user_id = 2 AND template_id = 1');
+    $db->exec('UPDATE categories SET parent_id = 22 WHERE id = ' . (int) $kidsId);
+    $db->exec("INSERT INTO category_templates (id, name, parent_template_id, \"order\") VALUES (2, 'Kid 1', 1, 2)");
+    assert_same(1, wallos_apply_category_templates($db, 2), 'added');
+    assert_same(null, $db->querySingle('SELECT parent_id FROM categories WHERE user_id = 2 AND template_id = 2'), 'starts at the top level');
+    assert_true(!@$db->exec("INSERT INTO categories (name, user_id, template_id) VALUES ('dup', 2, 1)"), 'one category per default per account');
+    $db->close();
+});

@@ -157,13 +157,29 @@ function wallos_subscription_anchor_day(array $subscription)
 }
 
 /**
- * Whether a cycle can be limited to some months: daily, weekly and monthly.
+ * Whether a schedule can be limited to some months: one that bills at least
+ * once a month (every 1-31 days, every 1-4 weeks, or monthly). Such a
+ * schedule reaches every month, so each active month gets its payments and
+ * the monthly cost counts them exactly; longer schedules (every two months,
+ * yearly) ignore the mask.
  *
+ * @param int|string      $cycleId
+ * @param int|string|null $frequency null when only the cycle is known
  * @return bool
  */
-function wallos_cycle_supports_active_months($cycleId)
+function wallos_cycle_supports_active_months($cycleId, $frequency = null)
 {
-    return in_array((int) $cycleId, [1, 2, 3], true);
+    $cycleId = (int) $cycleId;
+    if (!in_array($cycleId, [1, 2, 3], true)) {
+        return false;
+    }
+    if ($frequency === null) {
+        return true;
+    }
+    $frequency = (int) $frequency;
+    $limits = [1 => 31, 2 => 4, 3 => 1];
+
+    return $frequency >= 1 && $frequency <= $limits[$cycleId];
 }
 
 /**
@@ -200,14 +216,14 @@ function wallos_active_months_from_list($months)
 }
 
 /**
- * The months a subscription bills in. Yearly and one-time plans always bill
- * every month their schedule lands on.
+ * The months a subscription bills in. Schedules longer than a month (yearly,
+ * every two months, one-time) bill every month their schedule lands on.
  *
  * @return int
  */
 function wallos_subscription_active_months(array $subscription)
 {
-    if (!wallos_cycle_supports_active_months($subscription['cycle'] ?? 0)) {
+    if (!wallos_cycle_supports_active_months($subscription['cycle'] ?? 0, $subscription['frequency'] ?? 1)) {
         return WALLOS_ALL_MONTHS;
     }
 

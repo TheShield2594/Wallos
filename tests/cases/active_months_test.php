@@ -80,7 +80,21 @@ wallos_test('the active months read as ranges, including across December', funct
     assert_same('', wallos_active_months_label(WALLOS_ALL_MONTHS, 'en'), 'every month has no label');
 });
 
-wallos_test('a schedule that never reaches an active month bills as before', function () {
+wallos_test('only schedules that bill at least monthly can skip months', function () {
+    assert_true(wallos_cycle_supports_active_months(3, 1), 'monthly');
+    assert_true(wallos_cycle_supports_active_months(2, 4), 'every 4 weeks');
+    assert_true(wallos_cycle_supports_active_months(1, 31), 'every 31 days');
+    assert_true(!wallos_cycle_supports_active_months(3, 2), 'every two months');
+    assert_true(!wallos_cycle_supports_active_months(1, 60), 'every 60 days');
+    assert_true(!wallos_cycle_supports_active_months(4, 1), 'yearly');
+    // Every two months, January and March active: the mask is ignored, so the
+    // cost stays 120 / 2 instead of under-counting the two payments a year.
+    assert_equals(60.0, wallos_price_per_month(3, 2, 120, 1 | (1 << 2)), 'monthly cost ignores the mask');
+    assert_same(WALLOS_ALL_MONTHS, wallos_cycle_active_months(['cycle' => 3, 'frequency' => 2, 'active_months' => 5]), 'row mask ignored');
+    assert_same(WALLOS_ALL_MONTHS, wallos_subscription_active_months(['cycle' => 3, 'frequency' => 2, 'active_months' => 5]), 'schedule mask ignored');
+});
+
+wallos_test('a schedule longer than a month bills every month it lands on', function () {
     // Every two months from January never lands in February.
     $subscription = active_months_subscription(['frequency' => 2, 'next_payment' => '2030-01-10', 'start_date' => '2030-01-10', 'active_months' => 1 << 1]);
     assert_same('2030-03-10', wallos_next_occurrence($subscription, new DateTime('2030-01-10'))->format('Y-m-d'), 'falls back to the plain schedule');

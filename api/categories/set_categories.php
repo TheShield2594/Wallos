@@ -157,28 +157,17 @@ switch ($action) {
         // Optional parent (see includes/categories.php)
         $parentGiven = array_key_exists('parent_id', $_POST);
         $parentId = $parentGiven && ctype_digit((string) $_POST['parent_id']) && (int) $_POST['parent_id'] > 0 ? (int) $_POST['parent_id'] : null;
-        if ($parentGiven) {
-            $parentError = wallos_category_parent_error($db, $userId, $categoryId, $parentId ?? 0);
-            if ($parentError !== null) {
-                echo json_encode([
-                    'success' => false,
-                    'title' => 'Invalid parent',
-                    'message' => $parentError
-                ]);
-                exit;
-            }
+        // The parent check and the update share one write lock.
+        $update = wallos_update_category($db, $userId, $categoryId, $name, $parentGiven, $parentId);
+        if ($update['error'] !== null) {
+            echo json_encode([
+                'success' => false,
+                'title' => 'Invalid parent',
+                'message' => $update['error']
+            ]);
+            exit;
         }
-
-        // Update
-        $sqlEdit = "UPDATE categories SET name = :name" . ($parentGiven ? ", parent_id = :parentId" : "") . " WHERE id = :categoryId AND user_id = :userId";
-        $stmtEdit = $db->prepare($sqlEdit);
-        $stmtEdit->bindParam(':name', $name, SQLITE3_TEXT);
-        if ($parentGiven) {
-            $stmtEdit->bindValue(':parentId', $parentId, $parentId === null ? SQLITE3_NULL : SQLITE3_INTEGER);
-        }
-        $stmtEdit->bindParam(':categoryId', $categoryId, SQLITE3_INTEGER);
-        $stmtEdit->bindParam(':userId', $userId, SQLITE3_INTEGER);
-        $resultEdit = $stmtEdit->execute();
+        $resultEdit = $update['success'];
 
         if ($resultEdit) {
             echo json_encode([
@@ -254,11 +243,9 @@ switch ($action) {
         }
 
         // Delete
-        $sqlDelete = "DELETE FROM categories WHERE id = :categoryId AND user_id = :userId";
-        $stmtDelete = $db->prepare($sqlDelete);
-        $stmtDelete->bindParam(':categoryId', $categoryId, SQLITE3_INTEGER);
-        $stmtDelete->bindParam(':userId', $userId, SQLITE3_INTEGER);
-        $resultDelete = $stmtDelete->execute();
+        // Its sub-categories become top-level categories, in the same transaction.
+        $resultDelete = wallos_delete_category($db, $userId, $categoryId);
+
         if ($resultDelete) {
             $stmtOrphans = $db->prepare("UPDATE categories SET parent_id = NULL WHERE parent_id = :categoryId AND user_id = :userId");
             $stmtOrphans->bindParam(':categoryId', $categoryId, SQLITE3_INTEGER);

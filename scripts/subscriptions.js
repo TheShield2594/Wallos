@@ -1597,9 +1597,13 @@ function formActiveMonthsMask() {
   return mask === 0 ? 4095 : mask;
 }
 
+// Only schedules that bill at least monthly can skip months, as on the
+// server (wallos_cycle_supports_active_months()).
 function activeMonthsApply() {
   const cycle = document.querySelector("#cycle");
-  return cycle && ['1', '2', '3'].includes(String(cycle.value));
+  const frequency = Number((document.querySelector("#frequency") || {}).value) || 1;
+  const limits = { '1': 31, '2': 4, '3': 1 };
+  return !!cycle && limits[String(cycle.value)] !== undefined && frequency <= limits[String(cycle.value)];
 }
 
 function formMonthIsActive(date) {
@@ -1638,6 +1642,7 @@ document.addEventListener("DOMContentLoaded", function () {
   const cycle = document.querySelector("#cycle");
   if (cycle) {
     cycle.addEventListener("change", toggleActiveMonthsGroup);
+    document.querySelector("#frequency").addEventListener("change", toggleActiveMonthsGroup);
     toggleActiveMonthsGroup();
   }
 });

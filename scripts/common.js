@@ -192,6 +192,23 @@ const TALLY_DATE_FORMATS = {
   mon_d_y: { order: ['month', 'day', 'year'], sep: ' ', numeric: false },
 };
 
+// The UI language as an Intl locale tag: Tally's keys use underscores and
+// lower case ("pt_br", "zh_cn", "sr_lat"), which Intl rejects.
+function tallyLocale() {
+  const key = String(window.lang || 'en').toLowerCase();
+  const special = { sr_lat: 'sr-Latn', jp: 'ja' };
+  let tag = special[key];
+  if (!tag) {
+    const parts = key.split(/[_-]/);
+    tag = parts[0] + (parts[1] ? '-' + (parts[1].length === 2 ? parts[1].toUpperCase() : parts[1].charAt(0).toUpperCase() + parts[1].slice(1)) : '');
+  }
+  try {
+    return Intl.getCanonicalLocales(tag)[0] || 'en';
+  } catch (e) {
+    return 'en';
+  }
+}
+
 function tallyParseDate(value) {
   if (value instanceof Date) {
     return isNaN(value) ? null : value;
@@ -209,7 +226,7 @@ function tallyFormatDate(value, style) {
     return value || '';
   }
   style = style || 'short';
-  const lang = window.lang || 'en';
+  const lang = tallyLocale();
   const withYear = style !== 'short' || date.getFullYear() !== new Date().getFullYear();
   const format = TALLY_DATE_FORMATS[window.tallyDateFormat];
 
@@ -259,7 +276,7 @@ function tallyFormatDate(value, style) {
 */
 function tallyFormatMoney(amount, code, decimals, symbol) {
   const value = Number(amount) || 0;
-  const lang = window.lang || 'en';
+  const lang = tallyLocale();
   const digits = decimals === null || decimals === undefined || decimals === '' || decimals === 'auto'
     ? null : Math.max(0, Math.min(8, Number(decimals)));
   const fixed = digits === null ? {} : { minimumFractionDigits: digits, maximumFractionDigits: digits };

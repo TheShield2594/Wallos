@@ -357,7 +357,18 @@ $actualYearOverYear = $actualLastYear > 0 ? ($actualThisYear - $actualLastYear) 
       }
       $periodByCategory = $rolledUp;
     }
-    $categoryDataPoints = wallos_period_split_points($periodByCategory, array_map(fn($row) => $row['name'], $categoryCost ?? []));
+    // Same points as wallos_period_split_points(), keeping the drill-down link on parents.
+    $categoryDataPoints = [];
+    foreach ($periodByCategory as $periodCategoryId => $amount) {
+      if ($amount > 0 && isset($categoryCost[$periodCategoryId])) {
+        $point = ['label' => html_entity_decode($categoryCost[$periodCategoryId]['name']), 'y' => round($amount, 2)];
+        if (!$categoryDrillDown && isset($categoryHasChildren[(int) $periodCategoryId])) {
+          $point['href'] = 'stats.php?' . http_build_query(array_merge($_GET, ['category' => (int) $periodCategoryId]));
+        }
+        $categoryDataPoints[] = $point;
+      }
+    }
+    usort($categoryDataPoints, fn($a, $b) => $b['y'] <=> $a['y']);
     $memberDataPoints = wallos_period_split_points($periodCharges['by_member'], array_map(fn($row) => $row['name'], $memberCost ?? []));
     $paymentMethodDataPoints = wallos_period_split_points($periodCharges['by_payment'], array_map(fn($row) => $row['name'], $paymentMethodsCount ?? []));
     $showCategoryCostGraph = count($categoryDataPoints) > 1;

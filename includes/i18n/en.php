@@ -801,7 +801,7 @@ $i18n = [
     "default_categories_info" => "New accounts start with these categories instead of the built-in ones. Apply to all users adds the ones an account is missing; it never renames or removes anyone's own categories.",
     // Active months
     "active_months" => "Active months",
-    "active_months_info" => "Payments in unselected months are skipped. The monthly cost spreads the active months' payments over the year.",
+    "active_months_info" => "Payments in unselected months are skipped. The monthly cost spreads the active months' payments over the year. Only for plans that bill at least once a month.",
     "active_months_none" => "Pick at least one month.",
 ];
 

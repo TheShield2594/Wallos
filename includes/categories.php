@@ -128,6 +128,9 @@ function wallos_category_parent_error(SQLite3 $db, $userId, $categoryId, $parent
     if ($parentId === $categoryId) {
         return 'A category cannot be its own parent.';
     }
+    if ($categoryId === 1 || $categoryId === wallos_no_category_id($db, $userId)) {
+        return 'No category stays at the top level.';
+    }
     $stmt = $db->prepare('SELECT id, parent_id FROM categories WHERE id = :id AND user_id = :userId');
     $stmt->bindValue(':id', $parentId, SQLITE3_INTEGER);
     $stmt->bindValue(':userId', (int) $userId, SQLITE3_INTEGER);
@@ -196,7 +199,7 @@ function wallos_category_templates(SQLite3 $db)
  * Adds the templates an account does not have yet (matched on template_id),
  * after its own categories. Never renames or deletes anything.
  *
- * @return int the number of categories added
+ * @return int|false the number of categories added, false when an insert failed
  */
 function wallos_apply_category_templates(SQLite3 $db, $userId, array $templates = null)
 {
@@ -207,24 +210,32 @@ function wallos_apply_category_templates(SQLite3 $db, $userId, array $templates 
     $userId = (int) $userId;
 
     $existing = [];
-    $stmt = $db->prepare('SELECT id, template_id FROM categories WHERE user_id = :userId AND template_id IS NOT NULL');
+    $isChild = [];
+    $stmt = $db->prepare('SELECT id, template_id, parent_id FROM categories WHERE user_id = :userId AND template_id IS NOT NULL');
     $stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
     $result = $stmt->execute();
     while ($result && ($row = $result->fetchArray(SQLITE3_ASSOC))) {
         $existing[(int) $row['template_id']] = (int) $row['id'];
+        $isChild[(int) $row['id']] = (int) ($row['parent_id'] ?? 0) > 0;
     }
     $stmt = $db->prepare('SELECT COALESCE(MAX("order"), 0) FROM categories WHERE user_id = :userId');
     $stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
     $order = (int) $stmt->execute()->fetchArray(SQLITE3_NUM)[0];
 
     $added = 0;
-    $insert = $db->prepare('INSERT INTO categories (name, "order", user_id, parent_id, template_id) VALUES (:name, :order, :userId, :parentId, :templateId)');
+    // The unique index on (user_id, template_id) makes a concurrent apply a no-op.
+    $insert = $db->prepare('INSERT OR IGNORE INTO categories (name, "order", user_id, parent_id, template_id) VALUES (:name, :order, :userId, :parentId, :templateId)');
     foreach ($templates as $templateId => $template) {
         if (isset($existing[$templateId])) {
             continue;
         }
         $parentTemplateId = (int) ($template['parent_template_id'] ?? 0);
         $parentId = $parentTemplateId > 0 ? ($existing[$parentTemplateId] ?? null) : null;
+        // The user nested their copy of the parent under another category:
+        // a third level isn't allowed, so this one starts at the top level.
+        if ($parentId !== null && !empty($isChild[$parentId])) {
+            $parentId = null;
+        }
         $insert->reset();
         $insert->bindValue(':name', $template['name'], SQLITE3_TEXT);
         $insert->bindValue(':order', ++$order, SQLITE3_INTEGER);
@@ -232,10 +243,21 @@ function wallos_apply_category_templates(SQLite3 $db, $userId, array $templates 
         $insert->bindValue(':parentId', $parentId, $parentId === null ? SQLITE3_NULL : SQLITE3_INTEGER);
         $insert->bindValue(':templateId', (int) $templateId, SQLITE3_INTEGER);
         if ($insert->execute() === false) {
-            return $added;
+            return false;
         }
-        $existing[$templateId] = $db->lastInsertRowID();
-        $added++;
+        if ($db->changes() === 1) {
+            $existing[$templateId] = $db->lastInsertRowID();
+            $added++;
+        } else {
+            $lookup = $db->prepare('SELECT id FROM categories WHERE user_id = :userId AND template_id = :templateId');
+            $lookup->bindValue(':userId', $userId, SQLITE3_INTEGER);
+            $lookup->bindValue(':templateId', (int) $templateId, SQLITE3_INTEGER);
+            $row = $lookup->execute()->fetchArray(SQLITE3_NUM);
+            if ($row !== false) {
+                $existing[$templateId] = (int) $row[0];
+            }
+        }
+        $isChild[$existing[$templateId] ?? 0] = $parentId !== null;
     }
 
     return $added;
@@ -261,7 +283,80 @@ function wallos_seed_user_categories(SQLite3 $db, $userId, $language)
         $stmt->execute();
     }
 
-    if ($templates !== []) {
-        wallos_apply_category_templates($db, $userId, $templates);
+    if ($templates !== [] && wallos_apply_category_templates($db, $userId, $templates) === false) {
+        // The account still has No category; the admin can apply the defaults again.
+        error_log('Tally: could not add the default categories for user ' . (int) $userId . ': ' . $db->lastErrorMsg());
     }
+}
+
+/**
+ * Renames a category and, when $parentGiven, moves it under $parentId (null
+ * for top level). The parent check and the update run under one write lock,
+ * so two requests can't nest two categories under each other.
+ *
+ * @return array{success: bool, error: ?string, parent_changed: bool}
+ */
+function wallos_update_category(SQLite3 $db, $userId, $categoryId, $name, $parentGiven, $parentId)
+{
+    $userId = (int) $userId;
+    $categoryId = (int) $categoryId;
+    $result = ['success' => false, 'error' => null, 'parent_changed' => false];
+    if (@$db->exec('BEGIN IMMEDIATE') === false) {
+        return $result;
+    }
+    if ($parentGiven) {
+        $result['error'] = wallos_category_parent_error($db, $userId, $categoryId, $parentId ?? 0);
+        if ($result['error'] !== null) {
+            @$db->exec('ROLLBACK');
+            return $result;
+        }
+        $current = $db->prepare('SELECT parent_id FROM categories WHERE id = :id AND user_id = :userId');
+        $current->bindValue(':id', $categoryId, SQLITE3_INTEGER);
+        $current->bindValue(':userId', $userId, SQLITE3_INTEGER);
+        $row = $current->execute()->fetchArray(SQLITE3_ASSOC);
+        $result['parent_changed'] = $row !== false && (int) ($row['parent_id'] ?? 0) !== (int) ($parentId ?? 0);
+    }
+    $stmt = $db->prepare('UPDATE categories SET name = :name' . ($parentGiven ? ', parent_id = :parentId' : '') . ' WHERE id = :id AND user_id = :userId');
+    $stmt->bindValue(':name', $name, SQLITE3_TEXT);
+    if ($parentGiven) {
+        $stmt->bindValue(':parentId', $parentId, $parentId === null ? SQLITE3_NULL : SQLITE3_INTEGER);
+    }
+    $stmt->bindValue(':id', $categoryId, SQLITE3_INTEGER);
+    $stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
+    if ($stmt->execute() === false || $db->exec('COMMIT') === false) {
+        @$db->exec('ROLLBACK');
+        $result['parent_changed'] = false;
+        return $result;
+    }
+    $result['success'] = true;
+
+    return $result;
+}
+
+/**
+ * Deletes a category; its sub-categories become top-level. Both happen or neither.
+ *
+ * @return bool
+ */
+function wallos_delete_category(SQLite3 $db, $userId, $categoryId)
+{
+    if (@$db->exec('BEGIN IMMEDIATE') === false) {
+        return false;
+    }
+    foreach (['DELETE FROM categories WHERE id = :id AND user_id = :userId',
+        'UPDATE categories SET parent_id = NULL WHERE parent_id = :id AND user_id = :userId'] as $sql) {
+        $stmt = $db->prepare($sql);
+        $stmt->bindValue(':id', (int) $categoryId, SQLITE3_INTEGER);
+        $stmt->bindValue(':userId', (int) $userId, SQLITE3_INTEGER);
+        if ($stmt->execute() === false) {
+            @$db->exec('ROLLBACK');
+            return false;
+        }
+    }
+    if ($db->exec('COMMIT') === false) {
+        @$db->exec('ROLLBACK');
+        return false;
+    }
+
+    return true;
 }

@@ -85,3 +85,23 @@ wallos_test('deleting a subscription or an account removes its shares', function
         assert_contains('DELETE FROM subscription_shares', file_get_contents(WALLOS_ROOT . '/' . $file), $file);
     }
 });
+
+wallos_test('the account holder, payers and split members cannot be deleted', function () {
+    $db = cost_sharing_db();
+    $db->exec("INSERT INTO household (id, name, user_id) VALUES (14, 'Cleo', 1)");
+    $db->exec("INSERT INTO subscriptions (id, name, price, currency_id, next_payment, cycle, frequency, user_id, payer_user_id) VALUES (1, 'Netflix', 10, 1, '2030-01-01', 3, 1, 1, 12)");
+    assert_true(wallos_store_subscription_shares($db, 1, 1, [11 => 50, 13 => 50]), 'split');
+    assert_same('self', wallos_delete_household_member($db, 1, 11), 'the account holder');
+    assert_same('in_use', wallos_delete_household_member($db, 1, 12), 'a payer');
+    assert_same('in_use', wallos_delete_household_member($db, 1, 13), 'a member in a split');
+    assert_same('not_found', wallos_delete_household_member($db, 2, 14), 'another account');
+    assert_same('deleted', wallos_delete_household_member($db, 1, 14), 'an unused member');
+    assert_same(11, wallos_self_member_id($db, 1), 'the account holder is unchanged');
+    $db->close();
+});
+
+wallos_test('a share for a member that no longer exists is refused', function () {
+    $db = cost_sharing_db();
+    assert_true(!wallos_store_subscription_shares($db, 1, 1, [11 => 50, 99 => 50]), 'missing member');
+    $db->close();
+});

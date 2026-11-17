@@ -225,7 +225,7 @@ $loginDisabledAllowed = $userCount == 1 && $settings['registrations_open'] == 0;
                 if ($id !== null && (int) $parentId === (int) $id) {
                     continue;
                 } ?>
-                <option value="<?= (int) $parentId ?>" <?= (int) $selectedParent === (int) $parentId ? 'selected' : '' ?>><?= htmlspecialchars($parent['name']) ?></option>
+                <option value="<?= (int) $parentId ?>" <?= (int) $selectedParent === (int) $parentId ? 'selected' : '' ?>><?= htmlspecialchars(htmlspecialchars_decode($parent['name'])) ?></option>
             <?php } ?>
         </select>
         <?php
@@ -238,7 +238,7 @@ $loginDisabledAllowed = $userCount == 1 && $settings['registrations_open'] == 0;
         <div id="categoryTemplates">
             <?php foreach ($categoryTemplates as $templateId => $template) { ?>
                 <div class="form-group-inline<?= (int) ($template['parent_template_id'] ?? 0) > 0 ? ' is-subcategory' : '' ?>" data-templateid="<?= (int) $templateId ?>">
-                    <input type="text" name="name" autocomplete="off" maxlength="100" value="<?= htmlspecialchars($template['name']) ?>"
+                    <input type="text" name="name" autocomplete="off" maxlength="100" value="<?= htmlspecialchars(htmlspecialchars_decode($template['name'])) ?>"
                         aria-label="<?= translate('category', $i18n) ?>">
                     <?php $renderTemplateParentSelect($templateId, $template['parent_template_id'] ?? 0, isset($templateHasChildren[(int) $templateId])); ?>
                     <button class="image-button medium" name="save" onClick="saveCategoryTemplate(<?= (int) $templateId ?>)"

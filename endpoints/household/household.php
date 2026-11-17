@@ -1,5 +1,6 @@
 <?php
 require_once '../../includes/connect_endpoint.php';
+require_once '../../includes/cost_sharing.php';
 require_once '../../includes/inputvalidation.php';
 require_once '../../includes/validate_endpoint.php';
 
@@ -85,42 +86,14 @@ function handleEditMember($db, $userId, $i18n)
 function handleDeleteMember($db, $userId, $i18n)
 {
     if (isset($_POST['memberId']) && $_POST['memberId'] != "" && $_POST['memberId'] != 1) {
-        $memberId = $_POST['memberId'];
-        $checkMember = "SELECT (SELECT COUNT(*) FROM subscriptions WHERE payer_user_id = :memberId AND user_id = :userId)
-            + (SELECT COUNT(*) FROM subscription_shares WHERE household_id = :memberId AND user_id = :userId)";
-        $checkStmt = $db->prepare($checkMember);
-        $checkStmt->bindParam(':memberId', $memberId, SQLITE3_INTEGER);
-        $checkStmt->bindParam(':userId', $userId, SQLITE3_INTEGER);
-        $checkResult = $checkStmt->execute();
-        $row = $checkResult->fetchArray();
-        $count = $row[0];
-
-        if ($count > 0) {
-            $response = [
-                "success" => false,
-                "message" => translate('household_in_use', $i18n)
-            ];
-            echo json_encode($response);
-        } else {
-            $sql = "DELETE FROM household WHERE id = :memberId and user_id = :userId";
-            $stmt = $db->prepare($sql);
-            $stmt->bindParam(':memberId', $memberId, SQLITE3_INTEGER);
-            $stmt->bindParam(':userId', $userId, SQLITE3_INTEGER);
-            $result = $stmt->execute();
-            if ($result) {
-                $response = [
-                    "success" => true,
-                    "message" => translate('member_removed', $i18n)
-                ];
-                echo json_encode($response);
-            } else {
-                $response = [
-                    "success" => false,
-                    "message" => translate('failed_remove_household', $i18n)
-                ];
-                echo json_encode($response);
-            }
-        }
+        // The account holder, a payer or a member in a split can't be deleted;
+        // the checks and the delete share one write lock.
+        $outcome = wallos_delete_household_member($db, $userId, (int) $_POST['memberId']);
+        $messages = ['deleted' => 'member_removed', 'in_use' => 'household_in_use', 'self' => 'cant_delete_member'];
+        echo json_encode([
+            "success" => $outcome === 'deleted',
+            "message" => translate($messages[$outcome] ?? 'failed_remove_household', $i18n)
+        ]);
     } else {
         $response = [
             "success" => false,

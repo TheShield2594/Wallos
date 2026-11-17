@@ -24,6 +24,7 @@ Example response:
 */
 
 require_once '../../includes/connect_endpoint.php';
+require_once '../../includes/cost_sharing.php';
 require_once '../../includes/inputvalidation.php';
 
 header('Content-Type: application/json; charset=UTF-8');
@@ -189,72 +190,22 @@ switch ($action) {
         }
         $memberId = intval($memberId);
 
-        // Cannot delete member 1 (default user member)
-        if ($memberId === 1) {
-            echo json_encode([
-                'success' => false,
-                'title' => 'Cannot delete member',
-                'message' => 'The default household member cannot be deleted.'
-            ]);
-            exit;
-        }
-
-        // Check ownership
-        $checkSql = "SELECT * FROM household WHERE id = :memberId AND user_id = :userId";
-        $checkStmt = $db->prepare($checkSql);
-        $checkStmt->bindValue(':memberId', $memberId, SQLITE3_INTEGER);
-        $checkStmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
-        $checkResult = $checkStmt->execute();
-        $member = $checkResult->fetchArray(SQLITE3_ASSOC);
-
-        if (!$member) {
-            echo json_encode([
-                'success' => false,
-                'title' => 'Unauthorized or Not Found',
-                'message' => 'Household member not found or does not belong to you.'
-            ]);
-            exit;
-        }
-
-        // Check if in use
-        $checkUseSql = "SELECT (SELECT COUNT(*) FROM subscriptions WHERE payer_user_id = :memberId AND user_id = :userId)
-            + (SELECT COUNT(*) FROM subscription_shares WHERE household_id = :memberId AND user_id = :userId)";
-        $checkUseStmt = $db->prepare($checkUseSql);
-        $checkUseStmt->bindParam(':memberId', $memberId, SQLITE3_INTEGER);
-        $checkUseStmt->bindParam(':userId', $userId, SQLITE3_INTEGER);
-        $checkUseResult = $checkUseStmt->execute();
-        $row = $checkUseResult->fetchArray();
-        $count = $row[0] ?? 0;
-
-        if ($count > 0) {
-            echo json_encode([
-                'success' => false,
-                'title' => 'Member in use',
-                'message' => 'This household member cannot be deleted because they are in use by one or more subscriptions.'
-            ]);
-            exit;
-        }
-
-        // Delete
-        $sqlDelete = "DELETE FROM household WHERE id = :memberId AND user_id = :userId";
-        $stmtDelete = $db->prepare($sqlDelete);
-        $stmtDelete->bindParam(':memberId', $memberId, SQLITE3_INTEGER);
-        $stmtDelete->bindParam(':userId', $userId, SQLITE3_INTEGER);
-        $resultDelete = $stmtDelete->execute();
-
-        if ($resultDelete) {
-            echo json_encode([
-                'success' => true,
-                'title' => 'Member deleted',
-                'message' => 'Household member deleted successfully.'
-            ]);
-        } else {
-            echo json_encode([
-                'success' => false,
-                'title' => 'Database error',
-                'message' => 'Failed to delete household member.'
-            ]);
-        }
+        // The account holder, a payer or a member in a split can't be deleted;
+        // the checks and the delete share one write lock.
+        $outcome = wallos_delete_household_member($db, $userId, $memberId);
+        $replies = [
+            'deleted' => [true, 'Member deleted', 'Household member deleted successfully.'],
+            'self' => [false, 'Cannot delete member', 'The default household member cannot be deleted.'],
+            'not_found' => [false, 'Unauthorized or Not Found', 'Household member not found or does not belong to you.'],
+            'in_use' => [false, 'Member in use', 'This household member cannot be deleted because they are in use by one or more subscriptions.'],
+            'error' => [false, 'Database error', 'Failed to delete household member.'],
+        ];
+        [$success, $title, $message] = $replies[$outcome];
+        echo json_encode([
+            'success' => $success,
+            'title' => $title,
+            'message' => $message
+        ]);
         break;
 }
 

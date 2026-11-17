@@ -40,3 +40,5 @@ $migrate("CREATE TABLE IF NOT EXISTS category_templates (
     \"order\" INTEGER DEFAULT 0
 )");
 $migrate("CREATE INDEX IF NOT EXISTS idx_categories_parent ON categories (user_id, parent_id)");
+// One category per default per account, so applying the defaults twice adds nothing.
+$migrate("CREATE UNIQUE INDEX IF NOT EXISTS idx_categories_template ON categories (user_id, template_id) WHERE template_id IS NOT NULL");

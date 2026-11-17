@@ -423,7 +423,7 @@ if ($sharedEdit) {
 // Active months (issue #25): daily, weekly and monthly plans can bill in some
 // months only. The next payment moves to the first date in an active month.
 $activeMonths = WALLOS_ALL_MONTHS;
-if (wallos_cycle_supports_active_months($cycle) && isset($_POST['active_months']) && is_array($_POST['active_months'])) {
+if (wallos_cycle_supports_active_months($cycle, $frequency) && isset($_POST['active_months']) && is_array($_POST['active_months'])) {
     $activeMonths = wallos_active_months_from_list($_POST['active_months']);
 }
 if ($activeMonths !== WALLOS_ALL_MONTHS) {

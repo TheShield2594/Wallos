@@ -193,13 +193,14 @@ function wallos_store_subscription_shares(SQLite3 $db, $subscriptionId, $userId,
         return false;
     }
     foreach ($shares as $memberId => $percent) {
+        // Only a member that still exists (the caller holds the write lock).
         $insert = $db->prepare('INSERT INTO subscription_shares (subscription_id, household_id, share_percent, user_id)
-            VALUES (:id, :member, :percent, :userId)');
+            SELECT :id, :member, :percent, :userId WHERE EXISTS (SELECT 1 FROM household WHERE id = :member AND user_id = :userId)');
         $insert->bindValue(':id', (int) $subscriptionId, SQLITE3_INTEGER);
         $insert->bindValue(':member', (int) $memberId, SQLITE3_INTEGER);
         $insert->bindValue(':percent', (float) $percent, SQLITE3_FLOAT);
         $insert->bindValue(':userId', (int) $userId, SQLITE3_INTEGER);
-        if ($insert->execute() === false) {
+        if ($insert->execute() === false || $db->changes() !== 1) {
             return false;
         }
     }
@@ -275,4 +276,51 @@ function wallos_cost_sharing_context(SQLite3 $db, $userId)
     }
 
     return $cache[$userId];
+}
+
+/**
+ * Deletes a household member unless it is the account holder (the first
+ * member, which "My cost" counts as the account's own), the payer of a
+ * subscription, or part of a split. The checks and the delete run under one
+ * write lock, so a subscription saved meanwhile can't reference the member.
+ *
+ * @return string 'deleted', 'self', 'in_use', 'not_found' or 'error'
+ */
+function wallos_delete_household_member(SQLite3 $db, $userId, $memberId)
+{
+    $userId = (int) $userId;
+    $memberId = (int) $memberId;
+    if (@$db->exec('BEGIN IMMEDIATE') === false) {
+        return 'error';
+    }
+    $outcome = 'deleted';
+    $exists = $db->prepare('SELECT 1 FROM household WHERE id = :memberId AND user_id = :userId');
+    $exists->bindValue(':memberId', $memberId, SQLITE3_INTEGER);
+    $exists->bindValue(':userId', $userId, SQLITE3_INTEGER);
+    if ($exists->execute()->fetchArray(SQLITE3_NUM) === false) {
+        $outcome = 'not_found';
+    } elseif ($memberId === 1 || $memberId === wallos_self_member_id($db, $userId)) {
+        $outcome = 'self';
+    } else {
+        $inUse = $db->prepare('SELECT (SELECT COUNT(*) FROM subscriptions WHERE payer_user_id = :memberId AND user_id = :userId)
+            + (SELECT COUNT(*) FROM subscription_shares WHERE household_id = :memberId AND user_id = :userId)');
+        $inUse->bindValue(':memberId', $memberId, SQLITE3_INTEGER);
+        $inUse->bindValue(':userId', $userId, SQLITE3_INTEGER);
+        if ((int) $inUse->execute()->fetchArray(SQLITE3_NUM)[0] > 0) {
+            $outcome = 'in_use';
+        } else {
+            $delete = $db->prepare('DELETE FROM household WHERE id = :memberId AND user_id = :userId');
+            $delete->bindValue(':memberId', $memberId, SQLITE3_INTEGER);
+            $delete->bindValue(':userId', $userId, SQLITE3_INTEGER);
+            if ($delete->execute() === false) {
+                $outcome = 'error';
+            }
+        }
+    }
+    if ($outcome === 'deleted' && $db->exec('COMMIT') !== false) {
+        return 'deleted';
+    }
+    @$db->exec('ROLLBACK');
+
+    return $outcome === 'deleted' ? 'error' : $outcome;
 }
