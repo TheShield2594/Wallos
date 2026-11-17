@@ -591,6 +591,7 @@ $i18n = [
     "plan_completed" => "Final payment recorded. The plan is complete.",
     "payment_undone" => "Payment undone",
     "undo_only_latest_payment" => "Only the most recent payment can be undone.",
+    "payment_already_recorded" => "This payment is already recorded.",
     "undo_payment" => "Undo payment",
     "ends" => "Ends",
     "ends_never" => "Never",

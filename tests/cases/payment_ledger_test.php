@@ -373,3 +373,23 @@ wallos_test('review fixes: undo follows the order of payments, not of due dates'
     assert_same(0, (int) ledger_reload($db, $subscription)['payments_made'], 'nothing counted');
     $db->close();
 });
+
+wallos_test('review fixes: a repeated payment on the same day is refused, not counted twice', function () {
+    $db = ledger_open_database();
+    $subscription = ledger_subscription($db, ['next_payment' => '2026-03-15', 'auto_renew' => 0, 'renew_from_action' => 1, 'billing_anchor_day' => 15]);
+    $outcomes = [];
+    for ($i = 0; $i < 3; $i++) {
+        $outcomes[] = wallos_mark_paid($db, ledger_reload($db, $subscription), new DateTime('2026-02-01'));
+    }
+    assert_same([true, true, false], array_column($outcomes, 'success'), 'the third payment on Feb 1 is for an already paid cycle');
+    assert_same('already_paid', $outcomes[2]['error'] ?? null, 'and says so');
+    assert_same(2, (int) ledger_reload($db, $subscription)['payments_made'], 'two payments counted');
+    assert_same(2, count(ledger_rows($db, $subscription)), 'two payments recorded');
+
+    assert_true(wallos_undo_paid($db, $subscription, '2026-03-01')['success'], 'the second is undone');
+    assert_true(wallos_undo_paid($db, $subscription, '2026-03-15')['success'], 'then the first');
+    $after = ledger_reload($db, $subscription);
+    assert_same(0, (int) $after['payments_made'], 'the count is back to zero');
+    assert_same('2026-03-15', $after['next_payment'], 'and the schedule to the start');
+    $db->close();
+});

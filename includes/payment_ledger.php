@@ -267,6 +267,15 @@ function wallos_mark_paid_locked(SQLite3 $db, array $subscription, DateTimeInter
     }
 
     $dueDate = $next->format('Y-m-d');
+    // With payments restarting the cycle, a second payment on the same day
+    // lands on the same due date again. It would replace the first row while
+    // counting a second payment, so it is refused instead.
+    $existing = $db->prepare("SELECT 1 FROM subscription_payments WHERE subscription_id = :id AND due_date = :dueDate AND status = 'paid'");
+    $existing->bindValue(':id', (int) $subscription['id'], SQLITE3_INTEGER);
+    $existing->bindValue(':dueDate', $dueDate, SQLITE3_TEXT);
+    if ($existing->execute()->fetchArray(SQLITE3_NUM) !== false) {
+        return ['success' => false, 'error' => 'already_paid'];
+    }
     $paymentsMade = (int) ($subscription['payments_made'] ?? 0) + 1;
     $fields = ['payments_made' => $paymentsMade];
     $schedule = $subscription;

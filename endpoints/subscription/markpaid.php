@@ -25,7 +25,8 @@ if ($subscription === false) {
 
 $outcome = wallos_mark_paid($db, $subscription, new DateTime('today'), $amount);
 if (!$outcome['success']) {
-    die(json_encode(["success" => false, "message" => translate("error", $i18n)]));
+    $message = ($outcome['error'] ?? '') === 'already_paid' ? translate('payment_already_recorded', $i18n) : translate('error', $i18n);
+    die(json_encode(["success" => false, "message" => $message]));
 }
 
 echo json_encode([
