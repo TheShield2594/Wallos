@@ -273,14 +273,16 @@ if ($result) {
                         false
                     );
                     $amountDueThisMonth += getPriceConverted(wallos_price_of_occurrences($subscription, $dueThisMonth), $currency, $db, $userId);
-
-                    $chargedThisMonth = wallos_occurrences_in_range(
-                        $subscription,
-                        new DateTime('first day of this month'),
-                        new DateTime('last day of this month')
-                    );
-                    $chargesThisMonth += getPriceConverted(wallos_price_of_occurrences($subscription, $chargedThisMonth), $currency, $db, $userId);
                 }
+
+                // Everything charged this calendar month, a one-time purchase
+                // dated in it included (it stays out of the amortized totals).
+                $chargedThisMonth = wallos_occurrences_in_range(
+                    $subscription,
+                    new DateTime('first day of this month'),
+                    new DateTime('last day of this month')
+                );
+                $chargesThisMonth += getPriceConverted(wallos_price_of_occurrences($subscription, $chargedThisMonth), $currency, $db, $userId);
             } elseif (($subscription['ended_reason'] ?? null) === 'completed') {
                 // A plan that ran its course was paid off, not cancelled:
                 // it is not a saving. Its final payments still count among
