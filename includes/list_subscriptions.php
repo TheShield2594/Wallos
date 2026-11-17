@@ -6,6 +6,7 @@ require_once __DIR__ . '/ui_helpers.php';
 require_once __DIR__ . '/payment_ledger.php';
 require_once __DIR__ . '/cancellation_deadline.php';
 require_once __DIR__ . '/households.php';
+require_once __DIR__ . '/monthly_cost.php';
 
 function getBillingCycle($cycle, $frequency, $i18n)
 {
@@ -35,27 +36,6 @@ function getSubscriptionProgress($cycle, $frequency, $next_payment, $subscriptio
 
     return wallos_cycle_progress($subscription, new DateTime('today'));
 }
-
-function getPricePerMonth($cycle, $frequency, $price)
-{
-    switch ($cycle) {
-        case 1:
-            $numberOfPaymentsPerMonth = (30 / $frequency);
-            return $price * $numberOfPaymentsPerMonth;
-        case 2:
-            $numberOfPaymentsPerMonth = (4.35 / $frequency);
-            return $price * $numberOfPaymentsPerMonth;
-        case 3:
-            $numberOfPaymentsPerMonth = (1 / $frequency);
-            return $price * $numberOfPaymentsPerMonth;
-        case 4:
-            $numberOfMonths = (12 * $frequency);
-            return $price / $numberOfMonths;
-        case 5:
-            return 0;
-    }
-}
-
 
 function getPriceConverted($price, $currency, $database)
 {
@@ -135,7 +115,9 @@ function addListRowFields(&$printRow, $subscription, $mainCurrencyId, $db)
     $printRow['next_payment_raw'] = $subscription['next_payment'];
     $printRow['start_date'] = $subscription['start_date'] ?? '';
     $printRow['cycle'] = (int) $subscription['cycle'];
-    $monthly = getPricePerMonth((int) $subscription['cycle'], (int) $subscription['frequency'], wallos_current_price($subscription));
+    $printRow['active_months'] = wallos_cycle_active_months($subscription);
+    $printRow['active_months_label'] = wallos_active_months_label($printRow['active_months'], $GLOBALS['lang'] ?? 'en');
+    $monthly = getPricePerMonth((int) $subscription['cycle'], (int) $subscription['frequency'], wallos_current_price($subscription), wallos_cycle_active_months($subscription));
     if ($subscription['currency_id'] != $mainCurrencyId) {
         $monthly = getPriceConverted($monthly, $subscription['currency_id'], $db);
     }
@@ -193,6 +175,10 @@ function listRowSubtitle($subscription, $i18n, $lang)
         return [$sharedPrefix . $text, $tone];
     }
     $cycle = $subscription['billing_cycle'];
+    // "Monthly · Sep–Dec" for a plan limited to some months.
+    if (!empty($subscription['active_months_label'])) {
+        $cycle .= ' · ' . $subscription['active_months_label'];
+    }
     if (!empty($subscription['ended'])) {
         $total = (int) ($subscription['plan_total'] ?? 0);
         return [translate('plan_completed_label', $i18n) . ($total ? ' · ' . sprintf(translate('n_payments', $i18n), $total) : ''), ''];

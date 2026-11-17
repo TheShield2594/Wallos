@@ -39,6 +39,7 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
             $subscriptionData['next_payment'] = $row['next_payment'];
             $subscriptionData['frequency'] = $row['frequency'];
             $subscriptionData['cycle'] = $row['cycle'];
+            $subscriptionData['active_months'] = wallos_sanitize_active_months($row['active_months'] ?? WALLOS_ALL_MONTHS);
             $subscriptionData['notes'] = $row['notes'] ?? "";
             $subscriptionData['notes_html'] = render_notes_markdown($row['notes'] ?? "");
             $subscriptionData['payment_method_id'] = $row['payment_method_id'];

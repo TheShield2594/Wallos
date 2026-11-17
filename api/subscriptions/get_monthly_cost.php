@@ -151,7 +151,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" || $_SERVER["REQUEST_METHOD"] === "GET
             if ($mode === 'short_cycles' && !wallos_is_short_cycle($subscription['cycle'], $subscription['frequency'])) {
                 continue;
             }
-            $price = wallos_price_per_month($subscription['cycle'], $subscription['frequency'], wallos_price_on($subscription, $monthStart->format('Y-m-d')));
+            $price = wallos_price_per_month($subscription['cycle'], $subscription['frequency'], wallos_price_on($subscription, $monthStart->format('Y-m-d')), wallos_cycle_active_months($subscription));
         }
         if (
             $userCurrencyId !== $subscription['currency_id']

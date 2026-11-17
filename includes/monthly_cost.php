@@ -24,26 +24,125 @@ function wallos_sanitize_monthly_cost_mode($mode)
 }
 
 /**
- * Price spread over one month: the same arithmetic as getPricePerMonth() in
- * the pages, for code that does not load them (the API).
+ * Price spread over one month. Every page, cron job and API endpoint uses
+ * this (getPricePerMonth() is a wrapper kept for the pages).
  *
+ * With active months (issue #25) the price counts only the payments of the
+ * active months, spread over twelve: monthly Sep-Dec at 250 is 4 x 250 / 12.
+ * Daily and weekly cycles count the days of the active months in the current
+ * year.
+ *
+ * @param int   $cycle
+ * @param int   $frequency
+ * @param float $price
+ * @param int   $activeMonths 12-bit mask, bit 0 = January (4095 = every month)
  * @return float
  */
-function wallos_price_per_month($cycle, $frequency, $price)
+function wallos_price_per_month($cycle, $frequency, $price, $activeMonths = 4095)
 {
     $frequency = max(1, (int) $frequency);
+    $price = (float) $price;
     switch ((int) $cycle) {
         case 1:
-            return $price * (30 / $frequency);
+            $monthly = $price * (30 / $frequency);
+            break;
         case 2:
-            return $price * (4.35 / $frequency);
+            $monthly = $price * (4.35 / $frequency);
+            break;
         case 3:
-            return $price / $frequency;
+            $monthly = $price / $frequency;
+            break;
         case 4:
             return $price / (12 * $frequency);
+        default:
+            return 0.0;
     }
 
-    return 0.0;
+    $activeMonths = is_numeric($activeMonths) ? (int) $activeMonths : 4095;
+    if ($activeMonths < 1 || $activeMonths >= 4095) {
+        return $monthly;
+    }
+
+    return $monthly * wallos_active_months_share((int) $cycle, $activeMonths);
+}
+
+/**
+ * The share of a year's payments that fall in the active months.
+ *
+ * @param int $cycle
+ * @param int $activeMonths
+ * @param int|null $year the current year when null
+ * @return float 0-1
+ */
+function wallos_active_months_share($cycle, $activeMonths, $year = null)
+{
+    $activeCount = 0;
+    $activeDays = 0;
+    $year = $year ?? (int) date('Y');
+    $daysInYear = (int) date('z', mktime(0, 0, 0, 12, 31, $year)) + 1;
+    for ($month = 1; $month <= 12; $month++) {
+        if (($activeMonths & (1 << ($month - 1))) !== 0) {
+            $activeCount++;
+            $activeDays += wallos_days_in_month($month, $year);
+        }
+    }
+
+    if ((int) $cycle === 3) {
+        return $activeCount / 12;
+    }
+
+    return $activeDays / $daysInYear;
+}
+
+function wallos_days_in_month($month, $year)
+{
+    return (int) date('t', mktime(0, 0, 0, $month, 1, $year));
+}
+
+/**
+ * The monthly price of a subscriptions row (cycle, frequency, active months).
+ *
+ * @param array      $subscription
+ * @param float|null $price the price to spread; the row's price when null
+ * @return float
+ */
+function wallos_subscription_price_per_month(array $subscription, $price = null)
+{
+    return wallos_price_per_month(
+        $subscription['cycle'] ?? 0,
+        $subscription['frequency'] ?? 1,
+        $price ?? ($subscription['price'] ?? 0),
+        wallos_cycle_active_months($subscription)
+    );
+}
+
+/**
+ * The row's active months, every month for yearly and one-time plans.
+ *
+ * @return int
+ */
+function wallos_cycle_active_months(array $subscription)
+{
+    if (!in_array((int) ($subscription['cycle'] ?? 0), [1, 2, 3], true)) {
+        return 4095;
+    }
+    $mask = $subscription['active_months'] ?? 4095;
+
+    return is_numeric($mask) && (int) $mask >= 1 && (int) $mask <= 4095 ? (int) $mask : 4095;
+}
+
+if (!function_exists('getPricePerMonth')) {
+    /**
+     * @param int   $cycle
+     * @param int   $frequency
+     * @param float $price
+     * @param int   $activeMonths
+     * @return float
+     */
+    function getPricePerMonth($cycle, $frequency, $price, $activeMonths = 4095)
+    {
+        return wallos_price_per_month($cycle, $frequency, $price, $activeMonths);
+    }
 }
 
 /**

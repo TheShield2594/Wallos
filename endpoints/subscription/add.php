@@ -398,6 +398,25 @@ if ($intro['next_payment'] !== null) {
     $nextPayment = $intro['next_payment'];
 }
 
+// Active months (issue #25): daily, weekly and monthly plans can bill in some
+// months only. The next payment moves to the first date in an active month.
+$activeMonths = WALLOS_ALL_MONTHS;
+if (wallos_cycle_supports_active_months($cycle) && isset($_POST['active_months']) && is_array($_POST['active_months'])) {
+    $activeMonths = wallos_active_months_from_list($_POST['active_months']);
+}
+if ($activeMonths !== WALLOS_ALL_MONTHS) {
+    $firstActive = wallos_first_active_occurrence([
+        'next_payment' => $nextPayment,
+        'start_date' => $startDate,
+        'cycle' => $cycle,
+        'frequency' => $frequency,
+        'active_months' => $activeMonths,
+    ], wallos_parse_date($nextPayment));
+    if ($firstActive !== null) {
+        $nextPayment = $firstActive->format('Y-m-d');
+    }
+}
+
 $existingSchedule = [];
 if ($isEdit) {
     $scheduleStmt = $db->prepare("SELECT id, billing_anchor_day, payments_made, ended_reason, next_payment, start_date, cycle, frequency, renew_from_action
@@ -415,6 +434,7 @@ $plan = wallos_plan_fields([
     'cycle' => $cycle,
     'frequency' => $frequency,
     'billing_anchor_day' => $billingAnchorDay,
+    'active_months' => $activeMonths,
     'payments_made' => $existingSchedule['payments_made'] ?? 0,
     // A plan that stays completed keeps the payments it counted.
     'ended_reason' => $inactive ? ($existingSchedule['ended_reason'] ?? null) : null,
@@ -534,14 +554,14 @@ if (!$isEdit) {
                         notify_days_before, user_id, cancellation_date, replacement_subscription_id,
                         auto_renew, start_date, logo_text_color, logo_variant,
                         billing_anchor_day, renew_from_action, variable_amount, end_date,
-                        total_payments, payments_made, ended_reason, plan_mode, tier_name
+                        total_payments, payments_made, ended_reason, plan_mode, tier_name, active_months
                     ) VALUES (
                         :name, :logo, :price, :currencyId, :nextPayment, :cycle, :frequency, :notes,
                         :paymentMethodId, :payerUserId, :categoryId, :notify, :inactive, :url,
                         :notifyDaysBefore, :userId, :cancellationDate, :replacement_subscription_id,
                         :autoRenew, :startDate, :logoTextColor, :logoVariant,
                         :billingAnchorDay, :renewFromAction, :variableAmount, :endDate,
-                        :totalPayments, :paymentsMade, :endedReason, :planMode, :tierName
+                        :totalPayments, :paymentsMade, :endedReason, :planMode, :tierName, :activeMonths
                     )";
 } else {
     $id = $_POST['id'];
@@ -588,7 +608,8 @@ if (!$isEdit) {
                         payments_made = :paymentsMade,
                         ended_reason = :endedReason,
                         plan_mode = :planMode,
-                        tier_name = :tierName";
+                        tier_name = :tierName,
+                        active_months = :activeMonths";
 
     if ($logo != "") {
         $sql .= ", logo = :logo, logo_text_color = :logoTextColor, logo_variant = :logoVariant";
@@ -634,6 +655,7 @@ $stmt->bindValue(':paymentsMade', $paymentsMade, SQLITE3_INTEGER);
 $stmt->bindValue(':endedReason', $endedReason, $endedReason === null ? SQLITE3_NULL : SQLITE3_TEXT);
 $stmt->bindValue(':planMode', $planMode, $planMode === null ? SQLITE3_NULL : SQLITE3_TEXT);
 $stmt->bindValue(':tierName', $tierName, $tierName === null ? SQLITE3_NULL : SQLITE3_TEXT);
+$stmt->bindValue(':activeMonths', $activeMonths, SQLITE3_INTEGER);
 
 // The row, its cancellation notice, intro period and sharing are saved as
 // one unit: if any part fails, nothing is saved and the form stays open.

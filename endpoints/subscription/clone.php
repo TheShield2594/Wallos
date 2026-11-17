@@ -19,7 +19,7 @@ if ($subscriptionToClone === false) {
     ]));
 }
 
-$query = "INSERT INTO subscriptions (name, logo, price, currency_id, next_payment, auto_renew, start_date, cycle, frequency, notes, payment_method_id, payer_user_id, category_id, notify, url, inactive, notify_days_before, user_id, cancellation_date, replacement_subscription_id, billing_anchor_day, renew_from_action, variable_amount, end_date, total_payments, payments_made, ended_reason, plan_mode, tier_name) VALUES (:name, :logo, :price, :currency_id, :next_payment, :auto_renew, :start_date, :cycle, :frequency, :notes, :payment_method_id, :payer_user_id, :category_id, :notify, :url, :inactive, :notify_days_before, :user_id, :cancellation_date, :replacement_subscription_id, :billing_anchor_day, :renew_from_action, :variable_amount, :end_date, :total_payments, :payments_made, :ended_reason, :plan_mode, :tier_name)";
+$query = "INSERT INTO subscriptions (name, logo, price, currency_id, next_payment, auto_renew, start_date, cycle, frequency, notes, payment_method_id, payer_user_id, category_id, notify, url, inactive, notify_days_before, user_id, cancellation_date, replacement_subscription_id, billing_anchor_day, renew_from_action, variable_amount, end_date, total_payments, payments_made, ended_reason, plan_mode, tier_name, active_months) VALUES (:name, :logo, :price, :currency_id, :next_payment, :auto_renew, :start_date, :cycle, :frequency, :notes, :payment_method_id, :payer_user_id, :category_id, :notify, :url, :inactive, :notify_days_before, :user_id, :cancellation_date, :replacement_subscription_id, :billing_anchor_day, :renew_from_action, :variable_amount, :end_date, :total_payments, :payments_made, :ended_reason, :plan_mode, :tier_name, :active_months)";
 $cloneStmt = $db->prepare($query);
 $cloneStmt->bindValue(':name', $subscriptionToClone['name'], SQLITE3_TEXT);
 $cloneStmt->bindValue(':logo', $subscriptionToClone['logo'], SQLITE3_TEXT);
@@ -45,6 +45,7 @@ foreach (['billing_anchor_day', 'renew_from_action', 'variable_amount', 'total_p
     $value = $subscriptionToClone[$scheduleColumn] ?? null;
     $cloneStmt->bindValue(':' . $scheduleColumn, $value, $value === null ? SQLITE3_NULL : SQLITE3_INTEGER);
 }
+$cloneStmt->bindValue(':active_months', (int) ($subscriptionToClone['active_months'] ?? 4095), SQLITE3_INTEGER);
 foreach (['end_date', 'ended_reason', 'plan_mode', 'tier_name'] as $scheduleColumn) {
     $value = $subscriptionToClone[$scheduleColumn] ?? null;
     $cloneStmt->bindValue(':' . $scheduleColumn, $value, $value === null ? SQLITE3_NULL : SQLITE3_TEXT);

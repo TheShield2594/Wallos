@@ -772,6 +772,10 @@ $i18n = [
     "decimals_auto" => "Auto",
     "decimals_count" => "%d decimals",
     "decimals_info" => "Decimals sets how many digits each currency shows after the decimal point. Auto uses the currency's usual digits, and up to 8 for codes like BTC.",
+    // Active months
+    "active_months" => "Active months",
+    "active_months_info" => "Payments in unselected months are skipped. The monthly cost spreads the active months' payments over the year.",
+    "active_months_none" => "Pick at least one month.",
 ];
 
 

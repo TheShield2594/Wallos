@@ -70,7 +70,7 @@ function get_upcoming_cancellations_monthly_value($cancellations, $db, $userId)
     $total = 0;
 
     foreach ($cancellations as $subscription) {
-        $perMonth = getPricePerMonth($subscription['cycle'], $subscription['frequency'], $subscription['price']);
+        $perMonth = getPricePerMonth($subscription['cycle'], $subscription['frequency'], $subscription['price'], wallos_cycle_active_months($subscription));
         $total += getPriceConverted($perMonth, $subscription['currency_id'], $db, $userId);
     }
 

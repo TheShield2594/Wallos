@@ -8,26 +8,6 @@ require_once __DIR__ . '/households.php';
 require_once __DIR__ . '/monthly_cost.php';
 require_once __DIR__ . '/price_changes.php';
 
-function getPricePerMonth($cycle, $frequency, $price)
-{
-    switch ($cycle) {
-        case 1:
-            $numberOfPaymentsPerMonth = (30 / $frequency);
-            return $price * $numberOfPaymentsPerMonth;
-        case 2:
-            $numberOfPaymentsPerMonth = (4.35 / $frequency);
-            return $price * $numberOfPaymentsPerMonth;
-        case 3:
-            $numberOfPaymentsPerMonth = (1 / $frequency);
-            return $price * $numberOfPaymentsPerMonth;
-        case 4:
-            $numberOfMonths = (12 * $frequency);
-            return $price / $numberOfMonths;
-        case 5:
-            return 0;
-    }
-}
-
 function getPriceConverted($price, $currency, $database, $userId)
 {
     return wallos_convert_price($price, $currency, $database, $userId);
@@ -119,7 +99,7 @@ $totalSavingsPerMonth = 0;
 $totalCostsInReplacementsPerMonth = 0;
 
 $statsSubtitleParts = [];
-$query = "SELECT id, name, price, logo, logo_text_color, logo_variant, frequency, cycle, currency_id, next_payment, payer_user_id, category_id, payment_method_id, inactive, replacement_subscription_id, start_date, auto_renew, billing_anchor_day, end_date, total_payments, payments_made, ended_reason, intro_type, intro_price, intro_end_date, intro_converted_on FROM subscriptions";
+$query = "SELECT id, name, price, logo, logo_text_color, logo_variant, frequency, cycle, currency_id, next_payment, payer_user_id, category_id, payment_method_id, inactive, replacement_subscription_id, start_date, auto_renew, billing_anchor_day, active_months, end_date, total_payments, payments_made, ended_reason, intro_type, intro_price, intro_end_date, intro_converted_on FROM subscriptions";
 $conditions = [];
 $params = [];
 
@@ -221,7 +201,7 @@ if ($result) {
             // price; a cancelled trial is saved at the regular price.
             $hasIntro = wallos_intro_active($subscription);
             $originalSubscriptionPrice = getPriceConverted($inactive == 0 ? wallos_current_price($subscription) : $price, $currency, $db, $userId);
-            $price = getPricePerMonth($cycle, $frequency, $originalSubscriptionPrice);
+            $price = getPricePerMonth($cycle, $frequency, $originalSubscriptionPrice, wallos_cycle_active_months($subscription));
 
             if ($inactive == 0) {
                 // A fixed-term plan only costs the payments it has left in
@@ -305,7 +285,7 @@ if ($result) {
 
                 // Check if it has a replacement subscription and if it was not already counted
                 if ($replacementSubscriptionId && !in_array($replacementSubscriptionId, $replacementSubscriptions)) {
-                    $query = "SELECT price, currency_id, cycle, frequency FROM subscriptions WHERE id = :replacementSubscriptionId AND user_id = :userId";
+                    $query = "SELECT price, currency_id, cycle, frequency, active_months FROM subscriptions WHERE id = :replacementSubscriptionId AND user_id = :userId";
                     $stmt = $db->prepare($query);
                     $stmt->bindValue(':replacementSubscriptionId', $replacementSubscriptionId, SQLITE3_INTEGER);
                     $stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
@@ -313,7 +293,7 @@ if ($result) {
                     $replacementSubscription = $result->fetchArray(SQLITE3_ASSOC);
                     if ($replacementSubscription) {
                         $replacementSubscriptionPrice = getPriceConverted($replacementSubscription['price'], $replacementSubscription['currency_id'], $db, $userId);
-                        $replacementSubscriptionPrice = getPricePerMonth($replacementSubscription['cycle'], $replacementSubscription['frequency'], $replacementSubscriptionPrice);
+                        $replacementSubscriptionPrice = getPricePerMonth($replacementSubscription['cycle'], $replacementSubscription['frequency'], $replacementSubscriptionPrice, wallos_cycle_active_months($replacementSubscription));
                         $totalCostsInReplacementsPerMonth += $replacementSubscriptionPrice;
                     }
                 }

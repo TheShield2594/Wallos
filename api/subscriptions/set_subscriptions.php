@@ -36,6 +36,7 @@ For 'add' and 'edit' actions (all optional for 'edit'):
 - shared: 1 to share the subscription with your household, 0 to make it private.
 - replacement_subscription_id: the ID of the replacement subscription (integer).
 - tier_name: (edit) the plan or tier name (string, empty to clear).
+- active_months: the months a daily, weekly or monthly plan bills in, as a 12-bit mask (integer 1-4095, bit 0 = January, 4095 = every month; Sep-Dec is 3840). A next_payment in an inactive month moves to the first active one.
 - price_change_reason: (edit) 'tier' (default, you changed plan) or 'provider' (the provider changed the price); recorded in the price history when the price, currency, cycle or frequency changes.
 
 It returns a JSON object with the following properties:
@@ -63,6 +64,52 @@ require_once '../../includes/cancellation_deadline.php';
 require_once '../../includes/intro_pricing.php';
 require_once '../../includes/households.php';
 require_once '../../includes/price_changes.php';
+require_once '../../includes/recurrence.php';
+
+/**
+ * The active_months parameter (issue #25): the stored mask when absent, every
+ * month for yearly plans. Exits with an error for anything but 1-4095.
+ */
+function api_active_months_input($cycle, $current = 4095)
+{
+    if (!wallos_cycle_supports_active_months($cycle)) {
+        return WALLOS_ALL_MONTHS;
+    }
+    if (!array_key_exists('active_months', $_POST)) {
+        return wallos_sanitize_active_months($current);
+    }
+    $value = $_POST['active_months'];
+    if (!ctype_digit((string) $value) || (int) $value < 1 || (int) $value > WALLOS_ALL_MONTHS) {
+        echo json_encode([
+            'success' => false,
+            'title' => 'Invalid parameter',
+            'message' => 'Parameter "active_months" must be an integer from 1 to 4095 (bit 0 = January).'
+        ]);
+        exit;
+    }
+
+    return (int) $value;
+}
+
+/**
+ * Moves next_payment into the first active month of the schedule.
+ */
+function api_first_active_payment($nextPayment, $startDate, $cycle, $frequency, $activeMonths)
+{
+    $date = wallos_parse_date($nextPayment);
+    if ($date === null || $activeMonths === WALLOS_ALL_MONTHS) {
+        return $nextPayment;
+    }
+    $first = wallos_first_active_occurrence([
+        'next_payment' => $nextPayment,
+        'start_date' => $startDate,
+        'cycle' => $cycle,
+        'frequency' => $frequency,
+        'active_months' => $activeMonths,
+    ], $date);
+
+    return $first !== null ? $first->format('Y-m-d') : $nextPayment;
+}
 
 /**
  * Settings saved after the subscription row itself: the cancellation notice
@@ -684,13 +731,15 @@ switch ($action) {
                             name, logo, price, currency_id, next_payment, cycle, frequency, notes,
                             payment_method_id, payer_user_id, category_id, notify, inactive, url,
                             notify_days_before, user_id, cancellation_date, replacement_subscription_id,
-                            auto_renew, start_date, logo_text_color, logo_variant
+                            auto_renew, start_date, logo_text_color, logo_variant, active_months
                         ) VALUES (
                             :name, :logo, :price, :currencyId, :nextPayment, :cycle, :frequency, :notes,
                             :paymentMethodId, :payerUserId, :categoryId, :notify, :inactive, :url,
                             :notifyDaysBefore, :userId, :cancellationDate, :replacement_subscription_id,
-                            :autoRenew, :startDate, :logoTextColor, :logoVariant
+                            :autoRenew, :startDate, :logoTextColor, :logoVariant, :activeMonths
                         )";
+        $activeMonths = api_active_months_input($cycle);
+        $nextPayment = api_first_active_payment($nextPayment, $startDate, $cycle, $frequency, $activeMonths);
         $stmtInsert = $db->prepare($sqlInsert);
         $stmtInsert->bindParam(':name', $name, SQLITE3_TEXT);
         $stmtInsert->bindParam(':logo', $logo, SQLITE3_TEXT);
@@ -714,6 +763,7 @@ switch ($action) {
         $stmtInsert->bindParam(':replacement_subscription_id', $replacementSubscriptionId, SQLITE3_INTEGER);
         $stmtInsert->bindParam(':autoRenew', $autoRenew, SQLITE3_INTEGER);
         $stmtInsert->bindParam(':startDate', $startDate, SQLITE3_TEXT);
+        $stmtInsert->bindValue(':activeMonths', $activeMonths, SQLITE3_INTEGER);
 
         $newSubscriptionId = api_save_atomically($db, function () use ($db, $stmtInsert) {
             return $stmtInsert->execute() !== false ? $db->lastInsertRowID() : false;
@@ -1031,8 +1081,11 @@ switch ($action) {
                             notify_days_before = :notifyDaysBefore,
                             cancellation_date = :cancellationDate,
                             replacement_subscription_id = :replacement_subscription_id,
-                            tier_name = :tierName
+                            tier_name = :tierName,
+                            active_months = :activeMonths
                        WHERE id = :id AND user_id = :userId";
+        $activeMonths = api_active_months_input($cycle, $subscription['active_months'] ?? WALLOS_ALL_MONTHS);
+        $nextPayment = api_first_active_payment($nextPayment, $startDate, $cycle, $frequency, $activeMonths);
 
         $stmtUpdate = $db->prepare($sqlUpdate);
         $stmtUpdate->bindParam(':name', $name, SQLITE3_TEXT);
@@ -1056,6 +1109,7 @@ switch ($action) {
         $stmtUpdate->bindParam(':notifyDaysBefore', $notifyDaysBefore, SQLITE3_INTEGER);
         $stmtUpdate->bindParam(':cancellationDate', $cancellationDate, SQLITE3_TEXT);
         $stmtUpdate->bindParam(':replacement_subscription_id', $replacementSubscriptionId, SQLITE3_INTEGER);
+        $stmtUpdate->bindValue(':activeMonths', $activeMonths, SQLITE3_INTEGER);
         $stmtUpdate->bindParam(':id', $subscriptionId, SQLITE3_INTEGER);
         $stmtUpdate->bindParam(':userId', $userId, SQLITE3_INTEGER);
         $tierName = array_key_exists('tier_name', $_POST) ? wallos_normalize_tier_name($_POST['tier_name']) : ($subscription['tier_name'] ?? null);

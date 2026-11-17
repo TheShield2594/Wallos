@@ -53,6 +53,7 @@ function resetForm() {
   delete document.querySelector("#next_payment").dataset.trialBase;
   toggleIntroFields();
   updatePriceStep();
+  setActiveMonths(4095);
   setSharedEditMode(null);
   rememberPriceForChange(null);
   closeLogoSearch();
@@ -99,6 +100,7 @@ function fillEditFormFields(subscription) {
   const cycleSelect = document.querySelector("#cycle");
   cycleSelect.value = subscription.cycle;
   toggleOneTimeCycleUI(subscription.cycle == 5);
+  setActiveMonths(subscription.active_months);
   const paymentSelect = document.querySelector("#payment_method");
   paymentSelect.value = subscription.payment_method_id;
   const categorySelect = document.querySelector("#category");
@@ -1008,7 +1010,8 @@ function autoFillNextPaymentDate(e) {
 
   // Each occurrence is computed from the start date, with months and years
   // clamped to the end of the month, so Jan 31 renews Feb 28 then Mar 31.
-  while (nextDate <= today && safetyCounter < maxIterations) {
+  // Dates in an inactive month (Settings: Active months) are skipped too.
+  while ((nextDate <= today || !formMonthIsActive(nextDate)) && safetyCounter < maxIterations) {
     safetyCounter++;
     switch (cycle) {
     case '1': // Days
@@ -1565,4 +1568,73 @@ document.addEventListener("DOMContentLoaded", function () {
       field.addEventListener("change", updatePriceChangeNotice);
     }
   });
+});
+
+/*
+  Active months (issue #25): daily, weekly and monthly plans can bill in some
+  months only. The mask matches subscriptions.active_months: bit 0 = January.
+*/
+function activeMonthInputs() {
+  return Array.from(document.querySelectorAll('.month-chip-input'));
+}
+
+function setActiveMonths(mask) {
+  const value = Number(mask) >= 1 && Number(mask) <= 4095 ? Number(mask) : 4095;
+  activeMonthInputs().forEach((input) => {
+    input.checked = (value & (1 << (Number(input.value) - 1))) !== 0;
+  });
+  toggleActiveMonthsGroup();
+}
+
+function formActiveMonthsMask() {
+  if (!activeMonthsApply()) {
+    return 4095;
+  }
+  const mask = activeMonthInputs().reduce((total, input) => input.checked ? total | (1 << (Number(input.value) - 1)) : total, 0);
+  return mask === 0 ? 4095 : mask;
+}
+
+function activeMonthsApply() {
+  const cycle = document.querySelector("#cycle");
+  return cycle && ['1', '2', '3'].includes(String(cycle.value));
+}
+
+function formMonthIsActive(date) {
+  return (formActiveMonthsMask() & (1 << date.getMonth())) !== 0;
+}
+
+function toggleActiveMonthsGroup() {
+  const group = document.querySelector("#active-months-group");
+  if (!group) {
+    return;
+  }
+  const applies = activeMonthsApply();
+  group.classList.toggle('hide', !applies);
+  activeMonthInputs().forEach((input) => { input.disabled = !applies; });
+  updateActiveMonthsHint();
+}
+
+function updateActiveMonthsHint() {
+  const inputs = activeMonthInputs();
+  if (inputs.length === 0) {
+    return;
+  }
+  const none = activeMonthsApply() && !inputs.some((input) => input.checked);
+  const hint = document.querySelector("#active-months-hint");
+  if (hint) {
+    if (!hint.dataset.info) {
+      hint.dataset.info = hint.textContent;
+    }
+    hint.textContent = none ? hint.dataset.none : hint.dataset.info;
+    hint.classList.toggle('is-danger', none);
+  }
+  inputs[0].setCustomValidity(none ? (hint ? hint.dataset.none : 'none') : '');
+}
+
+document.addEventListener("DOMContentLoaded", function () {
+  const cycle = document.querySelector("#cycle");
+  if (cycle) {
+    cycle.addEventListener("change", toggleActiveMonthsGroup);
+    toggleActiveMonthsGroup();
+  }
 });

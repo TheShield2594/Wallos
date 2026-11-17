@@ -234,14 +234,14 @@ foreach ($subscriptions as $subscription) {
     $print[$id]['currency_code'] = $currencies[$mainCurrencyId]['code'];
   }
   if (isset($settings['showMonthlyPrice']) && $settings['showMonthlyPrice'] === 'true') {
-    $print[$id]['price'] = getPricePerMonth($cycle, $frequency, $print[$id]['price']);
-    $print[$id]['regular_price'] = getPricePerMonth($cycle, $frequency, $print[$id]['regular_price']);
+    $print[$id]['price'] = getPricePerMonth($cycle, $frequency, $print[$id]['price'], wallos_cycle_active_months($subscription));
+    $print[$id]['regular_price'] = getPricePerMonth($cycle, $frequency, $print[$id]['regular_price'], wallos_cycle_active_months($subscription));
   }
   // Sort on the price in the main currency, whether or not it is displayed
   // converted, so mixed currencies order by value rather than raw number.
   $sortPrice = $currencyId != $mainCurrencyId ? getPriceConverted(wallos_current_price($subscription), $currencyId, $db) : wallos_current_price($subscription);
   if (isset($settings['showMonthlyPrice']) && $settings['showMonthlyPrice'] === 'true') {
-    $sortPrice = getPricePerMonth($cycle, $frequency, $sortPrice);
+    $sortPrice = getPricePerMonth($cycle, $frequency, $sortPrice, wallos_cycle_active_months($subscription));
   }
   $print[$id]['sort_price'] = $sortPrice;
   if (isset($settings['showOriginalPrice']) && $settings['showOriginalPrice'] === 'true') {
@@ -461,6 +461,32 @@ if ($db->querySingle("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND 
           </div>
         </div>
       </div>
+    </div>
+
+    <div class="form-group" id="active-months-group">
+      <fieldset class="month-chips-fieldset">
+        <legend><?= translate('active_months', $i18n) ?></legend>
+        <div class="month-chips">
+          <?php
+          $monthChipFormatter = null;
+          try {
+            $monthChipFormatter = new IntlDateFormatter($lang, IntlDateFormatter::NONE, IntlDateFormatter::NONE, null, null, 'LLL');
+          } catch (Throwable $e) {
+            $monthChipFormatter = null;
+          }
+          for ($month = 1; $month <= 12; $month++) {
+            $monthDate = new DateTime(sprintf('2001-%02d-01', $month));
+            $monthChipName = $monthChipFormatter ? $monthChipFormatter->format($monthDate) : $monthDate->format('M');
+            ?>
+            <input type="checkbox" class="month-chip-input" id="active_month_<?= $month ?>" name="active_months[]"
+              value="<?= $month ?>" checked onchange="updateActiveMonthsHint()">
+            <label class="month-chip" for="active_month_<?= $month ?>"><?= htmlspecialchars($monthChipName) ?></label>
+            <?php
+          }
+          ?>
+        </div>
+      </fieldset>
+      <p class="form-hint" id="active-months-hint" data-none="<?= translate('active_months_none', $i18n) ?>"><?= translate('active_months_info', $i18n) ?></p>
     </div>
 
     <div class="form-group">

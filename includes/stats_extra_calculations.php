@@ -48,7 +48,7 @@ if (isset($subscriptions)) {
         $cycle = (int) $subscription['cycle'];
         $frequency = max(1, (int) $subscription['frequency']);
         $convertedPrice = getPriceConverted($subscription['price'], $subscription['currency_id'], $db, $userId);
-        $monthlyPrice = getPricePerMonth($cycle, $frequency, $convertedPrice);
+        $monthlyPrice = getPricePerMonth($cycle, $frequency, $convertedPrice, wallos_cycle_active_months($subscription));
 
         // New subscriptions per year (all subscriptions, active or not)
         $startDate = null;

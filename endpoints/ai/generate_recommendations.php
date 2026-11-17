@@ -5,17 +5,6 @@ require_once '../../includes/validate_endpoint.php';
 require_once '../../includes/ssrf_helper.php';
 require_once '../../includes/ai_client.php';
 
-function getPricePerMonth($cycle, $frequency, $price)
-{
-    switch ($cycle) {
-        case 1:  return $price * (30 / $frequency);   // daily
-        case 2:  return $price * (4.35 / $frequency); // weekly
-        case 3:  return $price / $frequency;          // monthly
-        case 4:  return $price / (12 * $frequency);   // yearly
-        default: return $price;
-    }
-}
-
 function describeFrequency($cycle, $frequency)
 {
     $unit = match ($cycle) {

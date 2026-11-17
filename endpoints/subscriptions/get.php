@@ -227,14 +227,14 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
       $print[$id]['currency_code'] = $currencies[$mainCurrencyId]['code'];
     }
     if (isset($settings['showMonthlyPrice']) && $settings['showMonthlyPrice'] === 'true') {
-      $print[$id]['price'] = getPricePerMonth($cycle, $frequency, $print[$id]['price']);
-      $print[$id]['regular_price'] = getPricePerMonth($cycle, $frequency, $print[$id]['regular_price']);
+      $print[$id]['price'] = getPricePerMonth($cycle, $frequency, $print[$id]['price'], wallos_cycle_active_months($subscription));
+      $print[$id]['regular_price'] = getPricePerMonth($cycle, $frequency, $print[$id]['regular_price'], wallos_cycle_active_months($subscription));
     }
     // Sort on the price in the main currency, whether or not it is displayed
     // converted, so mixed currencies order by value rather than raw number.
     $sortPrice = $currencyId != $mainCurrencyId ? getPriceConverted(wallos_current_price($subscription), $currencyId, $db) : wallos_current_price($subscription);
     if (isset($settings['showMonthlyPrice']) && $settings['showMonthlyPrice'] === 'true') {
-      $sortPrice = getPricePerMonth($cycle, $frequency, $sortPrice);
+      $sortPrice = getPricePerMonth($cycle, $frequency, $sortPrice, wallos_cycle_active_months($subscription));
     }
     $print[$id]['sort_price'] = $sortPrice;
     if (isset($settings['showOriginalPrice']) && $settings['showOriginalPrice'] === 'true') {
