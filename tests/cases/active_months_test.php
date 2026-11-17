@@ -116,3 +116,22 @@ wallos_test('no page keeps its own monthly price arithmetic', function () {
         assert_not_contains('function getPricePerMonth(', file_get_contents(WALLOS_ROOT . '/' . $file), $file . ' uses includes/monthly_cost.php');
     }
 });
+
+wallos_test('cancellation savings read the stored active months', function () {
+    require_once WALLOS_ROOT . '/includes/upcoming_cancellations.php';
+    $db = wallos_test_open_database();
+    wallos_test_create_user($db, 1, 'alice');
+    $next = (new DateTime('first day of next month'))->format('Y-m-d');
+    $db->exec("INSERT INTO subscriptions (name, price, currency_id, next_payment, cycle, frequency, user_id, inactive, cancellation_date, active_months)
+        VALUES ('Season pass', 120, 1, '$next', 3, 1, 1, 0, '$next', 1)");
+    $rows = get_upcoming_cancellations($db, 1);
+    assert_true(count($rows) === 1, 'listed');
+    assert_same(1, (int) $rows[0]['active_months'], 'mask selected');
+    assert_equals(10.0, wallos_price_per_month($rows[0]['cycle'], $rows[0]['frequency'], $rows[0]['price'], wallos_cycle_active_months($rows[0])), 'January only is 10 a month');
+    $db->close();
+});
+
+wallos_test('the statistics projection uses the shared schedule', function () {
+    $source = file_get_contents(WALLOS_ROOT . '/includes/stats_extra_calculations.php');
+    assert_contains('wallos_occurrences_in_range($subscription, $projectionStart', $source, 'projection honours active months');
+});

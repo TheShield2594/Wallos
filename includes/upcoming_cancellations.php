@@ -24,7 +24,7 @@ function get_upcoming_cancellations($db, $userId, $today = null)
 {
     $today = $today ?? (new DateTime('today'))->format('Y-m-d');
     $stmt = $db->prepare("SELECT id, user_id, logo, logo_text_color, logo_variant, name, price, currency_id, cycle, frequency,
-            next_payment, start_date, billing_anchor_day, end_date, inactive, cancellation_date,
+            next_payment, start_date, billing_anchor_day, active_months, end_date, inactive, cancellation_date,
             cancel_notice_mode, cancel_notice_value, cancel_notice_unit, min_term_end
         FROM subscriptions
         WHERE user_id = :userId

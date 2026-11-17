@@ -316,7 +316,9 @@ $actualYearOverYear = $actualLastYear > 0 ? ($actualThisYear - $actualLastYear) 
     }
   }
   usort($categoryDataPoints, fn($a, $b) => $b['y'] <=> $a['y']);
-  $showCategoryCostGraph = count($categoryDataPoints) > 1;
+  // A single slice says nothing, unless it is a parent that opens its sub-categories.
+  $categorySplitWorthShowing = fn($points) => count($points) > 1 || (count($points) === 1 && !empty($points[0]['href']));
+  $showCategoryCostGraph = $categorySplitWorthShowing($categoryDataPoints);
 
   $memberDataPoints = [];
   if (isset($memberCost)) {
@@ -371,7 +373,7 @@ $actualYearOverYear = $actualLastYear > 0 ? ($actualThisYear - $actualLastYear) 
     usort($categoryDataPoints, fn($a, $b) => $b['y'] <=> $a['y']);
     $memberDataPoints = wallos_period_split_points($periodCharges['by_member'], array_map(fn($row) => $row['name'], $memberCost ?? []));
     $paymentMethodDataPoints = wallos_period_split_points($periodCharges['by_payment'], array_map(fn($row) => $row['name'], $paymentMethodsCount ?? []));
-    $showCategoryCostGraph = count($categoryDataPoints) > 1;
+    $showCategoryCostGraph = $categorySplitWorthShowing($categoryDataPoints);
     $showMemberCostGraph = count($memberDataPoints) > 1;
     $showPaymentMethodsGraph = count($paymentMethodDataPoints) > 1;
   }

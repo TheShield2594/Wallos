@@ -90,20 +90,15 @@ if (isset($subscriptions)) {
                 $manualRenewalsCount++;
             }
 
-            // Projection: walk renewals forward into the buckets
-            $paymentTimestamp = strtotime($subscription['next_payment'] ?? '');
-            if ($paymentTimestamp !== false && isset($cycleStepUnits[$cycle])) {
-                $paymentDate = (new DateTime())->setTimestamp($paymentTimestamp);
-                $safety = 0;
-                while ($paymentDate < $projectionEnd && $safety < 1000) {
-                    if ($paymentDate >= $projectionStart) {
-                        $bucketKey = $paymentDate->format('Y-m');
-                        if (isset($projectionBuckets[$bucketKey])) {
-                            $projectionBuckets[$bucketKey]['total'] += $convertedPrice;
-                        }
+            // Projection: the renewals in each bucket, from the shared schedule
+            // (anchored days, plan end dates and active months included).
+            if (isset($cycleStepUnits[$cycle])) {
+                $projectionLastDay = (clone $projectionEnd)->modify('-1 day');
+                foreach (wallos_occurrences_in_range($subscription, $projectionStart, $projectionLastDay) as $paymentDate) {
+                    $bucketKey = $paymentDate->format('Y-m');
+                    if (isset($projectionBuckets[$bucketKey])) {
+                        $projectionBuckets[$bucketKey]['total'] += $convertedPrice;
                     }
-                    $paymentDate->modify("+{$frequency} {$cycleStepUnits[$cycle]}");
-                    $safety++;
                 }
             }
 
