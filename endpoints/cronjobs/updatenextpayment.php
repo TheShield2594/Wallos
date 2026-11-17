@@ -34,6 +34,7 @@ $stmt->bindValue(':currentDate', $currentDate->format('Y-m-d'));
 $result = $stmt->execute();
 
 $due = [];
+$failed = [];
 while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
     $due[] = $row;
 }
@@ -46,7 +47,19 @@ foreach ($due as $row) {
         continue;
     }
 
-    wallos_apply_schedule_advance($db, $row, $currentDate);
+    if (empty(wallos_apply_schedule_advance($db, $row, $currentDate)['success'])) {
+        $failed[] = $row;
+    }
+}
+
+// A row skipped because the database stayed busy (each advance is its own
+// transaction) gets one more try once the rest are done, and is reported if
+// it still fails; the next run picks it up from its stored date.
+$stillFailed = [];
+foreach ($failed as $row) {
+    if (empty(wallos_apply_schedule_advance($db, $row, $currentDate)['success'])) {
+        $stillFailed[] = (int) $row['id'];
+    }
 }
 
 $formattedDate = $currentDate->format('Y-m-d');
@@ -60,5 +73,9 @@ $stmt = $db->prepare($query);
 $stmt->bindParam(':formattedDate', $currentDateString, SQLITE3_TEXT);
 $result = $stmt->execute();
 
+if ($stillFailed !== []) {
+    echo "Could not update " . count($stillFailed) . " subscription(s) because the database was busy (ids: "
+        . implode(', ', $stillFailed) . "); they will be retried on the next run.<br />\n";
+}
 echo "Updated next payment dates";
 ?>
