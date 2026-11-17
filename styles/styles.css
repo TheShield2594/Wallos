@@ -1184,6 +1184,14 @@ input.hidden {
   color: var(--danger);
 }
 
+.list-row-subtitle.is-success {
+  color: var(--success);
+}
+
+.list-row-subtitle.is-warning {
+  color: var(--warning);
+}
+
 .list-row-subtitle:empty {
   display: none;
 }
@@ -1679,6 +1687,75 @@ body.light img.logo-theme-variant[data-native-theme="dark"] {
 
 .detail-status.is-danger {
   color: var(--danger);
+}
+
+.detail-status.is-success {
+  color: var(--success);
+}
+
+/* Payment history card in the details panel. */
+.history-sparkline {
+  display: block;
+  width: calc(100% - 32px);
+  height: 48px;
+  margin: 4px 16px 8px;
+  color: var(--tint);
+}
+
+.history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 6px;
+}
+
+.history-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 4px 8px 4px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.history-text {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  min-width: 0;
+}
+
+.history-date {
+  font-size: 14px;
+  color: var(--text);
+}
+
+.history-status,
+.history-note {
+  font-size: 12px;
+  color: var(--text2);
+}
+
+.history-status.is-paid {
+  color: var(--success);
+}
+
+.history-status.is-pending_amount {
+  color: var(--warning);
+}
+
+.history-note {
+  flex-basis: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-amount {
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
 }
 
 .detail-actions {
@@ -2532,6 +2609,16 @@ body.light img.logo-theme-variant[data-native-theme="dark"] {
 
 .form-group .inline .inline {
   align-items: center;
+}
+
+.form-hint {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--text2);
+}
+
+.form-hint:empty {
+  display: none;
 }
 
 .form-group.hide,

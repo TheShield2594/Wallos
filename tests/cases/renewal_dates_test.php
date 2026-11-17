@@ -55,10 +55,22 @@ wallos_test('daily and weekly renewals are unchanged', function () {
     assert_same(['2026-02-14', '2026-02-28'], renewal_dates_series('2026-01-31', 'Weekly', 2, 2), 'weekly steps whole weeks');
 });
 
-wallos_test('the renewal cron and manual renew endpoint use the clamping helper', function () {
-    foreach (['endpoints/cronjobs/updatenextpayment.php', 'endpoints/subscription/renew.php', 'calendar.php'] as $file) {
+wallos_test('the renewal cron, mark-paid and the calendar step dates through the recurrence engine', function () {
+    // includes/recurrence.php builds on wallos_renewal_date() and adds the
+    // calendar anchor; every caller goes through it.
+    $engine = file_get_contents(WALLOS_ROOT . '/includes/recurrence.php');
+    assert_contains('wallos_renewal_date(', $engine, 'the recurrence engine clamps through wallos_renewal_date()');
+
+    $callers = [
+        'endpoints/cronjobs/updatenextpayment.php' => 'wallos_apply_schedule_advance(',
+        'includes/payment_ledger.php' => 'wallos_next_occurrence(',
+        'calendar.php' => 'wallos_occurrences_in_range(',
+        'includes/budget_period_calculations.php' => 'wallos_occurrences_in_range(',
+        'api/subscriptions/get_monthly_cost.php' => 'wallos_occurrences_in_range(',
+    ];
+    foreach ($callers as $file => $call) {
         $source = file_get_contents(WALLOS_ROOT . '/' . $file);
-        assert_contains('wallos_renewal_date(', $source, $file . ' advances dates through wallos_renewal_date()');
+        assert_contains($call, $source, $file . ' uses the recurrence engine');
         assert_true(strpos($source, 'new DateInterval(') === false && strpos($source, '{$frequency} months') === false,
             $file . ' no longer adds raw month intervals');
     }

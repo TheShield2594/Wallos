@@ -1723,6 +1723,13 @@ $upcomingPaymentsLimit = normalize_upcoming_payments_limit($settings['upcoming_p
             </div>
             <div>
                 <div class="form-group-inline">
+                    <input type="checkbox" id="requirepaymentconfirmation" name="requirepaymentconfirmation"
+                        onChange="setRequirePaymentConfirmation()" <?= !empty($settings['require_payment_confirmation']) ? 'checked' : '' ?>>
+                    <label for="requirepaymentconfirmation"><?= translate('require_payment_confirmation', $i18n) ?></label>
+                </div>
+            </div>
+            <div>
+                <div class="form-group-inline">
                     <input type="checkbox" id="weekstartssunday" name="weekstartssunday"
                         onChange="setWeekStartsSunday()" <?= !empty($settings['week_starts_sunday']) ? 'checked' : '' ?>>
                     <label for="weekstartssunday"><?= translate('week_starts_on_sunday', $i18n) ?></label>

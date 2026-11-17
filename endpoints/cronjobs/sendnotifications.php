@@ -339,7 +339,7 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
         $activeBudgetPeriod = getActiveBudgetPeriod($currentDate, $budgetPeriodType, $budgetPeriodAnchorDate);
         $isPeriodStart = $activeBudgetPeriod['start']->format('Y-m-d') === $currentDate->format('Y-m-d');
 
-        $query = "SELECT price, currency_id, next_payment, cycle, frequency, inactive, auto_renew FROM subscriptions WHERE user_id = :userId AND inactive = 0";
+        $query = "SELECT price, currency_id, next_payment, cycle, frequency, inactive, auto_renew, start_date, billing_anchor_day, end_date FROM subscriptions WHERE user_id = :userId AND inactive = 0";
         $stmt = $db->prepare($query);
         $stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
         $result = $stmt->execute();

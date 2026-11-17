@@ -362,7 +362,8 @@ if ($db->querySingle("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND 
 
     <div class="form-group-inline">
       <input type="number" step="0.01" id="price" name="price" autocomplete="off"
-        placeholder="<?= translate('price', $i18n) ?>" required>
+        placeholder="<?= translate('price', $i18n) ?>" data-placeholder-price="<?= translate('price', $i18n) ?>"
+        data-placeholder-estimate="<?= translate('estimated_price', $i18n) ?>" required>
       <select id="currency" name="currency_id" placeholder="<?= translate('add_subscription', $i18n) ?>">
         <?php
         foreach ($currencies as $currency) {
@@ -405,7 +406,7 @@ if ($db->querySingle("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND 
         <div class="split33" id="auto-renew-group">
           <label><?= translate('auto_renewal', $i18n) ?></label>
           <div class="inline height50">
-            <input type="checkbox" id="auto_renew" name="auto_renew" checked>
+            <input type="checkbox" id="auto_renew" name="auto_renew" checked onchange="toggleRenewFromAction()">
             <label for="auto_renew"><?= translate('automatically_renews', $i18n) ?></label>
           </div>
         </div>
@@ -439,6 +440,42 @@ if ($db->querySingle("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND 
           </div>
         </div>
       </div>
+    </div>
+
+    <div class="form-group" id="ends-group">
+      <div class="inline">
+        <div class="split50">
+          <label for="ends_mode"><?= translate('ends', $i18n) ?></label>
+          <select id="ends_mode" name="ends_mode" onchange="toggleEndsFields()">
+            <option value="never"><?= translate('ends_never', $i18n) ?></option>
+            <option value="date"><?= translate('ends_on_date', $i18n) ?></option>
+            <option value="count"><?= translate('ends_after_payments', $i18n) ?></option>
+          </select>
+        </div>
+        <div class="split50 hide" id="end-date-field">
+          <label for="end_date"><?= translate('final_payment', $i18n) ?></label>
+          <div class="date-wrapper">
+            <input type="date" id="end_date" name="end_date" autocomplete="off" onchange="updateEndsHint()">
+          </div>
+        </div>
+        <div class="split50 hide" id="total-payments-field">
+          <label for="total_payments"><?= translate('number_of_payments', $i18n) ?></label>
+          <input type="number" id="total_payments" name="total_payments" min="1" max="10000" step="1" autocomplete="off" oninput="updateEndsHint()">
+        </div>
+      </div>
+      <p class="form-hint" id="ends-hint" aria-live="polite"
+        data-final-payment="<?= htmlspecialchars(translate('final_payment_on', $i18n), ENT_QUOTES) ?>"
+        data-payments-remaining="<?= htmlspecialchars(translate('payments_remaining_from_next', $i18n), ENT_QUOTES) ?>"></p>
+    </div>
+
+    <div class="form-group-inline grow" id="variable-amount-group">
+      <input type="checkbox" id="variable_amount" name="variable_amount" onchange="toggleVariableAmount()">
+      <label for="variable_amount" class="grow"><?= translate('variable_amount', $i18n) ?></label>
+    </div>
+
+    <div class="form-group-inline grow" id="renew-from-action-group">
+      <input type="checkbox" id="renew_from_action" name="renew_from_action">
+      <label for="renew_from_action" class="grow"><?= translate('renewal_resets_cycle', $i18n) ?></label>
     </div>
 
     <div class="form-group">

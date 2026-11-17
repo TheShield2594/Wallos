@@ -3,6 +3,7 @@
 require_once 'i18n/getlang.php';
 require_once __DIR__ . '/currency_rates.php';
 require_once __DIR__ . '/ui_helpers.php';
+require_once __DIR__ . '/payment_ledger.php';
 
 function getBillingCycle($cycle, $frequency, $i18n)
 {
@@ -20,47 +21,17 @@ function getBillingCycle($cycle, $frequency, $i18n)
     }
 }
 
-function getSubscriptionProgress($cycle, $frequency, $next_payment)
+function getSubscriptionProgress($cycle, $frequency, $next_payment, $subscription = [])
 {
-    if ($cycle === 5) {
-        return 0;
-    }
+    // Measured against the real calendar cycle that contains today (see
+    // wallos_cycle_progress()), not a 30- or 365-day approximation.
+    $subscription = array_merge($subscription, [
+        'cycle' => (int) $cycle,
+        'frequency' => (int) $frequency,
+        'next_payment' => $next_payment,
+    ]);
 
-    $nextPaymentDate = new DateTime($next_payment);
-    $currentDate = new DateTime((new DateTime('now'))->format('Y-m-d'));
-
-    $paymentCycleDays = 30; // Default to monthly
-    if ($cycle === 1) {
-        $paymentCycleDays = 1 * $frequency;
-    } else if ($cycle === 2) {
-        $paymentCycleDays = 7 * $frequency;
-    } else if ($cycle === 3) {
-        $paymentCycleDays = 30 * $frequency;
-    } else if ($cycle === 4) {
-        $paymentCycleDays = 365 * $frequency;
-    }
-
-    if ($paymentCycleDays <= 0) {
-        return 0;
-    }
-
-    // next_payment can be many cycles away from today (a stale value, or
-    // several missed renewal runs), so we can't always assume it's within a
-    // single cycle of "now". Walk back however many whole cycles are needed
-    // so the window we measure progress against is the one that actually
-    // contains today.
-    $daysUntilNextPayment = $currentDate->diff($nextPaymentDate)->days;
-    $cyclesBack = $currentDate <= $nextPaymentDate
-        ? max(1, (int) ceil($daysUntilNextPayment / $paymentCycleDays))
-        : 1;
-
-    $lastPaymentDate = clone $nextPaymentDate;
-    $lastPaymentDate->modify('-' . ($cyclesBack * $paymentCycleDays) . ' days');
-
-    $daysSinceLastPayment = $lastPaymentDate->diff($currentDate)->days;
-    $subscriptionProgress = ($daysSinceLastPayment / $paymentCycleDays) * 100;
-
-    return floor($subscriptionProgress);
+    return wallos_cycle_progress($subscription, new DateTime('today'));
 }
 
 function getPricePerMonth($cycle, $frequency, $price)
@@ -165,11 +136,50 @@ function addListRowFields(&$printRow, $subscription, $mainCurrencyId, $db)
         $monthly = getPriceConverted($monthly, $subscription['currency_id'], $db);
     }
     $printRow['monthly_main'] = $monthly;
+
+    // Schedule state: fixed-term plans, variable amounts and the paid badge.
+    static $paidMaps = [];
+    $mapKey = spl_object_id($db) . '-' . (int) ($subscription['user_id'] ?? 0);
+    if (!isset($paidMaps[$mapKey])) {
+        $paidMaps[$mapKey] = wallos_ledger_last_paid_map($db, (int) ($subscription['user_id'] ?? 0));
+    }
+    $printRow['paid_badge'] = wallos_paid_badge_date($subscription, $paidMaps[$mapKey][(int) $subscription['id']] ?? null);
+    $printRow['ended'] = ($subscription['ended_reason'] ?? null) === 'completed';
+    $printRow['variable_amount'] = (int) ($subscription['variable_amount'] ?? 0) === 1;
+    $printRow['end_date'] = $subscription['end_date'] ?? null;
+    $printRow['plan_total'] = isset($subscription['total_payments']) ? (int) $subscription['total_payments'] : null;
+    $printRow['plan_made'] = (int) ($subscription['payments_made'] ?? 0);
+    if ($printRow['plan_total']) {
+        $printRow['progress'] = (int) floor(min($printRow['plan_made'], $printRow['plan_total']) / $printRow['plan_total'] * 100);
+    } else {
+        $printRow['progress'] = getSubscriptionProgress((int) $subscription['cycle'], (int) $subscription['frequency'], $subscription['next_payment'], $subscription);
+    }
+}
+
+/**
+ * "Payment 4 of 12 · ends Mar 2027" for a fixed-term plan, or '' for an open-ended subscription.
+ */
+function listRowPlanText($subscription, $i18n, $lang)
+{
+    if (empty($subscription['plan_total'])) {
+        return '';
+    }
+    $current = min($subscription['plan_made'] + 1, $subscription['plan_total']);
+    $text = sprintf(translate('payment_n_of_total', $i18n), $current, $subscription['plan_total']);
+    if (!empty($subscription['end_date'])) {
+        $text .= ' · ' . sprintf(translate('ends_on', $i18n), formatDate($subscription['end_date'], $lang));
+    }
+
+    return $text;
 }
 
 function listRowSubtitle($subscription, $i18n, $lang)
 {
     $cycle = $subscription['billing_cycle'];
+    if (!empty($subscription['ended'])) {
+        $total = (int) ($subscription['plan_total'] ?? 0);
+        return [translate('plan_completed_label', $i18n) . ($total ? ' · ' . sprintf(translate('n_payments', $i18n), $total) : ''), ''];
+    }
     if ($subscription['inactive']) {
         $disabledLabel = translate('disabled', $i18n);
         return [mb_strtoupper(mb_substr($disabledLabel, 0, 1)) . mb_substr($disabledLabel, 1) . ' · ' . $cycle, ''];
@@ -181,7 +191,13 @@ function listRowSubtitle($subscription, $i18n, $lang)
     if ($isOverdue) {
         return [translate('overdue', $i18n) . ' · ' . sprintf(translate('was_due', $i18n), formatDate($subscription['next_payment_raw'], $lang)), 'danger'];
     }
-    return [$cycle . ' · ' . formatDate($subscription['next_payment_raw'], $lang), ''];
+    $planText = listRowPlanText($subscription, $i18n, $lang);
+    $schedule = $planText !== '' ? formatDate($subscription['next_payment_raw'], $lang) . ' · ' . $planText
+        : $cycle . ' · ' . formatDate($subscription['next_payment_raw'], $lang);
+    if (!empty($subscription['paid_badge'])) {
+        return [sprintf(translate('paid_badge', $i18n), formatDate($subscription['paid_badge'], $lang)) . ' · ' . $schedule, 'success'];
+    }
+    return [$schedule, ''];
 }
 
 /*
@@ -203,6 +219,9 @@ function printSubscriptions($subscriptions, $sort, $categories, $members, $i18n,
         if ($subscription['one_time'] && !$subscription['inactive']) {
             $key = 'lifetime';
             $title = translate('lifetime_purchases', $i18n);
+        } elseif (!empty($subscription['ended']) && !$groupByField) {
+            $key = 'completed';
+            $title = translate('completed_plans', $i18n);
         } elseif ($groupByField) {
             $key = $sort . '-' . $subscription[$sort];
             if ($sort === 'category_id') {
@@ -226,7 +245,7 @@ function printSubscriptions($subscriptions, $sort, $categories, $members, $i18n,
     }
 
     // Fixed order for the state groups; field groups keep the sorted order.
-    $order = ['active' => 0, 'disabled' => 2, 'lifetime' => 3];
+    $order = ['active' => 0, 'completed' => 2, 'disabled' => 3, 'lifetime' => 4];
     uksort($groups, function ($a, $b) use ($order, $groups) {
         $orderA = $order[$a] ?? 1;
         $orderB = $order[$b] ?? 1;
@@ -259,7 +278,7 @@ function printSubscriptions($subscriptions, $sort, $categories, $members, $i18n,
                         'logo_text_color' => $subscription['logo_text_color'] ?? null,
                         'subtitle' => $subtitle,
                         'subtitle_tone' => $tone,
-                        'trailing' => formatPrice($subscription['price'], $subscription['currency_code'], $currencies),
+                        'trailing' => (!empty($subscription['variable_amount']) ? '≈ ' : '') . formatPrice($subscription['price'], $subscription['currency_code'], $currencies),
                         'trailing_sub' => $trailingSub,
                         'dim' => (bool) $subscription['inactive'],
                         'progress' => ($showProgress && !$subscription['inactive'] && !$subscription['one_time']) ? min(100, $subscription['progress']) : null,
@@ -280,6 +299,8 @@ function printSubscriptions($subscriptions, $sort, $categories, $members, $i18n,
                 $footer = translate('lifetime_footer', $i18n);
             } elseif ($key === 'disabled') {
                 $footer = translate('disabled_footer', $i18n);
+            } elseif ($key === 'completed') {
+                $footer = translate('completed_footer', $i18n);
             }
             if ($footer !== '') {
                 ?>
@@ -303,4 +324,4 @@ if ($row !== false) {
     $mainCurrencyId = $currencies[1]['id'];
 }
 
-?>
+?>

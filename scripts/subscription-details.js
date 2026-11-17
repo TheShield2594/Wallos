@@ -156,6 +156,9 @@ function detailsRenderTile(container, subscription) {
 
 function detailsStatus(subscription) {
   const strings = detailsStrings();
+  if (subscription.ended_reason === 'completed') {
+    return { text: strings.plan_completed_label, tone: '' };
+  }
   if (Number(subscription.inactive)) {
     return { text: strings.inactive, tone: '' };
   }
@@ -165,6 +168,9 @@ function detailsStatus(subscription) {
   const days = detailsDaysUntil(subscription.next_payment);
   if (days === null) {
     return { text: '', tone: '' };
+  }
+  if (subscription.paid_badge) {
+    return { text: detailsFill(strings.paid_badge, detailsFormatDate(subscription.paid_badge, { day: 'numeric', month: 'short' })), tone: 'success' };
   }
   if (days < 0 && Number(subscription.auto_renew) !== 1) {
     return { text: detailsFill(strings.overdue_since, detailsFormatDate(subscription.next_payment, { day: 'numeric', month: 'short' })), tone: 'danger' };
@@ -209,11 +215,18 @@ function renderSubscriptionDetails(subscription, focusPanel) {
   const statusEl = document.querySelector('#details-status');
   statusEl.textContent = status.text;
   statusEl.classList.toggle('is-danger', status.tone === 'danger');
+  statusEl.classList.toggle('is-success', status.tone === 'success');
+  if (Number(subscription.variable_amount) === 1) {
+    document.querySelector('#details-billing-cycle').textContent += ` · ${strings.estimated}`;
+  }
 
-  // Actions
+  // Actions: every active recurring subscription can be marked as paid.
   const renewButton = document.querySelector('#details-renew-button');
-  renewButton.classList.toggle('hide', !isManual || isInactive || isOneTime);
-  renewButton.onclick = (event) => renewSubscription(event, subscription.id);
+  renewButton.classList.toggle('hide', isInactive || isOneTime);
+  renewButton.onclick = (event) => renewSubscription(event, subscription.id, subscription);
+  const undoButton = document.querySelector('#details-undo-button');
+  undoButton.classList.toggle('hide', !subscription.paid_due_date || isInactive);
+  undoButton.onclick = (event) => undoPayment(event, subscription.id, subscription.paid_due_date);
   document.querySelector('#details-edit-button').onclick = (event) => detailsEdit(event, subscription.id);
   const cloneButton = document.querySelector('#details-clone-button');
   cloneButton.classList.toggle('hide', typeof openEditSubscription !== 'function');
@@ -234,6 +247,24 @@ function renderSubscriptionDetails(subscription, focusPanel) {
   document.querySelector('#details-cycle').textContent = detailsBillingCycleText(subscription.cycle, subscription.frequency);
   document.querySelector('#details-renewal-item').classList.toggle('hide', isOneTime);
   document.querySelector('#details-renewal').textContent = isManual ? strings.manual_renewal : strings.automatic;
+  const planItem = document.querySelector('#details-plan-item');
+  const planTotal = Number(subscription.total_payments) || 0;
+  planItem.classList.toggle('hide', !planTotal && !subscription.end_date);
+  if (subscription.ended_reason === 'completed') {
+    document.querySelector('#details-plan').textContent = planTotal
+      ? `${strings.plan_completed_label} · ${detailsFill(strings.n_payments, planTotal)}`
+      : strings.plan_completed_label;
+  } else if (planTotal || subscription.end_date) {
+    const current = Math.min(Number(subscription.payments_made) + 1, planTotal);
+    const parts = [];
+    if (planTotal) {
+      parts.push(strings.payment_n_of_total.replace('%s', current).replace('%s', planTotal));
+    }
+    if (subscription.end_date) {
+      parts.push(detailsFill(strings.ends_on, detailsFormatDate(subscription.end_date)));
+    }
+    document.querySelector('#details-plan').textContent = parts.join(' · ');
+  }
   document.querySelector('#details-start-date').textContent = detailsFormatDate(subscription.start_date) || strings.none;
   document.querySelector('#details-category').textContent = lookups.categories[subscription.category_id] || strings.none;
   document.querySelector('#details-payer').textContent = lookups.members[subscription.payer_user_id] || strings.none;
@@ -256,6 +287,8 @@ function renderSubscriptionDetails(subscription, focusPanel) {
   const replacementName = subscription.replacement_subscription_id ? lookups.subscriptionNames[subscription.replacement_subscription_id] : null;
   document.querySelector('#details-replacement-item').classList.toggle('hide', !replacementName);
   document.querySelector('#details-replacement').textContent = replacementName || "";
+
+  detailsLoadHistory(subscription);
 
   // Notifications (one-time purchases never notify)
   document.querySelector('#details-notifications-card').classList.toggle('hide', isOneTime);
@@ -433,23 +466,59 @@ function cloneSubscription(event, id) {
     });
 }
 
-function renewSubscription(event, id) {
+function detailsPost(url, body) {
+  return fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-CSRF-Token": window.csrfToken },
+    body: JSON.stringify(body),
+  }).then((response) => {
+    if (!response.ok) {
+      throw new Error(translate("network_response_error"));
+    }
+    return response.json();
+  });
+}
+
+// Asks for the amount actually paid. Returns undefined when cancelled, and
+// null to keep the default.
+function detailsAskAmount(defaultAmount) {
+  const strings = detailsStrings();
+  const answer = window.prompt(strings.enter_amount_paid, defaultAmount === null || defaultAmount === undefined ? "" : String(defaultAmount));
+  if (answer === null) {
+    return undefined;
+  }
+  const normalized = answer.trim().replace(',', '.');
+  if (normalized === "") {
+    return null;
+  }
+  const amount = Number(normalized);
+  if (!isFinite(amount) || amount < 0) {
+    showErrorMessage(strings.invalid_amount);
+    return undefined;
+  }
+  return amount;
+}
+
+// "Mark paid": manual renewals move on a cycle, automatic ones confirm the
+// latest cycle. Variable-amount subscriptions ask for what was paid.
+function renewSubscription(event, id, subscription) {
   if (event) {
     event.stopPropagation();
     event.preventDefault();
   }
 
-  fetch("endpoints/subscription/renew.php", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-CSRF-Token": window.csrfToken },
-    body: JSON.stringify({ id: id }),
-  })
-    .then((response) => {
-      if (!response.ok) {
-        throw new Error(translate("network_response_error"));
-      }
-      return response.json();
-    })
+  const body = { id: id };
+  if (subscription && Number(subscription.variable_amount) === 1) {
+    const amount = detailsAskAmount(subscription.price);
+    if (amount === undefined) {
+      return;
+    }
+    if (amount !== null) {
+      body.amount = amount;
+    }
+  }
+
+  detailsPost("endpoints/subscription/markpaid.php", body)
     .then((data) => {
       if (data.success) {
         showSuccessMessage(decodeURI(data.message));
@@ -461,6 +530,187 @@ function renewSubscription(event, id) {
     .catch((error) => {
       showErrorMessage(error.message || translate("error"));
     });
+}
+
+function undoPayment(event, id, dueDate) {
+  if (event) {
+    event.stopPropagation();
+    event.preventDefault();
+  }
+  detailsPost("endpoints/subscription/undopaid.php", { id: id, due_date: dueDate })
+    .then((data) => {
+      if (data.success) {
+        showSuccessMessage(data.message);
+        detailsAfterChange("renew", id, event);
+      } else {
+        showErrorMessage(data.message || translate("error"));
+      }
+    })
+    .catch((error) => {
+      showErrorMessage(error.message || translate("error"));
+    });
+}
+
+// Payment history card: the last 12 ledger rows and a sparkline of the amounts.
+function detailsLoadHistory(subscription) {
+  const card = document.querySelector('#details-history-card');
+  if (!card) {
+    return;
+  }
+  const isOneTime = Number(subscription.cycle) === 5;
+  card.classList.toggle('hide', isOneTime);
+  if (isOneTime) {
+    return;
+  }
+  const requestedId = Number(subscription.id);
+  fetch(`endpoints/ledger/list.php?id=${encodeURIComponent(subscription.id)}`)
+    .then((response) => response.json())
+    .then((data) => {
+      if (currentDetailsId !== requestedId) {
+        return;
+      }
+      detailsRenderHistory(subscription, data && data.success ? data.payments : []);
+    })
+    .catch(() => {
+      if (currentDetailsId === requestedId) {
+        detailsRenderHistory(subscription, []);
+      }
+    });
+}
+
+function detailsRenderHistory(subscription, payments) {
+  const strings = detailsStrings();
+  const list = document.querySelector('#details-history-list');
+  const empty = document.querySelector('#details-history-empty');
+  list.innerHTML = "";
+  empty.classList.toggle('hide', payments.length > 0);
+
+  payments.forEach((payment) => {
+    const item = document.createElement('li');
+    item.className = 'history-row';
+
+    const text = document.createElement('span');
+    text.className = 'history-text';
+    const date = document.createElement('span');
+    date.className = 'history-date';
+    date.textContent = detailsFormatDate(payment.due_date);
+    const status = document.createElement('span');
+    status.className = `history-status is-${payment.status}`;
+    status.textContent = strings[`status_${payment.status}`] || payment.status;
+    text.append(date, status);
+    if (payment.note) {
+      const note = document.createElement('span');
+      note.className = 'history-note';
+      note.textContent = payment.note;
+      text.append(note);
+    }
+
+    const amount = document.createElement('span');
+    amount.className = 'history-amount';
+    amount.textContent = payment.amount === null ? '—' : detailsFormatPrice(payment.amount, payment.currency_id || subscription.currency_id);
+
+    const edit = document.createElement('button');
+    edit.type = 'button';
+    edit.className = 'icon-button';
+    edit.title = strings.edit;
+    edit.setAttribute('aria-label', strings.edit);
+    edit.innerHTML = '<i class="fa-solid fa-pen" aria-hidden="true"></i>';
+    edit.onclick = () => detailsEditPayment(subscription, payment);
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'icon-button';
+    remove.title = strings.delete;
+    remove.setAttribute('aria-label', strings.delete);
+    remove.innerHTML = '<i class="fa-solid fa-trash" aria-hidden="true"></i>';
+    remove.onclick = () => detailsDeletePayment(subscription, payment);
+
+    item.append(text, amount, edit, remove);
+    list.appendChild(item);
+  });
+
+  // Oldest on the left. Rows without an amount are skipped.
+  const values = payments.filter((payment) => payment.amount !== null).map((payment) => Number(payment.amount)).reverse();
+  const sparkline = document.querySelector('#details-history-sparkline');
+  sparkline.classList.toggle('hide', values.length < 2);
+  if (values.length >= 2) {
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const span = max - min || 1;
+    const points = values.map((value, index) => {
+      const x = (index / (values.length - 1)) * 236 + 2;
+      const y = 44 - ((value - min) / span) * 40;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    });
+    sparkline.querySelector('polyline').setAttribute('points', points.join(' '));
+  }
+}
+
+function detailsEditPayment(subscription, payment) {
+  const amount = detailsAskAmount(payment.amount === null ? subscription.price : payment.amount);
+  if (amount === undefined) {
+    return;
+  }
+  const value = amount === null ? (payment.amount === null ? Number(subscription.price) : payment.amount) : amount;
+  const today = new Date();
+  const todayString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  detailsPost("endpoints/ledger/save.php", {
+    id: payment.id,
+    amount: value,
+    paid_date: payment.paid_date || todayString,
+    note: payment.note || "",
+  })
+    .then((data) => {
+      if (!data.success) {
+        throw new Error(data.message);
+      }
+      showSuccessMessage(data.message);
+      detailsAfterChange("renew", subscription.id, null);
+    })
+    .catch((error) => showErrorMessage(error.message || detailsStrings().error));
+}
+
+// Dashboard "Payments to review": enter the amount of a variable bill, or
+// confirm a renewal the cron recorded at the list price.
+function confirmLedgerPayment(event, paymentId, defaultAmount, askAmount) {
+  if (event) {
+    event.stopPropagation();
+    event.preventDefault();
+  }
+  let amount = defaultAmount;
+  if (askAmount) {
+    const answer = detailsAskAmount(defaultAmount);
+    if (answer === undefined || answer === null) {
+      return;
+    }
+    amount = answer;
+  }
+  const today = new Date();
+  const todayString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  detailsPost("endpoints/ledger/save.php", { id: paymentId, amount: amount, paid_date: todayString, note: "" })
+    .then((data) => {
+      if (!data.success) {
+        throw new Error(data.message);
+      }
+      showSuccessMessage(data.message);
+      detailsAfterChange("renew", null, null);
+    })
+    .catch((error) => showErrorMessage(error.message || detailsStrings().error));
+}
+
+function detailsDeletePayment(subscription, payment) {
+  if (!confirm(detailsStrings().confirm_delete_payment)) {
+    return;
+  }
+  detailsPost("endpoints/ledger/delete.php", { id: payment.id })
+    .then((data) => {
+      if (!data.success) {
+        throw new Error(data.message);
+      }
+      showSuccessMessage(data.message);
+      detailsAfterChange("renew", subscription.id, null);
+    })
+    .catch((error) => showErrorMessage(error.message || detailsStrings().error));
 }
 
 document.addEventListener('DOMContentLoaded', function () {

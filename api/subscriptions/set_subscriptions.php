@@ -977,6 +977,11 @@ switch ($action) {
         $stmtDelete->bindParam(':userId', $userId, SQLITE3_INTEGER);
 
         if ($stmtDelete->execute()) {
+            $stmtPayments = $db->prepare("DELETE FROM subscription_payments WHERE subscription_id = :subId AND user_id = :userId");
+            $stmtPayments->bindParam(':subId', $subscriptionId, SQLITE3_INTEGER);
+            $stmtPayments->bindParam(':userId', $userId, SQLITE3_INTEGER);
+            $stmtPayments->execute();
+
             // Nullify replacement_subscription_id references pointing to this subscription
             $queryCascade = "UPDATE subscriptions SET replacement_subscription_id = NULL WHERE replacement_subscription_id = :subId AND user_id = :userId";
             $stmtCascade = $db->prepare($queryCascade);
