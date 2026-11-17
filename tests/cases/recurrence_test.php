@@ -258,3 +258,21 @@ wallos_test('review fixes: saving a completed plan keeps its payment count', fun
     assert_same(3, $byDate['total_payments'], 'the date mode agrees on three payments');
     assert_same('date', $byDate['plan_mode'], 'the mode is recorded');
 });
+
+wallos_test('review fixes: an edit between payments keeps the recorded count', function () {
+    // A three-payment plan from Jan 15 whose first payment, on Feb 20,
+    // restarted the cycle: next Mar 20, one payment made, ends Apr 20.
+    $restarted = recurrence_subscription([
+        'next_payment' => '2026-03-20', 'start_date' => '2026-01-15', 'billing_anchor_day' => 20, 'payments_made' => 1,
+    ]);
+    $recounted = wallos_plan_fields($restarted, 'count', null, 3);
+    assert_same(2, $recounted['payments_made'], 'counting from the start date would see Jan 20 and Feb 20');
+
+    $kept = wallos_plan_fields($restarted + ['keep_payments_made' => true], 'count', null, 3);
+    assert_same(1, $kept['payments_made'], 'the recorded payment count is kept');
+    assert_same('2026-04-20', $kept['end_date'], 'and the plan still ends on Apr 20');
+
+    $add = file_get_contents(WALLOS_ROOT . '/endpoints/subscription/add.php');
+    assert_contains("'keep_payments_made' =>", $add, 'the save endpoint keeps the count unless the schedule changed');
+    assert_contains("renew_from_action'] ?? 0) === 1", $add, 'and always for subscriptions whose payments restart the cycle');
+});

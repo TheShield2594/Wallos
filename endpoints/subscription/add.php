@@ -322,7 +322,8 @@ if ($endsMode === 'count' && (!ctype_digit((string) ($_POST['total_payments'] ??
 
 $existingSchedule = [];
 if ($isEdit) {
-    $scheduleStmt = $db->prepare("SELECT billing_anchor_day, payments_made, ended_reason FROM subscriptions WHERE id = :id AND user_id = :userId");
+    $scheduleStmt = $db->prepare("SELECT billing_anchor_day, payments_made, ended_reason, next_payment, start_date, cycle, frequency, renew_from_action
+        FROM subscriptions WHERE id = :id AND user_id = :userId");
     $scheduleStmt->bindValue(':id', $_POST['id'], SQLITE3_INTEGER);
     $scheduleStmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
     $scheduleResult = $scheduleStmt->execute();
@@ -339,6 +340,17 @@ $plan = wallos_plan_fields([
     'payments_made' => $existingSchedule['payments_made'] ?? 0,
     // A plan that stays completed keeps the payments it counted.
     'ended_reason' => $inactive ? ($existingSchedule['ended_reason'] ?? null) : null,
+    // payments_made is counted from the start date for a new subscription
+    // or a changed schedule. An edit that leaves the schedule alone keeps the
+    // recorded count, and so does any edit of a subscription whose payments
+    // restart the cycle: its past payments are not on a schedule to count.
+    'keep_payments_made' => $existingSchedule !== [] && (
+        (int) ($existingSchedule['renew_from_action'] ?? 0) === 1
+        || ($existingSchedule['next_payment'] === $nextPayment
+            && (string) $existingSchedule['start_date'] === (string) $startDate
+            && (int) $existingSchedule['cycle'] === $cycle
+            && (int) $existingSchedule['frequency'] === $frequency)
+    ),
 ], $endsMode, $_POST['end_date'] ?? null, $_POST['total_payments'] ?? null);
 $endDate = $plan['end_date'];
 $totalPayments = $plan['total_payments'];

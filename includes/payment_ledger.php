@@ -75,12 +75,14 @@ function wallos_ledger_record_cycles(SQLite3 $db, array $subscription, array $du
  */
 function wallos_ledger_upsert_paid(SQLite3 $db, array $subscription, $dueDate, $paidDate, $amount, $source)
 {
-    $stmt = $db->prepare("INSERT INTO subscription_payments
-        (subscription_id, user_id, due_date, paid_date, amount, currency_id, status, source)
-        VALUES (:subscriptionId, :userId, :dueDate, :paidDate, :amount, :currencyId, 'paid', :source)
-        ON CONFLICT(subscription_id, due_date) DO UPDATE SET
-            paid_date = excluded.paid_date, amount = excluded.amount, currency_id = excluded.currency_id,
-            status = 'paid', source = excluded.source");
+    // REPLACE rather than an in-place update: the row is re-inserted with a
+    // new (AUTOINCREMENT) id, so ids follow the order of payment actions.
+    // Due dates do not: when a payment restarts the cycle, a later payment
+    // can be for an earlier due date. The note is carried over.
+    $stmt = $db->prepare("INSERT OR REPLACE INTO subscription_payments
+        (subscription_id, user_id, due_date, paid_date, amount, currency_id, status, source, note)
+        VALUES (:subscriptionId, :userId, :dueDate, :paidDate, :amount, :currencyId, 'paid', :source,
+            (SELECT note FROM subscription_payments WHERE subscription_id = :subscriptionId AND due_date = :dueDate))");
     $stmt->bindValue(':subscriptionId', (int) $subscription['id'], SQLITE3_INTEGER);
     $stmt->bindValue(':userId', (int) $subscription['user_id'], SQLITE3_INTEGER);
     $stmt->bindValue(':dueDate', $dueDate, SQLITE3_TEXT);
@@ -352,9 +354,10 @@ function wallos_undo_paid_locked(SQLite3 $db, array $subscription, $dueDate)
     $completed = ($subscription['ended_reason'] ?? null) === 'completed';
 
     if ((int) $subscription['auto_renew'] !== 1) {
-        // Only the most recent payment. Its due date can be after
-        // next_payment when the cycle restarted on an early payment.
-        $latest = $db->prepare('SELECT MAX(due_date) FROM subscription_payments WHERE subscription_id = :id');
+        // Only the most recent payment action, by id (see
+        // wallos_ledger_upsert_paid()): after a restarted cycle a later
+        // payment can carry an earlier due date than the one before it.
+        $latest = $db->prepare('SELECT due_date FROM subscription_payments WHERE subscription_id = :id ORDER BY id DESC LIMIT 1');
         $latest->bindValue(':id', (int) $subscription['id'], SQLITE3_INTEGER);
         $latestDue = $latest->execute()->fetchArray(SQLITE3_NUM)[0] ?? null;
         if ($latestDue !== $row['due_date']) {
@@ -456,16 +459,16 @@ function wallos_ledger_delete(SQLite3 $db, $userId, $paymentId)
 }
 
 /**
- * The latest confirmed payment of each of a user's subscriptions, in one query.
+ * The most recently confirmed payment of each of a user's subscriptions, in one query.
  *
  * @return array<int, array{due_date: string, paid_date: ?string}>
  */
 function wallos_ledger_last_paid_map(SQLite3 $db, $userId)
 {
     $stmt = $db->prepare("SELECT p.subscription_id, p.due_date, p.paid_date FROM subscription_payments p
-        JOIN (SELECT subscription_id, MAX(due_date) AS due_date FROM subscription_payments
+        JOIN (SELECT subscription_id, MAX(id) AS id FROM subscription_payments
               WHERE user_id = :userId AND status = 'paid' GROUP BY subscription_id) latest
-        ON latest.subscription_id = p.subscription_id AND latest.due_date = p.due_date
+        ON latest.id = p.id
         WHERE p.user_id = :userId");
     $stmt->bindValue(':userId', (int) $userId, SQLITE3_INTEGER);
     $result = $stmt->execute();

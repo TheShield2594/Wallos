@@ -353,3 +353,23 @@ wallos_test('review fixes: the cron advance is atomic and works on the current r
     assert_same(1, (int) ledger_reload($db, $subscription)['payments_made'], 'payments_made counted once');
     $db->close();
 });
+
+wallos_test('review fixes: undo follows the order of payments, not of due dates', function () {
+    $db = ledger_open_database();
+    // Two early payments on a subscription whose payments restart the cycle:
+    // the second is for an earlier due date than the first.
+    $subscription = ledger_subscription($db, ['next_payment' => '2026-03-15', 'auto_renew' => 0, 'renew_from_action' => 1, 'billing_anchor_day' => 15]);
+    wallos_mark_paid($db, $subscription, new DateTime('2026-02-01'));
+    assert_same('2026-03-01', ledger_reload($db, $subscription)['next_payment'], 'restarted on Feb 1');
+    wallos_mark_paid($db, ledger_reload($db, $subscription), new DateTime('2026-02-02'));
+    assert_same('2026-03-02', ledger_reload($db, $subscription)['next_payment'], 'restarted again on Feb 2');
+
+    assert_same('not_latest', wallos_undo_paid($db, $subscription, '2026-03-15')['error'] ?? null,
+        'the first payment is not the latest, although its due date is later');
+    assert_true(wallos_undo_paid($db, $subscription, '2026-03-01')['success'], 'the second payment is undone first');
+    assert_same('2026-03-01', ledger_reload($db, $subscription)['next_payment'], 'back to the schedule after the first');
+    assert_true(wallos_undo_paid($db, $subscription, '2026-03-15')['success'], 'then the first');
+    assert_same('2026-03-15', ledger_reload($db, $subscription)['next_payment'], 'back to the original schedule');
+    assert_same(0, (int) ledger_reload($db, $subscription)['payments_made'], 'nothing counted');
+    $db->close();
+});

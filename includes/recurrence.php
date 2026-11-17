@@ -358,7 +358,10 @@ function wallos_count_occurrences_before_next(array $subscription, DateTimeInter
  *
  * A completed plan keeps its stored payments_made: its next_payment stays on
  * the final payment, which was already made, so counting the dates before it
- * would lose that payment on every save.
+ * would lose that payment on every save. So does a row with
+ * keep_payments_made set (the caller passes it when the schedule did not
+ * change, or when payments restart the cycle and the history is not on a
+ * regular schedule that could be counted).
  *
  * @param array  $subscription row with next_payment, start_date, cycle, frequency,
  *                             billing_anchor_day, payments_made, ended_reason
@@ -373,7 +376,8 @@ function wallos_plan_fields(array $subscription, $mode, $endDate, $totalPayments
     $completed = ($subscription['ended_reason'] ?? null) === 'completed';
     $start = wallos_parse_date($subscription['start_date'] ?? null);
     $next = wallos_parse_date($subscription['next_payment'] ?? null);
-    if (!$completed && $start !== null && $next !== null && wallos_is_recurring($subscription)) {
+    $keepCount = $completed || !empty($subscription['keep_payments_made']);
+    if (!$keepCount && $start !== null && $next !== null && wallos_is_recurring($subscription)) {
         $paymentsMade = wallos_count_occurrences_before_next($subscription, $start);
     }
     // Payments made before next_payment; for a completed plan next_payment
