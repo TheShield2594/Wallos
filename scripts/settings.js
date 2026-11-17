@@ -1413,3 +1413,29 @@ function runAiRecommendations() {
     });
 
 }
+
+// Shared household: create, invite, answer an invite, change roles, leave or
+// delete. The page reloads so every list reflects the new membership.
+function householdAction(payload, confirmText) {
+  if (confirmText && !confirm(confirmText)) {
+    return;
+  }
+  fetch('endpoints/households/manage.php', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRF-Token': window.csrfToken,
+    },
+    body: JSON.stringify(payload),
+  })
+    .then(response => response.json())
+    .then(data => {
+      if (data.success) {
+        showSuccessMessage(data.message);
+        setTimeout(() => window.location.reload(), 400);
+      } else {
+        showErrorMessage(data.message);
+      }
+    })
+    .catch(() => showErrorMessage(translate('unknown_error')));
+}

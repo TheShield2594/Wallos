@@ -3,6 +3,7 @@ require_once 'includes/header.php';
 require_once 'includes/currency_rates.php';
 require_once 'includes/recurrence.php';
 require_once 'includes/intro_pricing.php';
+require_once 'includes/households.php';
 
 function getPriceConverted($price, $currency, $database, $userId)
 {
@@ -57,6 +58,11 @@ $stmt->bindValue(':user_id', $userId, SQLITE3_INTEGER);
 $result = $stmt->execute();
 $subscriptions = [];
 while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
+  $subscriptions[] = $row;
+  $currenciesInUse[] = $row['currency_id'];
+}
+// Active subscriptions other household members share with the account.
+foreach (wallos_shared_subscriptions($db, $userId, true) as $row) {
   $subscriptions[] = $row;
   $currenciesInUse[] = $row['currency_id'];
 }

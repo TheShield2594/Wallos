@@ -2,6 +2,7 @@
 require_once 'includes/header.php';
 require_once 'includes/upcoming_payments.php';
 require_once 'includes/webpush_helper.php';
+require_once 'includes/households.php';
 
 $currencies = array();
 $query = "SELECT * FROM currencies WHERE user_id = :userId";
@@ -207,6 +208,103 @@ $upcomingPaymentsLimit = normalize_upcoming_payments_limit($settings['upcoming_p
                     <i class="fa-solid fa-circle-info"></i> <?= translate('household_info', $i18n) ?>
                 </p>
                 <p>
+            </div>
+        </div>
+    </section>
+
+    <?php
+    // Shared household: other accounts on this instance that see the
+    // subscriptions shared with it (see includes/households.php).
+    $sharingMembership = wallos_household_membership($db, $userId);
+    $sharingInvites = wallos_household_pending_invites($db, $userId);
+    $sharingMembers = $sharingMembership !== null ? wallos_household_members($db, $sharingMembership['id']) : [];
+    $sharingIsOwner = $sharingMembership !== null && $sharingMembership['role'] === 'owner';
+    $roleLabels = ['owner' => translate('role_owner', $i18n), 'editor' => translate('role_editor', $i18n), 'viewer' => translate('role_viewer', $i18n)];
+    ?>
+    <section class="account-section" id="household-sharing">
+        <header>
+            <h2><?= translate('shared_household', $i18n) ?></h2>
+        </header>
+        <div class="household-sharing">
+            <?php foreach ($sharingInvites as $invite) { ?>
+                <div class="household-invite">
+                    <p><?= sprintf(translate('household_invited_you', $i18n), '<strong>' . htmlspecialchars($invite['owner_name']) . '</strong>',
+                        '<strong>' . htmlspecialchars($invite['name']) . '</strong>', htmlspecialchars($roleLabels[$invite['role']])) ?></p>
+                    <div class="buttons">
+                        <input type="button" class="secondary-button thin" value="<?= translate('decline', $i18n) ?>"
+                            onClick="householdAction({action: 'respond', household_id: <?= (int) $invite['household_id'] ?>, accept: false})">
+                        <input type="button" class="thin" value="<?= translate('accept', $i18n) ?>"
+                            onClick="householdAction({action: 'respond', household_id: <?= (int) $invite['household_id'] ?>, accept: true})">
+                    </div>
+                </div>
+            <?php } ?>
+
+            <?php if ($sharingMembership === null) { ?>
+                <div class="form-group-inline">
+                    <input type="text" id="householdName" autocomplete="off" maxlength="80"
+                        placeholder="<?= translate('household_name', $i18n) ?>" aria-label="<?= translate('household_name', $i18n) ?>">
+                    <input type="button" class="thin" value="<?= translate('create_household', $i18n) ?>"
+                        onClick="householdAction({action: 'create', name: document.querySelector('#householdName').value})">
+                </div>
+            <?php } else { ?>
+                <p class="household-summary">
+                    <?= sprintf(translate($sharingIsOwner ? 'household_you_own' : 'household_you_are_member', $i18n),
+                        '<strong>' . htmlspecialchars($sharingMembership['name']) . '</strong>', htmlspecialchars($roleLabels[$sharingMembership['role']])) ?>
+                </p>
+                <ul class="household-member-list">
+                    <?php foreach ($sharingMembers as $member) {
+                        $isSelf = (int) $member['user_id'] === (int) $userId;
+                        ?>
+                        <li class="household-member-row">
+                            <span class="household-member-name">
+                                <?= htmlspecialchars($member['username']) ?><?= $isSelf ? ' (' . translate('you', $i18n) . ')' : '' ?>
+                                <?php if ($member['status'] === 'pending') { ?>
+                                    <span class="household-badge"><?= translate('invited', $i18n) ?></span>
+                                <?php } ?>
+                            </span>
+                            <?php if ($sharingIsOwner && $member['role'] !== 'owner') { ?>
+                                <select aria-label="<?= translate('role', $i18n) ?>"
+                                    onChange="householdAction({action: 'role', user_id: <?= (int) $member['user_id'] ?>, role: this.value})">
+                                    <?php foreach (['viewer', 'editor'] as $role) { ?>
+                                        <option value="<?= $role ?>" <?= $member['role'] === $role ? 'selected' : '' ?>><?= $roleLabels[$role] ?></option>
+                                    <?php } ?>
+                                </select>
+                                <button type="button" class="image-button medium" title="<?= translate('remove', $i18n) ?>" aria-label="<?= translate('remove', $i18n) ?>"
+                                    onClick="householdAction({action: 'remove', user_id: <?= (int) $member['user_id'] ?>}, '<?= htmlspecialchars(translate('household_confirm_remove', $i18n), ENT_QUOTES) ?>')">
+                                    <i class="fa-solid fa-trash-can" aria-hidden="true"></i>
+                                </button>
+                            <?php } else { ?>
+                                <span class="household-member-role"><?= htmlspecialchars($roleLabels[$member['role']]) ?></span>
+                            <?php } ?>
+                        </li>
+                    <?php } ?>
+                </ul>
+                <?php if ($sharingIsOwner) { ?>
+                    <div class="form-group-inline">
+                        <input type="text" id="householdInvite" autocomplete="off"
+                            placeholder="<?= translate('username_or_email', $i18n) ?>" aria-label="<?= translate('username_or_email', $i18n) ?>">
+                        <select id="householdInviteRole" aria-label="<?= translate('role', $i18n) ?>">
+                            <option value="viewer"><?= $roleLabels['viewer'] ?></option>
+                            <option value="editor"><?= $roleLabels['editor'] ?></option>
+                        </select>
+                        <input type="button" class="thin" value="<?= translate('invite', $i18n) ?>"
+                            onClick="householdAction({action: 'invite', identifier: document.querySelector('#householdInvite').value, role: document.querySelector('#householdInviteRole').value})">
+                    </div>
+                    <div class="buttons">
+                        <input type="button" class="warning-button thin" value="<?= translate('delete_household', $i18n) ?>"
+                            onClick="householdAction({action: 'delete'}, '<?= htmlspecialchars(translate('household_confirm_delete', $i18n), ENT_QUOTES) ?>')">
+                    </div>
+                <?php } else { ?>
+                    <div class="buttons">
+                        <input type="button" class="warning-button thin" value="<?= translate('leave_household', $i18n) ?>"
+                            onClick="householdAction({action: 'leave'}, '<?= htmlspecialchars(translate('household_confirm_leave', $i18n), ENT_QUOTES) ?>')">
+                    </div>
+                <?php } ?>
+            <?php } ?>
+            <div class="settings-notes">
+                <p>
+                    <i class="fa-solid fa-circle-info"></i> <?= translate('shared_household_info', $i18n) ?>
+                </p>
             </div>
         </div>
     </section>

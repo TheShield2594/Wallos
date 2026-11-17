@@ -51,6 +51,7 @@ function resetForm() {
   toggleRenewFromAction();
   toggleCancelNoticeFields(false);
   toggleIntroFields();
+  setSharedEditMode(null);
   closeLogoSearch();
   const deleteButton = document.querySelector("#deletesub");
   deleteButton.style = 'display: none';
@@ -144,6 +145,11 @@ function fillEditFormFields(subscription) {
   document.querySelector("#intro_end_date").value = subscription.intro_end_date || '';
   document.querySelector("#intro_notify_days").value = subscription.intro_notify_days ?? 3;
   toggleIntroFields();
+  const visibility = document.querySelector("#visibility");
+  if (visibility) {
+    visibility.value = subscription.shared ? 'household' : 'private';
+  }
+  setSharedEditMode(subscription);
 
   const notifyDaysBefore = document.querySelector("#notify_days_before");
   notifyDaysBefore.value = subscription.notify_days_before ?? 0;
@@ -1372,5 +1378,34 @@ function updateIntroHint() {
       updateEndsHint();
       updateCancelNoticeHint();
     }
+  }
+}
+
+/*
+  Editing a subscription another household member shares: its currency,
+  category, payer, payment method, reminders and sharing are the owner's,
+  so those fields are shown but locked (the server keeps them as stored).
+*/
+function setSharedEditMode(subscription) {
+  const shared = !!subscription && (subscription.access || 'owner') !== 'owner';
+  ['#currency', '#category', '#payer_user', '#payment_method', '#visibility', '#notifications', '#notify_days_before',
+    '#cancel_notice_mode', '#cancellation_date', '#cancel_notice_value', '#cancel_notice_unit', '#min_term_end',
+    '#replacement_subscription_id'].forEach((selector) => {
+    const field = document.querySelector(selector);
+    if (field) {
+      field.disabled = shared || (selector === '#notify_days_before' && !document.querySelector('#notifications').checked);
+    }
+  });
+  const price = document.querySelector("#price");
+  price.readOnly = shared && subscription.price_editable === false;
+  ['#visibility-group', '#cancel-notice-group'].forEach((selector) => {
+    const group = document.querySelector(selector);
+    if (group) {
+      group.classList.toggle('is-locked', shared);
+    }
+  });
+  const deleteButton = document.querySelector("#deletesub");
+  if (shared) {
+    deleteButton.style = 'display: none';
   }
 }

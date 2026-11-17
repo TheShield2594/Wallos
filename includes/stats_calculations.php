@@ -4,6 +4,7 @@ require_once __DIR__ . '/currency_rates.php';
 require_once __DIR__ . '/default_names.php';
 require_once __DIR__ . '/recurrence.php';
 require_once __DIR__ . '/intro_pricing.php';
+require_once __DIR__ . '/households.php';
 
 function getPricePerMonth($cycle, $frequency, $price)
 {
@@ -170,6 +171,15 @@ $subscriptions = [];
 if ($result) {
     while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
         $subscriptions[] = $row;
+    }
+    // "Household" scope (statistics page): add what other members share with
+    // the account's household, unless the figures are filtered by the
+    // account's own members, categories or payment methods. Their currency
+    // is mapped onto the account's currencies (see includes/households.php).
+    if (($statsScope ?? 'mine') === 'household' && empty($_GET['member']) && empty($_GET['category']) && empty($_GET['payment'])) {
+        foreach (wallos_shared_subscriptions($db, $userId) as $sharedRow) {
+            $subscriptions[] = $sharedRow;
+        }
     }
     if (isset($subscriptions)) {
         $replacementSubscriptions = array();

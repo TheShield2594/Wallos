@@ -174,6 +174,13 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
     }
   }
 
+  // Subscriptions shared with the account's household join the list unless
+  // it is filtered by the account's own categories, members or payment methods.
+  $listFiltered = !empty($_GET['categories']) || !empty($_GET['payments']) || !empty($_GET['members']);
+  if (!$listFiltered) {
+    $subscriptions = mergeSharedSubscriptions($subscriptions ?? [], $db, $userId, $sort, $order, $settings['disabledToBottom'] === 'true', $_GET['state'] ?? null);
+  }
+
   foreach ($subscriptions as $subscription) {
     if ($subscription['inactive'] == 1 && isset($settings['hideDisabledSubscriptions']) && $settings['hideDisabledSubscriptions'] === 'true') {
       continue;
@@ -212,6 +219,7 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
     $print[$id]['notes'] = $subscription['notes'] ?? "";
     $print[$id]['replacement_subscription_id'] = $subscription['replacement_subscription_id'];
     addListRowFields($print[$id], $subscription, $mainCurrencyId, $db);
+    addSharedRowFields($print[$id], $subscription);
 
     if (isset($settings['convertCurrency']) && $settings['convertCurrency'] === 'true' && $currencyId != $mainCurrencyId) {
       $print[$id]['price'] = getPriceConverted($print[$id]['price'], $currencyId, $db);

@@ -6,6 +6,9 @@ require_once 'includes/logo_theme_variant.php';
 
 include_once 'includes/list_subscriptions.php';
 require_once 'includes/ui_helpers.php';
+require_once 'includes/households.php';
+
+$householdMembership = wallos_household_membership($db, $userId);
 
 $sort = "next_payment";
 $sortOrder = $sort;
@@ -126,7 +129,18 @@ if ($result) {
   }
 }
 
+// Subscriptions shared with the account's household join the list unless it
+// is filtered by the account's own categories, members or payment methods.
+if (!isset($_GET['member']) && !isset($_GET['category']) && !isset($_GET['payment'])) {
+  $stateFilter = (!isset($settings['hideDisabledSubscriptions']) || $settings['hideDisabledSubscriptions'] !== 'true') ? ($_GET['state'] ?? null) : null;
+  $subscriptions = mergeSharedSubscriptions($subscriptions ?? [], $db, $userId, $sort, $order, $settings['disabledToBottom'] === 'true', $stateFilter);
+}
+
 foreach ($subscriptions as $subscription) {
+  if (!empty($subscription['shared_owner_name'])) {
+    // Someone else's records; they are not ours to count.
+    continue;
+  }
   // API-created rows can leave payer, category or payment method unset.
   $memberId = $subscription['payer_user_id'];
   if (isset($memberId, $members[$memberId])) {
@@ -202,6 +216,7 @@ foreach ($subscriptions as $subscription) {
   $print[$id]['progress'] = getSubscriptionProgress($cycle, $frequency, $subscription['next_payment']);
   $print[$id]['inactive'] = $subscription['inactive'];
   addListRowFields($print[$id], $subscription, $mainCurrencyId, $db);
+  addSharedRowFields($print[$id], $subscription);
 
   if (isset($settings['convertCurrency']) && $settings['convertCurrency'] === 'true' && $currencyId != $mainCurrencyId) {
     $print[$id]['price'] = getPriceConverted($print[$id]['price'], $currencyId, $db);
@@ -642,6 +657,16 @@ if ($db->querySingle("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND 
         data-locked="<?= htmlspecialchars(translate('locked_in_until_cancel_by', $i18n), ENT_QUOTES) ?>"></p>
     </div>
 
+    <?php if ($householdMembership !== null) { ?>
+      <div class="form-group" id="visibility-group">
+        <label for="visibility"><?= translate('visibility', $i18n) ?></label>
+        <select id="visibility" name="visibility">
+          <option value="private"><?= translate('visibility_private', $i18n) ?></option>
+          <option value="household"><?= sprintf(translate('visibility_household', $i18n), htmlspecialchars($householdMembership['name'])) ?></option>
+        </select>
+      </div>
+    <?php } ?>
+
     <div class="form-group">
       <input type="text" id="url" name="url" autocomplete="off" placeholder="<?= translate('url', $i18n) ?>">
     </div>
@@ -686,7 +711,7 @@ if ($db->querySingle("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND 
         <option value="0"><?= translate('none', $i18n) ?></option>
         <?php
         foreach ($orderedSubscriptions as $sub) {
-          if ($sub['inactive'] == 0) {
+          if ($sub['inactive'] == 0 && empty($sub['shared_owner_name'])) {
             ?>
             <option value="<?= htmlspecialchars($sub['id']) ?>"><?= htmlspecialchars($sub['name']) ?>
             </option>

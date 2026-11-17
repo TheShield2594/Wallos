@@ -33,6 +33,7 @@ For 'add' and 'edit' actions (all optional for 'edit'):
 - intro_end_date: the first payment at the regular price (YYYY-MM-DD); or intro_cycles: the number of billing cycles from the start date.
 - intro_price: the promo price per payment (float), for 'promo'.
 - intro_notify_days: days before the end to send the "trial ending" reminder (default 3).
+- shared: 1 to share the subscription with your household, 0 to make it private.
 - replacement_subscription_id: the ID of the replacement subscription (integer).
 
 It returns a JSON object with the following properties:
@@ -58,6 +59,7 @@ require_once '../../includes/ssrf_helper.php';
 require_once '../../includes/logo_theme_variant.php';
 require_once '../../includes/cancellation_deadline.php';
 require_once '../../includes/intro_pricing.php';
+require_once '../../includes/households.php';
 
 /**
  * Settings saved after the subscription row itself: the cancellation notice
@@ -102,8 +104,19 @@ function api_extra_fields($existing, $cycle)
         }
     }
 
-    return ['error' => null, 'apply' => function ($db, $subscriptionId, $userId) use ($cancel, $intro) {
+    $shared = null;
+    if (isset($_POST['shared'])) {
+        $shared = $_POST['shared'] === '1' || $_POST['shared'] === 1;
+        if ($shared && wallos_household_membership($GLOBALS['db'], $GLOBALS['userId']) === null) {
+            return ['error' => 'You are not in a household.', 'apply' => null];
+        }
+    }
+
+    return ['error' => null, 'apply' => function ($db, $subscriptionId, $userId) use ($cancel, $intro, $shared) {
         wallos_store_cancel_fields($db, $subscriptionId, $userId, $cancel['fields']);
+        if ($shared !== null) {
+            wallos_set_subscription_sharing($db, $userId, $subscriptionId, $shared);
+        }
         if ($intro !== null) {
             wallos_store_intro_fields($db, $subscriptionId, $userId, $intro['fields']);
             if ($intro['next_payment'] !== null) {

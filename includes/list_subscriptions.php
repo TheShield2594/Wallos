@@ -5,6 +5,7 @@ require_once __DIR__ . '/currency_rates.php';
 require_once __DIR__ . '/ui_helpers.php';
 require_once __DIR__ . '/payment_ledger.php';
 require_once __DIR__ . '/cancellation_deadline.php';
+require_once __DIR__ . '/households.php';
 
 function getBillingCycle($cycle, $frequency, $i18n)
 {
@@ -122,6 +123,65 @@ function formatDate($date, $lang = 'en')
     return $formattedDate;
 }
 
+/**
+ * Adds the subscriptions other household members share with the account to
+ * its own list, in the same order. Not while the list is filtered by
+ * category, member or payment method: those are the account's own records.
+ *
+ * @param array       $own   the account's rows, already sorted by SQL
+ * @param string      $sort  the column sorted on
+ * @param string      $order 'ASC' or 'DESC'
+ * @param string|null $state the inactive filter ('0', '1' or null)
+ * @return array
+ */
+function mergeSharedSubscriptions(array $own, SQLite3 $db, $userId, $sort, $order, $disabledToBottom, $state = null)
+{
+    $shared = wallos_shared_subscriptions($db, $userId);
+    if ($state !== null && $state !== '') {
+        $shared = array_values(array_filter($shared, fn($row) => (string) $row['inactive'] === (string) $state));
+    }
+    if ($shared === []) {
+        return $own;
+    }
+    if (in_array($sort, ['payer_user_id', 'category_id', 'payment_method_id'], true)) {
+        // Grouped by the account's own records: shared rows get a group of their own.
+        return array_merge($own, $shared);
+    }
+
+    $merged = array_merge($own, $shared);
+    $direction = strtoupper($order) === 'DESC' ? -1 : 1;
+    usort($merged, function ($a, $b) use ($sort, $direction, $disabledToBottom) {
+        if ($disabledToBottom && $sort !== 'inactive' && (int) $a['inactive'] !== (int) $b['inactive']) {
+            return (int) $a['inactive'] <=> (int) $b['inactive'];
+        }
+        $left = $a[$sort] ?? null;
+        $right = $b[$sort] ?? null;
+        $compare = is_numeric($left) && is_numeric($right) ? (float) $left <=> (float) $right : strnatcasecmp((string) $left, (string) $right);
+        if ($compare !== 0) {
+            return $compare * $direction;
+        }
+        if ((int) $a['inactive'] !== (int) $b['inactive']) {
+            return (int) $a['inactive'] <=> (int) $b['inactive'];
+        }
+
+        return strcmp((string) $a['next_payment'], (string) $b['next_payment']);
+    });
+
+    return $merged;
+}
+
+/**
+ * List fields of a row another household member shares: their name, and the
+ * payment method by its owner's name.
+ */
+function addSharedRowFields(&$printRow, $subscription)
+{
+    $printRow['shared_owner_name'] = $subscription['shared_owner_name'] ?? null;
+    if ($printRow['shared_owner_name'] !== null) {
+        $printRow['payment_method_name'] = $subscription['shared_payment_method_name'] ?? '';
+    }
+}
+
 /*
   Extra fields the list rows need on top of the display values each caller
   already computes: the raw dates, and the monthly cost in the main currency
@@ -181,6 +241,12 @@ function listRowPlanText($subscription, $i18n, $lang)
 
 function listRowSubtitle($subscription, $i18n, $lang)
 {
+    // Someone else's shared subscription is named after its owner.
+    $sharedPrefix = !empty($subscription['shared_owner_name']) ? sprintf(translate('shared_by', $i18n), $subscription['shared_owner_name']) . ' · ' : '';
+    if ($sharedPrefix !== '') {
+        [$text, $tone] = listRowSubtitle(array_merge($subscription, ['shared_owner_name' => null]), $i18n, $lang);
+        return [$sharedPrefix . $text, $tone];
+    }
     $cycle = $subscription['billing_cycle'];
     if (!empty($subscription['ended'])) {
         $total = (int) ($subscription['plan_total'] ?? 0);
@@ -240,6 +306,9 @@ function printSubscriptions($subscriptions, $sort, $categories, $members, $i18n,
         if ($subscription['one_time'] && !$subscription['inactive']) {
             $key = 'lifetime';
             $title = translate('lifetime_purchases', $i18n);
+        } elseif ($groupByField && !empty($subscription['shared_owner_name'])) {
+            $key = 'shared';
+            $title = translate('shared_with_you', $i18n);
         } elseif (!empty($subscription['ended']) && !$groupByField) {
             $key = 'completed';
             $title = translate('completed_plans', $i18n);
@@ -266,7 +335,7 @@ function printSubscriptions($subscriptions, $sort, $categories, $members, $i18n,
     }
 
     // Fixed order for the state groups; field groups keep the sorted order.
-    $order = ['active' => 0, 'completed' => 2, 'disabled' => 3, 'lifetime' => 4];
+    $order = ['active' => 0, 'completed' => 2, 'shared' => 3, 'disabled' => 4, 'lifetime' => 5];
     uksort($groups, function ($a, $b) use ($order, $groups) {
         $orderA = $order[$a] ?? 1;
         $orderB = $order[$b] ?? 1;

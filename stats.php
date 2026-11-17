@@ -2,6 +2,11 @@
 require_once 'includes/header.php';
 require_once 'includes/logo_theme_variant.php';
 require_once 'includes/default_names.php';
+require_once 'includes/households.php';
+
+// Mine / Household: the household scope adds what other members share.
+$statsHousehold = wallos_household_membership($db, $userId);
+$statsScope = ($statsHousehold !== null && ($_GET['scope'] ?? '') === 'household') ? 'household' : 'mine';
 
 
 // Get code of main currency to display on statistics
@@ -58,6 +63,18 @@ $actualYearOverYear = $actualLastYear > 0 ? ($actualThisYear - $actualLastYear) 
 
 ?>
 <?php page_toolbar_start(translate('stats', $i18n), $statsSubtitle !== '' ? trim($statsSubtitle, '()') : translate('general_statistics', $i18n)); ?>
+    <?php if ($statsHousehold !== null) {
+      $scopeQuery = $_GET;
+      ?>
+      <div class="segmented" role="group" aria-label="<?= translate('household', $i18n) ?>">
+        <?php foreach (['mine' => translate('scope_mine', $i18n), 'household' => translate('scope_household', $i18n)] as $scopeValue => $scopeLabel) {
+          $scopeQuery['scope'] = $scopeValue;
+          ?>
+          <a class="segmented-option<?= $statsScope === $scopeValue ? ' is-selected' : '' ?>" aria-current="<?= $statsScope === $scopeValue ? 'true' : 'false' ?>"
+            href="stats.php?<?= htmlspecialchars(http_build_query($scopeQuery)) ?>"><?= htmlspecialchars($scopeLabel) ?></a>
+        <?php } ?>
+      </div>
+    <?php } ?>
     <div class="filtermenu">
       <button type="button" class="btn btn-icon" id="filtermenu-button" title="<?= translate("filter", $i18n) ?>" aria-label="<?= translate("filter", $i18n) ?>">
         <i class="fa-solid fa-filter"></i>

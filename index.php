@@ -8,6 +8,7 @@ require_once 'includes/upcoming_cancellations.php';
 require_once 'includes/ui_helpers.php';
 require_once 'includes/payment_ledger.php';
 require_once 'includes/category_spend.php';
+require_once 'includes/households.php';
 
 function formatPrice($price, $currencyCode, $currencies)
 {
@@ -83,6 +84,20 @@ $upcomingSubscriptions = get_upcoming_payments(
     $userId,
     $settings['upcoming_payments_limit'] ?? 3
 );
+
+// Upcoming payments of subscriptions other household members share, with
+// their owner's name, in the same list.
+$upcomingLimit = normalize_upcoming_payments_limit($settings['upcoming_payments_limit'] ?? 3);
+$todayString = (new DateTime('today'))->format('Y-m-d');
+foreach (wallos_shared_subscriptions($db, $userId, true) as $sharedRow) {
+    if ((int) $sharedRow['cycle'] === 5 || $sharedRow['next_payment'] < $todayString) {
+        continue;
+    }
+    $sharedRow['price'] = wallos_price_on($sharedRow, $sharedRow['next_payment']);
+    $upcomingSubscriptions[] = $sharedRow;
+}
+usort($upcomingSubscriptions, fn($a, $b) => strcmp($a['next_payment'], $b['next_payment']));
+$upcomingSubscriptions = array_slice($upcomingSubscriptions, 0, $upcomingLimit);
 
 // Fetch enabled subscriptions with manual renewal that are overdue
 $stmt = $db->prepare("SELECT id, logo, logo_text_color, logo_variant, name, price, currency_id, next_payment, inactive, auto_renew FROM subscriptions WHERE user_id = :userId AND next_payment < date('now') AND auto_renew = 0 AND inactive = 0 AND cycle != 5 ORDER BY next_payment ASC");
@@ -267,7 +282,11 @@ $dashboardRow = function ($subscription, $subtitle, $tone = '') use ($dashboardP
                     <?php
                 } else {
                     foreach ($upcomingSubscriptions as $subscription) {
-                        echo $dashboardRow($subscription, due_text($subscription['next_payment'], $lang, $i18n));
+                        $dueText = due_text($subscription['next_payment'], $lang, $i18n);
+                        if (!empty($subscription['shared_owner_name'])) {
+                            $dueText = sprintf(translate('shared_by', $i18n), $subscription['shared_owner_name']) . ' · ' . $dueText;
+                        }
+                        echo $dashboardRow($subscription, $dueText);
                     }
                 }
                 ?>

@@ -33,6 +33,7 @@ require_once __DIR__ . '/getdbkeys.php';
           <span class="detail-price"><span id="details-price"></span> <span class="detail-per" id="details-billing-cycle"></span></span>
           <span class="detail-status" id="details-status"></span>
         </div>
+        <span class="detail-shared hide" id="details-shared"></span>
       </div>
     </header>
 
@@ -193,6 +194,9 @@ $detailsLookups = [
     'cancellation_notification' => translate('cancellation_notification', $i18n),
     'cancel_by_label' => translate('cancel_by_label', $i18n),
     'free_trial' => translate('free_trial', $i18n),
+    'shared_by' => translate('shared_by', $i18n),
+    'shared_with_household' => translate('shared_with_household', $i18n),
+    'view_only' => translate('view_only', $i18n),
     'intro_price' => translate('intro_price', $i18n),
     'intro_then' => translate('intro_then', $i18n),
     'locked_in_until' => translate('locked_in_until', $i18n),

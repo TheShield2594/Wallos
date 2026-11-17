@@ -222,16 +222,37 @@ function renderSubscriptionDetails(subscription, focusPanel) {
     document.querySelector('#details-billing-cycle').textContent += ` · ${strings.estimated}`;
   }
 
+  // Household sharing: someone else's subscription is read-only for a
+  // viewer; an editor may edit it and mark it as paid. Cloning, deleting and
+  // the reminders stay with its owner.
+  const access = subscription.access || 'owner';
+  const isOwner = access === 'owner';
+  const canEdit = access !== 'viewer';
+  const sharedLine = document.querySelector('#details-shared');
+  let sharedText = '';
+  if (!isOwner) {
+    sharedText = detailsFill(strings.shared_by, subscription.shared_owner_name || '') + (canEdit ? '' : ` · ${strings.view_only}`);
+  } else if (subscription.shared) {
+    sharedText = strings.shared_with_household;
+  }
+  sharedLine.textContent = sharedText;
+  sharedLine.classList.toggle('hide', sharedText === '');
+
   // Actions: every active recurring subscription can be marked as paid.
   const renewButton = document.querySelector('#details-renew-button');
-  renewButton.classList.toggle('hide', isInactive || isOneTime);
+  renewButton.classList.toggle('hide', isInactive || isOneTime || !canEdit);
   renewButton.onclick = (event) => renewSubscription(event, subscription.id, subscription);
   const undoButton = document.querySelector('#details-undo-button');
-  undoButton.classList.toggle('hide', !subscription.paid_due_date || isInactive);
+  undoButton.classList.toggle('hide', !subscription.paid_due_date || isInactive || !canEdit);
   undoButton.onclick = (event) => undoPayment(event, subscription.id, subscription.paid_due_date);
-  document.querySelector('#details-edit-button').onclick = (event) => detailsEdit(event, subscription.id);
+  const editButton = document.querySelector('#details-edit-button');
+  editButton.classList.toggle('hide', !canEdit);
+  editButton.onclick = (event) => detailsEdit(event, subscription.id);
   const cloneButton = document.querySelector('#details-clone-button');
-  cloneButton.classList.toggle('hide', typeof openEditSubscription !== 'function');
+  cloneButton.classList.toggle('hide', typeof openEditSubscription !== 'function' || !isOwner);
+  document.querySelector('#details-delete-button').classList.toggle('hide', !isOwner);
+  document.querySelector('#details-export-button').classList.toggle('hide', !isOwner);
+  document.querySelector('#details-notifications-card').classList.toggle('hide', !isOwner);
   cloneButton.onclick = (event) => cloneSubscription(event, subscription.id);
   document.querySelector('#details-export-button').onclick = () => exportCalendar(subscription.id);
   document.querySelector('#details-delete-button').onclick = (event) => deleteSubscription(event, subscription.id);
@@ -276,14 +297,18 @@ function renderSubscriptionDetails(subscription, focusPanel) {
     document.querySelector('#details-plan').textContent = parts.join(' · ');
   }
   document.querySelector('#details-start-date').textContent = detailsFormatDate(subscription.start_date) || strings.none;
-  document.querySelector('#details-category').textContent = lookups.categories[subscription.category_id] || strings.none;
-  document.querySelector('#details-payer').textContent = lookups.members[subscription.payer_user_id] || strings.none;
+  // A shared subscription carries its owner's names; the ids are not ours.
+  const shared = (subscription.access || 'owner') !== 'owner';
+  document.querySelector('#details-category').textContent = (shared ? subscription.category_name : lookups.categories[subscription.category_id]) || strings.none;
+  document.querySelector('#details-payer').textContent = (shared ? subscription.payer_name : lookups.members[subscription.payer_user_id]) || strings.none;
 
-  const paymentMethod = lookups.paymentMethods[subscription.payment_method_id];
+  const paymentMethod = shared
+    ? (subscription.payment_method_name ? { name: subscription.payment_method_name, icon: '' } : null)
+    : lookups.paymentMethods[subscription.payment_method_id];
   const paymentIcon = document.querySelector('#details-payment-icon');
   if (paymentMethod) {
     paymentIcon.src = paymentMethod.icon;
-    paymentIcon.classList.remove('hide');
+    paymentIcon.classList.toggle('hide', !paymentMethod.icon);
     document.querySelector('#details-payment-name').textContent = paymentMethod.name;
   } else {
     paymentIcon.classList.add('hide');
@@ -309,7 +334,7 @@ function renderSubscriptionDetails(subscription, focusPanel) {
   detailsLoadHistory(subscription);
 
   // Notifications (one-time purchases never notify)
-  document.querySelector('#details-notifications-card').classList.toggle('hide', isOneTime);
+  document.querySelector('#details-notifications-card').classList.toggle('hide', isOneTime || (subscription.access || 'owner') !== 'owner');
   detailsRenderNotify(subscription);
 
   // Notes: notes_html is rendered server-side through render_notes_markdown()
@@ -625,7 +650,10 @@ function detailsRenderHistory(subscription, payments) {
 
     const amount = document.createElement('span');
     amount.className = 'history-amount';
-    amount.textContent = payment.amount === null ? '—' : detailsFormatPrice(payment.amount, payment.currency_id || subscription.currency_id);
+    const isOwner = (subscription.access || 'owner') === 'owner';
+    // A shared subscription's payments are in its owner's currency records.
+    amount.textContent = payment.amount === null ? '—'
+      : detailsFormatPrice(payment.amount, isOwner ? (payment.currency_id || subscription.currency_id) : subscription.currency_id);
 
     const edit = document.createElement('button');
     edit.type = 'button';
@@ -643,7 +671,11 @@ function detailsRenderHistory(subscription, payments) {
     remove.innerHTML = '<i class="fa-solid fa-trash" aria-hidden="true"></i>';
     remove.onclick = () => detailsDeletePayment(subscription, payment);
 
-    item.append(text, amount, edit, remove);
+    // The history is edited by the subscription's owner only.
+    item.append(text, amount);
+    if (isOwner) {
+      item.append(edit, remove);
+    }
     list.appendChild(item);
   });
 

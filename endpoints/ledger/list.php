@@ -4,6 +4,7 @@
 */
 require_once '../../includes/connect_endpoint.php';
 require_once '../../includes/payment_ledger.php';
+require_once '../../includes/households.php';
 
 header('Content-Type: application/json');
 
@@ -12,12 +13,13 @@ if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true) {
     die(json_encode(['success' => false, 'message' => translate('session_expired', $i18n)]));
 }
 
-$subscription = wallos_ledger_load_subscription($db, $userId, (int) ($_GET['id'] ?? 0));
+// Readable by the owner and by the household it is shared with.
+$subscription = wallos_load_accessible_subscription($db, $userId, (int) ($_GET['id'] ?? 0), 'read');
 if ($subscription === false) {
     die(json_encode(['success' => false, 'message' => translate('error', $i18n)]));
 }
 
 echo json_encode([
     'success' => true,
-    'payments' => wallos_ledger_list($db, $userId, $subscription['id'], 12),
+    'payments' => wallos_ledger_list($db, (int) $subscription['user_id'], $subscription['id'], 12),
 ]);

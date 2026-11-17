@@ -1,6 +1,7 @@
 <?php
 
 require_once '../../includes/connect_endpoint.php';
+require_once __DIR__ . '/../../includes/households.php';
 require_once '../../includes/validate_endpoint.php';
 require_once '../../includes/logo_cleanup.php';
 
@@ -36,6 +37,13 @@ if ($userIdToDelete == 1 || $userIdToDelete != $userId) {
     $stmt = $db->prepare('DELETE FROM user WHERE id = :id');
     $stmt->bindValue(':id', $userIdToDelete, SQLITE3_INTEGER);
     $result = $stmt->execute();
+
+    // A household the account owns goes (its members' shared subscriptions
+    // become private again); any other membership or invite goes too.
+    wallos_household_forget_user($db, $userIdToDelete);
+    $stmt = $db->prepare('DELETE FROM household_members WHERE user_id = :id');
+    $stmt->bindValue(':id', $userIdToDelete, SQLITE3_INTEGER);
+    $stmt->execute();
 
     // Delete subscriptions
     $stmt = $db->prepare('DELETE FROM subscriptions WHERE user_id = :id');
@@ -216,4 +224,4 @@ if ($userIdToDelete == 1 || $userIdToDelete != $userId) {
         "message" => translate('success', $i18n)
     ]));
 
-}
+}
