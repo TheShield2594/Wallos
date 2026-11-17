@@ -2,7 +2,7 @@
 
 require_once 'validate.php';
 require_once __DIR__ . '/../../includes/connect_endpoint_crontabs.php';
-require_once __DIR__ . '/../../includes/renewal_dates.php';
+require_once __DIR__ . '/../../includes/payment_ledger.php';
 
 require 'settimezone.php';
 
@@ -13,47 +13,29 @@ echo $timezone . "<br />\n";
 $currentDate = new DateTime();
 $currentDateString = $currentDate->format('Y-m-d');
 
-$cycles = array();
-$query = "SELECT * FROM cycles";
-$result = $db->query($query);
-while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
-    $cycleId = $row['id'];
-    $cycles[$cycleId] = $row;
-}
-
-$query = "SELECT id, next_payment, frequency, cycle FROM subscriptions WHERE next_payment < :currentDate AND auto_renew = 1 AND inactive = 0";
+// Every active auto-renewing subscription whose payment date has passed:
+// advance it along its calendar-anchored schedule, write one ledger row per
+// cycle it moved past, and close fixed-term plans after their final payment
+// (see includes/recurrence.php and includes/payment_ledger.php).
+$query = "SELECT * FROM subscriptions WHERE next_payment < :currentDate AND auto_renew = 1 AND inactive = 0";
 $stmt = $db->prepare($query);
 $stmt->bindValue(':currentDate', $currentDate->format('Y-m-d'));
 $result = $stmt->execute();
 
+$due = [];
 while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
-    $subscriptionId = $row['id'];
-    $nextPaymentDate = new DateTime($row['next_payment']);
-    $frequency = (int) $row['frequency'];
-    $cycle = $cycles[$row['cycle']]['name'] ?? null;
+    $due[] = $row;
+}
 
+foreach ($due as $row) {
     // A row saved before frequency was validated must not stall this loop
     // for every other user: 0 never advances the date, and a negative value
     // or a cycle without a unit (e.g. one-time) is not a valid interval.
-    if ($frequency < 1 || !in_array($cycle, ['Daily', 'Weekly', 'Monthly', 'Yearly'], true)) {
+    if (!wallos_is_recurring($row)) {
         continue;
     }
 
-    // Advance whole cycles until the next payment date is in the future,
-    // clamping month and year steps to the end of the month.
-    $baseDate = $nextPaymentDate;
-    $steps = 0;
-    while ($nextPaymentDate < $currentDate) {
-        $steps++;
-        $nextPaymentDate = wallos_renewal_date($baseDate, $cycle, $frequency, $steps);
-    }
-
-    // Update the subscription's next_payment date
-    $updateQuery = "UPDATE subscriptions SET next_payment = :nextPaymentDate WHERE id = :subscriptionId";
-    $updateStmt = $db->prepare($updateQuery);
-    $updateStmt->bindValue(':nextPaymentDate', $nextPaymentDate->format('Y-m-d'));
-    $updateStmt->bindValue(':subscriptionId', $subscriptionId);
-    $updateStmt->execute();
+    wallos_apply_schedule_advance($db, $row, $currentDate);
 }
 
 $formattedDate = $currentDate->format('Y-m-d');

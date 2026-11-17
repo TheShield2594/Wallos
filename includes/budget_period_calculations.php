@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/currency_rates.php';
+require_once __DIR__ . '/recurrence.php';
 
 if (!function_exists('sanitizeBudgetPeriodType')) {
     function sanitizeBudgetPeriodType($periodType)
@@ -122,136 +123,18 @@ if (!function_exists('formatBudgetPeriodLabel')) {
     }
 }
 
-if (!function_exists('getSubscriptionIntervalSpec')) {
-    function getSubscriptionIntervalSpec($cycle, $frequency)
-    {
-        $frequency = max(1, (int) $frequency);
-        $cycle = (int) $cycle;
-
-        $unit = match ($cycle) {
-            1 => 'D',
-            2 => 'W',
-            3 => 'M',
-            4 => 'Y',
-            default => null,
-        };
-
-        return $unit !== null ? 'P' . $frequency . $unit : null;
-    }
-}
-
-if (!function_exists('shiftSubscriptionOccurrence')) {
-    function shiftSubscriptionOccurrence(DateTime $date, array $subscription, DateTime $anchorDate, $direction)
-    {
-        $frequency = max(1, (int) ($subscription['frequency'] ?? 1));
-        $cycle = (int) ($subscription['cycle'] ?? 0);
-        $direction = $direction < 0 ? -1 : 1;
-        $step = $direction * $frequency;
-
-        if ($cycle === 1) {
-            $shifted = clone $date;
-            $shifted->modify($step . ' day');
-            return createDateAtMidnight($shifted);
-        }
-
-        if ($cycle === 2) {
-            $shifted = clone $date;
-            $shifted->modify(($step * 7) . ' day');
-            return createDateAtMidnight($shifted);
-        }
-
-        if ($cycle === 3) {
-            $totalMonths = ((int) $date->format('Y') * 12) + ((int) $date->format('n') - 1) + $step;
-            $targetYear = (int) floor($totalMonths / 12);
-            $targetMonth = ($totalMonths % 12) + 1;
-            $anchorDay = (int) $anchorDate->format('j');
-
-            return getDateWithClampedDay($targetYear, $targetMonth, $anchorDay);
-        }
-
-        if ($cycle === 4) {
-            $targetYear = (int) $date->format('Y') + $step;
-            $anchorMonth = (int) $anchorDate->format('n');
-            $anchorDay = (int) $anchorDate->format('j');
-
-            return getDateWithClampedDay($targetYear, $anchorMonth, $anchorDay);
-        }
-
-        return null;
-    }
-}
-
 if (!function_exists('getSubscriptionOccurrencesInRange')) {
+    /**
+     * Payment dates of a subscription inside a budget period. Delegates to the
+     * shared recurrence engine, so the budget agrees with the calendar and the
+     * renewal cron (calendar-anchored months, start date, end of a plan). A
+     * manually renewed subscription only counts its next payment.
+     *
+     * @return DateTime[]
+     */
     function getSubscriptionOccurrencesInRange(array $subscription, DateTime $rangeStart, DateTime $rangeEnd)
     {
-        if (empty($subscription['next_payment'])) {
-            return [];
-        }
-
-        $nextPayment = DateTime::createFromFormat('!Y-m-d', trim($subscription['next_payment']));
-        if ($nextPayment === false) {
-            return [];
-        }
-
-        $rangeStartDate = createDateAtMidnight($rangeStart);
-        $rangeEndDate = createDateAtMidnight($rangeEnd);
-        $occurrences = [];
-
-        $autoRenew = isset($subscription['auto_renew']) ? (int) $subscription['auto_renew'] === 1 : true;
-        $intervalSpec = getSubscriptionIntervalSpec($subscription['cycle'] ?? 0, $subscription['frequency'] ?? 1);
-
-        if ($intervalSpec === null) {
-            return [];
-        }
-
-        if (!$autoRenew) {
-            return ($nextPayment >= $rangeStartDate && $nextPayment <= $rangeEndDate)
-                ? [clone $nextPayment]
-                : [];
-        }
-
-        $current = clone $nextPayment;
-        $safetyCounter = 0;
-
-        while ($current > $rangeStartDate) {
-            $current = shiftSubscriptionOccurrence($current, $subscription, $nextPayment, -1);
-            if ($current === null) {
-                return [];
-            }
-            $safetyCounter++;
-            if ($safetyCounter > 10000) {
-                return [];
-            }
-        }
-
-        while ($current < $rangeStartDate) {
-            $current = shiftSubscriptionOccurrence($current, $subscription, $nextPayment, 1);
-            if ($current === null) {
-                return [];
-            }
-            $safetyCounter++;
-            if ($safetyCounter > 10000) {
-                return [];
-            }
-        }
-
-        while ($current <= $rangeEndDate) {
-            if ($current >= $rangeStartDate) {
-                $occurrences[] = clone $current;
-            }
-
-            $nextOccurrence = shiftSubscriptionOccurrence($current, $subscription, $nextPayment, 1);
-            if ($nextOccurrence === null || $nextOccurrence <= $current) {
-                break;
-            }
-            $current = $nextOccurrence;
-            $safetyCounter++;
-            if ($safetyCounter > 10000) {
-                break;
-            }
-        }
-
-        return $occurrences;
+        return wallos_occurrences_in_range($subscription, $rangeStart, $rangeEnd, false);
     }
 }
 

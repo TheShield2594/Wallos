@@ -45,6 +45,9 @@ function resetForm() {
   const form = document.querySelector("#subs-form");
   form.reset();
   toggleOneTimeCycleUI(false);
+  toggleEndsFields();
+  toggleVariableAmount();
+  toggleRenewFromAction();
   closeLogoSearch();
   const deleteButton = document.querySelector("#deletesub");
   deleteButton.style = 'display: none';
@@ -117,6 +120,15 @@ function fillEditFormFields(subscription) {
   if (notifications) {
     notifications.checked = subscription.notify;
   }
+
+  document.querySelector("#variable_amount").checked = Number(subscription.variable_amount) === 1;
+  document.querySelector("#renew_from_action").checked = Number(subscription.renew_from_action) === 1;
+  document.querySelector("#ends_mode").value = subscription.ends_mode || 'never';
+  document.querySelector("#end_date").value = subscription.end_date || '';
+  document.querySelector("#total_payments").value = subscription.total_payments || '';
+  toggleEndsFields();
+  toggleVariableAmount();
+  toggleRenewFromAction();
 
   const notifyDaysBefore = document.querySelector("#notify_days_before");
   notifyDaysBefore.value = subscription.notify_days_before ?? 0;
@@ -876,6 +888,10 @@ function toggleOneTimeCycleUI(isOneTime) {
   const notificationsGroup = document.querySelector("#notifications-group");
   const notifyDaysCancellationGroup = document.querySelector("#notify-days-cancellation-group");
   const notificationsCheckbox = document.querySelector("#notifications");
+  const endsGroup = document.querySelector("#ends-group");
+  const renewFromActionGroup = document.querySelector("#renew-from-action-group");
+  if (endsGroup) endsGroup.classList.toggle('hide', isOneTime);
+  if (renewFromActionGroup && isOneTime) renewFromActionGroup.classList.add('hide');
 
   if (isOneTime) {
     if (frequencySelect) frequencySelect.style.display = 'none';
@@ -897,6 +913,7 @@ function toggleOneTimeCycleUI(isOneTime) {
     if (notificationsGroup) notificationsGroup.style.display = '';
     if (notifyDaysCancellationGroup) notifyDaysCancellationGroup.style.display = '';
     if (notificationsCheckbox) notificationsCheckbox.disabled = false;
+    toggleRenewFromAction();
   }
 }
 
@@ -1014,3 +1031,146 @@ function applyNotesMarkdown(action) {
   }
 }
 
+
+/*
+  Schedule helpers for the form. They mirror includes/recurrence.php: month
+  and year steps clamp to the end of the month and return to the anchor day,
+  so a bill on the 31st goes Jan 31, Feb 28, Mar 31. The shared vectors live
+  in tests/cases/recurrence_test.php.
+*/
+function parseFormDate(value) {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return null;
+  }
+  const [year, month, day] = value.split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function formatFormDate(date) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function stepOccurrence(date, cycle, frequency, steps, anchorDay) {
+  const result = new Date(date);
+  switch (String(cycle)) {
+    case '1':
+      result.setDate(result.getDate() + frequency * steps);
+      return result;
+    case '2':
+      result.setDate(result.getDate() + 7 * frequency * steps);
+      return result;
+    case '3':
+    case '4': {
+      const months = (String(cycle) === '4' ? 12 : 1) * frequency * steps;
+      const moved = addMonthsClamped(date, months);
+      if (anchorDay) {
+        const lastDay = new Date(moved.getFullYear(), moved.getMonth() + 1, 0).getDate();
+        moved.setDate(Math.min(anchorDay, lastDay));
+      }
+      return moved;
+    }
+    default:
+      return null;
+  }
+}
+
+function formSchedule() {
+  const next = parseFormDate(document.querySelector("#next_payment").value);
+  const start = parseFormDate(document.querySelector("#start_date").value);
+  const cycle = document.querySelector("#cycle").value;
+  const frequency = Number(document.querySelector("#frequency").value) || 1;
+  let anchorDay = next ? next.getDate() : null;
+  if (next && start && start.getDate() > anchorDay) {
+    const monthEnd = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
+    if (anchorDay === monthEnd) {
+      anchorDay = start.getDate();
+    }
+  }
+  // Payments already made: scheduled dates from the start date up to the
+  // next payment, as the server counts them (wallos_plan_fields()).
+  let made = 0;
+  if (next && start) {
+    let previous = stepOccurrence(next, cycle, frequency, -1, anchorDay);
+    while (previous && previous >= start && made < 10000) {
+      made++;
+      previous = stepOccurrence(next, cycle, frequency, -(made + 1), anchorDay);
+    }
+  }
+  return { next, cycle, frequency, anchorDay, made };
+}
+
+function toggleEndsFields() {
+  const mode = document.querySelector("#ends_mode").value;
+  document.querySelector("#end-date-field").classList.toggle('hide', mode !== 'date');
+  document.querySelector("#total-payments-field").classList.toggle('hide', mode !== 'count');
+  document.querySelector("#end_date").required = mode === 'date';
+  document.querySelector("#total_payments").required = mode === 'count';
+  updateEndsHint();
+}
+
+// "Final payment Mar 31, 2027" for a count, or "12 payments from the next one" for a date.
+function updateEndsHint() {
+  const hint = document.querySelector("#ends-hint");
+  if (!hint) {
+    return;
+  }
+  const mode = document.querySelector("#ends_mode").value;
+  const schedule = formSchedule();
+  hint.textContent = '';
+  if (!schedule.next || mode === 'never') {
+    return;
+  }
+  if (mode === 'count') {
+    const total = Number(document.querySelector("#total_payments").value);
+    if (total >= 1) {
+      const final = stepOccurrence(schedule.next, schedule.cycle, schedule.frequency, total - schedule.made - 1, schedule.anchorDay);
+      if (final) {
+        hint.textContent = hint.dataset.finalPayment.replace('%s', final.toLocaleDateString(window.lang || 'en', { day: 'numeric', month: 'short', year: 'numeric' }));
+      }
+    }
+    return;
+  }
+  const end = parseFormDate(document.querySelector("#end_date").value);
+  if (!end) {
+    return;
+  }
+  let count = 0;
+  let current = schedule.next;
+  while (current && current <= end && count < 10000) {
+    count++;
+    current = stepOccurrence(schedule.next, schedule.cycle, schedule.frequency, count, schedule.anchorDay);
+  }
+  hint.textContent = hint.dataset.paymentsRemaining.replace('%s', schedule.made + count);
+}
+
+function toggleVariableAmount() {
+  const price = document.querySelector("#price");
+  const variable = document.querySelector("#variable_amount").checked;
+  price.placeholder = variable ? price.dataset.placeholderEstimate : price.dataset.placeholderPrice;
+}
+
+// Restarting the cycle on the day of payment only applies to manual renewals.
+function toggleRenewFromAction() {
+  const autoRenew = document.querySelector("#auto_renew");
+  const group = document.querySelector("#renew-from-action-group");
+  const isOneTime = document.querySelector("#cycle").value === '5';
+  const manual = autoRenew && !autoRenew.checked && !isOneTime;
+  group.classList.toggle('hide', !manual);
+  if (!manual) {
+    document.querySelector("#renew_from_action").checked = false;
+  }
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+  ['#next_payment', '#start_date', '#frequency', '#cycle'].forEach((selector) => {
+    const field = document.querySelector(selector);
+    if (field) {
+      field.addEventListener('change', updateEndsHint);
+    }
+  });
+  if (document.querySelector("#ends_mode")) {
+    toggleEndsFields();
+    toggleRenewFromAction();
+  }
+});

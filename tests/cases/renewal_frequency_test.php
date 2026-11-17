@@ -31,7 +31,9 @@ function renewal_cron_sandbox()
     }
     copy(WALLOS_ROOT . '/includes/connect_endpoint_crontabs.php', $root . '/includes/connect_endpoint_crontabs.php');
     copy(WALLOS_ROOT . '/includes/db_lock.php', $root . '/includes/db_lock.php');
-    copy(WALLOS_ROOT . '/includes/renewal_dates.php', $root . '/includes/renewal_dates.php');
+    foreach (['renewal_dates.php', 'recurrence.php', 'payment_ledger.php', 'currency_rates.php'] as $include) {
+        copy(WALLOS_ROOT . '/includes/' . $include, $root . '/includes/' . $include);
+    }
     foreach (glob(WALLOS_ROOT . '/includes/i18n/*.php') as $file) {
         copy($file, $root . '/includes/i18n/' . basename($file));
     }

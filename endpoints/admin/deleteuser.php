@@ -42,6 +42,11 @@ if ($userId == 1) {
     $stmt->bindValue(':id', $userId, SQLITE3_INTEGER);
     $result = $stmt->execute();
 
+    // Delete the payment history
+    $stmt = $db->prepare('DELETE FROM subscription_payments WHERE user_id = :id');
+    $stmt->bindValue(':id', $userId, SQLITE3_INTEGER);
+    $result = $stmt->execute();
+
     // Delete settings
     $stmt = $db->prepare('DELETE FROM settings WHERE user_id = :id');
     $stmt->bindValue(':id', $userId, SQLITE3_INTEGER);

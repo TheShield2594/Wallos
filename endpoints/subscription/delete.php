@@ -20,6 +20,12 @@ $deleteStmt->bindParam(':subscriptionId', $subscriptionId, SQLITE3_INTEGER);
 $deleteStmt->bindParam(':userId', $userId, SQLITE3_INTEGER);
 
 if ($deleteStmt->execute()) {
+    $query = "DELETE FROM subscription_payments WHERE subscription_id = :subscriptionId AND user_id = :userId";
+    $stmt = $db->prepare($query);
+    $stmt->bindParam(':subscriptionId', $subscriptionId, SQLITE3_INTEGER);
+    $stmt->bindParam(':userId', $userId, SQLITE3_INTEGER);
+    $stmt->execute();
+
     $query = "UPDATE subscriptions SET replacement_subscription_id = NULL WHERE replacement_subscription_id = :subscriptionId AND user_id = :userId";
     $stmt = $db->prepare($query);
     $stmt->bindParam(':subscriptionId', $subscriptionId, SQLITE3_INTEGER);
@@ -41,4 +47,4 @@ if ($deleteStmt->execute()) {
         "message" => translate('error_deleting_subscription', $i18n)
     ]);
 }
-$db->close();
+$db->close();

@@ -1,7 +1,7 @@
 <?php
 require_once 'includes/header.php';
 require_once 'includes/currency_rates.php';
-require_once 'includes/renewal_dates.php';
+require_once 'includes/recurrence.php';
 
 function getPriceConverted($price, $currency, $database, $userId)
 {
@@ -183,47 +183,15 @@ if ($weekStartsSunday) {
       }
     };
 
+    // Payment dates inside the month from the shared recurrence engine:
+    // calendar-anchored months, never before the start date, and never after
+    // the final payment of a fixed-term plan.
+    $monthStartDate = new DateTime($monthKey . '-01');
+    $monthEndDate = (clone $monthStartDate)->modify('last day of this month');
+    $projectionLimit = (new DateTime('today'))->modify('+' . (int) $yearsToLoad . ' years');
     foreach ($subscriptions as $subscription) {
-      $nextPaymentDate = strtotime($subscription['next_payment']);
-      $subscriptionStartDate = !empty($subscription['start_date'])
-        ? strtotime($subscription['start_date'])
-        : $nextPaymentDate;
-      $cycle = $subscription['cycle'];
-      $frequency = $subscription['frequency'];
-
-      if ($cycle == 5) {
-        // One-time purchase: only shown on its exact payment date
-        if (date('Y-m', $nextPaymentDate) == $monthKey) {
-          $registerPayment($nextPaymentDate, $subscription);
-        }
-        continue;
-      }
-
-      $cycleNames = [1 => 'Daily', 2 => 'Weekly', 3 => 'Monthly', 4 => 'Yearly'];
-      $cycleName = $cycleNames[$cycle] ?? 'Monthly';
-      if ((int) $frequency < 1) {
-        continue;
-      }
-
-      $baseDate = new DateTime(date('Y-m-d', $nextPaymentDate));
-      $occurrence = function ($steps) use ($baseDate, $cycleName, $frequency) {
-        return wallos_renewal_date($baseDate, $cycleName, $frequency, $steps)->getTimestamp();
-      };
-      $endDate = strtotime("+" . $yearsToLoad . " years", $nextPaymentDate);
-
-      // Find the first payment date of the month by moving backwards
-      $steps = 0;
-      while ($occurrence($steps) > $startOfMonth) {
-        $steps--;
-      }
-
-      for ($date = $occurrence($steps); $date <= $endDate; $date = $occurrence(++$steps)) {
-        if ($date < $subscriptionStartDate) {
-          continue;
-        }
-        if (date('Y-m', $date) == $monthKey) {
-          $registerPayment($date, $subscription);
-        }
+      foreach (wallos_occurrences_in_range($subscription, $monthStartDate, min($monthEndDate, $projectionLimit)) as $occurrence) {
+        $registerPayment($occurrence->getTimestamp(), $subscription);
       }
     }
     ?>

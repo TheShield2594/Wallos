@@ -2,6 +2,7 @@
 require_once __DIR__ . '/budget_period_calculations.php';
 require_once __DIR__ . '/currency_rates.php';
 require_once __DIR__ . '/default_names.php';
+require_once __DIR__ . '/recurrence.php';
 
 function getPricePerMonth($cycle, $frequency, $price)
 {
@@ -102,11 +103,12 @@ $mostExpensiveSubscription = array();
 $mostExpensiveSubscription['price'] = 0;
 $amountDueThisMonth = 0;
 $totalCostPerMonth = 0;
+$totalCostPerYearSum = 0;
 $totalSavingsPerMonth = 0;
 $totalCostsInReplacementsPerMonth = 0;
 
 $statsSubtitleParts = [];
-$query = "SELECT name, price, logo, logo_text_color, logo_variant, frequency, cycle, currency_id, next_payment, payer_user_id, category_id, payment_method_id, inactive, replacement_subscription_id, start_date, auto_renew FROM subscriptions";
+$query = "SELECT name, price, logo, logo_text_color, logo_variant, frequency, cycle, currency_id, next_payment, payer_user_id, category_id, payment_method_id, inactive, replacement_subscription_id, start_date, auto_renew, billing_anchor_day, end_date, total_payments, payments_made, ended_reason FROM subscriptions";
 $conditions = [];
 $params = [];
 
@@ -199,6 +201,14 @@ if ($result) {
             $price = getPricePerMonth($cycle, $frequency, $originalSubscriptionPrice);
 
             if ($inactive == 0) {
+                // A fixed-term plan only costs the payments it has left in
+                // the coming year; everything else costs twelve months.
+                if ($cycle != 5 && !empty($subscription['end_date'])) {
+                    $yearAhead = (new DateTime('today'))->modify('+1 year -1 day');
+                    $totalCostPerYearSum += count(wallos_occurrences_in_range($subscription, new DateTime('today'), $yearAhead)) * $originalSubscriptionPrice;
+                } else {
+                    $totalCostPerYearSum += $price * 12;
+                }
                 if ($cycle != 5) {
                     $activeSubscriptions++;
                     if (isset($paymentMethodsCount[$paymentMethodId])) {
@@ -221,26 +231,21 @@ if ($result) {
                 }
 
                 if ($cycle != 5) {
-                    // Calculate ammount due this month
-                    $nextPaymentDate = DateTime::createFromFormat('Y-m-d', trim($next_payment));
-                    $todayVal = new DateTime('today');
-                    $endOfMonth = new DateTime('last day of this month');
-
-                    if ($nextPaymentDate >= $todayVal && $nextPaymentDate <= $endOfMonth) {
-                        $timesToPay = 1;
-                        $daysInMonth = $endOfMonth->diff($todayVal)->days + 1;
-                        $daysRemaining = $endOfMonth->diff($nextPaymentDate)->days + 1;
-                        if ($cycle == 1) {
-                            $timesToPay = $daysRemaining / $frequency;
-                        }
-                        if ($cycle == 2) {
-                            $weeksInMonth = ceil($daysInMonth / 7);
-                            $weeksRemaining = ceil($daysRemaining / 7);
-                            $timesToPay = $weeksRemaining / $frequency;
-                        }
-                        $amountDueThisMonth += $originalSubscriptionPrice * $timesToPay;
-                    }
+                    // Amount due for the rest of this month: every payment
+                    // date from today to the end of the month, up to the end
+                    // of a fixed-term plan.
+                    $timesToPay = count(wallos_occurrences_in_range(
+                        $subscription,
+                        new DateTime('today'),
+                        new DateTime('last day of this month'),
+                        false
+                    ));
+                    $amountDueThisMonth += $originalSubscriptionPrice * $timesToPay;
                 }
+            } elseif (($subscription['ended_reason'] ?? null) === 'completed') {
+                // A plan that ran its course was paid off, not cancelled:
+                // it is not a saving.
+                continue;
             } else {
                 $inactiveSubscriptions++;
                 $totalSavingsPerMonth += $price;
@@ -268,8 +273,8 @@ if ($result) {
         // Subtract the total cost of replacement subscriptions from the total savings
         $totalSavingsPerMonth -= $totalCostsInReplacementsPerMonth;
 
-        // Calculate yearly price
-        $totalCostPerYear = $totalCostPerMonth * 12;
+        // Yearly price (fixed-term plans only count their remaining payments)
+        $totalCostPerYear = $totalCostPerYearSum;
 
         // Calculate average subscription monthly cost
         if ($activeSubscriptions > 0) {

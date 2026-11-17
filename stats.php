@@ -24,6 +24,38 @@ $upcomingCancellations = get_upcoming_cancellations($db, $userId);
 $upcomingCancellationsCount = count($upcomingCancellations);
 $potentialMonthlySavings = get_upcoming_cancellations_monthly_value($upcomingCancellations, $db, $userId);
 
+// What was actually paid, from the payment ledger: the last twelve months,
+// and this year so far against the same months last year.
+require_once 'includes/payment_ledger.php';
+$ledgerToday = new DateTime('today');
+$ledgerMonths = wallos_ledger_monthly_totals($db, $userId,
+    (clone $ledgerToday)->modify('first day of this month')->modify('-23 months')->format('Y-m'),
+    $ledgerToday->format('Y-m'));
+$actualPaymentsDataPoints = [];
+foreach (array_slice($ledgerMonths, -12, null, true) as $month => $total) {
+    $actualPaymentsDataPoints[] = [
+        'label' => (new IntlDateFormatter($lang, IntlDateFormatter::NONE, IntlDateFormatter::NONE, null, null, 'MMM yy'))->format(new DateTime($month . '-01')),
+        'y' => round($total, 2),
+    ];
+}
+$showActualPaymentsGraph = array_sum(array_column($actualPaymentsDataPoints, 'y')) > 0;
+$actualThisYear = 0.0;
+$actualLastYear = 0.0;
+$currentYear = $ledgerToday->format('Y');
+$currentMonth = (int) $ledgerToday->format('n');
+foreach ($ledgerMonths as $month => $total) {
+    [$year, $monthNumber] = array_map('intval', explode('-', $month));
+    if ($monthNumber > $currentMonth) {
+        continue;
+    }
+    if ((string) $year === $currentYear) {
+        $actualThisYear += $total;
+    } elseif ($year === (int) $currentYear - 1) {
+        $actualLastYear += $total;
+    }
+}
+$actualYearOverYear = $actualLastYear > 0 ? ($actualThisYear - $actualLastYear) / $actualLastYear * 100 : null;
+
 ?>
 <?php page_toolbar_start(translate('stats', $i18n), $statsSubtitle !== '' ? trim($statsSubtitle, '()') : translate('general_statistics', $i18n)); ?>
     <div class="filtermenu">
@@ -195,13 +227,15 @@ $potentialMonthlySavings = get_upcoming_cancellations_monthly_value($upcomingCan
 
   $showAnyGraph = $showCategoryCostGraph || $showMemberCostGraph || $showPaymentMethodsGraph || $showTotalMonthlyCostGraph
     || ($showMonthlyStats && $showVsMonthlyBudgetGraph) || ($showPeriodStats && $showVsPeriodBudgetGraph)
-    || $showProjectionGraph || $showLifetimeGraph || $showCycleGraph || $showCurrencyGraph || $showHistogramGraph || $showYearlyNewGraph;
+    || $showProjectionGraph || $showLifetimeGraph || $showCycleGraph || $showCurrencyGraph || $showHistogramGraph || $showYearlyNewGraph
+    || $showActualPaymentsGraph;
 
   $showTrendsSection = $showTotalMonthlyCostGraph || $showProjectionGraph || $monthOverMonthDelta !== null;
   $showBudgetSection = ($showMonthlyStats && (isset($monthlyBudgetUsed) || isset($monthlyBudgetLeft) || isset($monthlyOverBudgetAmount) || $showVsMonthlyBudgetGraph))
     || ($showPeriodStats && (isset($periodBudgetUsed) || isset($periodBudgetLeft) || isset($periodOverBudgetAmount) || $showVsPeriodBudgetGraph));
   $showSplitSection = $showMemberCostGraph || $showCategoryCostGraph || $showPaymentMethodsGraph || $showCycleGraph || $showCurrencyGraph || $showHistogramGraph;
-  $showHistorySection = $totalLifetimeSpend > 0 || $oldestSubscription !== null || $averageSubscriptionAge !== null || $showLifetimeGraph || $showYearlyNewGraph;
+  $showHistorySection = $totalLifetimeSpend > 0 || $oldestSubscription !== null || $averageSubscriptionAge !== null || $showLifetimeGraph || $showYearlyNewGraph
+    || $showActualPaymentsGraph;
   ?>
 
   <section class="stats-section">
@@ -546,7 +580,7 @@ $potentialMonthlySavings = get_upcoming_cancellations_monthly_value($upcomingCan
     <section class="stats-section">
       <h2><?= translate('history_and_lifetime', $i18n) ?></h2>
       <?php
-      if ($totalLifetimeSpend > 0 || $oldestSubscription !== null || $averageSubscriptionAge !== null) {
+      if ($totalLifetimeSpend > 0 || $oldestSubscription !== null || $averageSubscriptionAge !== null || $showActualPaymentsGraph) {
         ?>
         <div class="statistics">
           <?php
@@ -589,14 +623,36 @@ $potentialMonthlySavings = get_upcoming_cancellations_monthly_value($upcomingCan
             </div>
             <?php
           }
+          if ($showActualPaymentsGraph) {
+            ?>
+            <div class="statistic">
+              <span><?= CurrencyFormatter::format($actualThisYear, $code) ?></span>
+              <div class="title"><?= translate('actually_paid_this_year', $i18n) ?></div>
+              <?php if ($actualYearOverYear !== null) { ?>
+                <div class="subtitle"><?= sprintf(translate('vs_same_period_last_year', $i18n), ($actualYearOverYear >= 0 ? '+' : '') . number_format($actualYearOverYear, 0) . '%') ?></div>
+              <?php } ?>
+            </div>
+            <?php
+          }
           ?>
         </div>
         <?php
       }
-      if ($showLifetimeGraph || $showYearlyNewGraph) {
+      if ($showLifetimeGraph || $showYearlyNewGraph || $showActualPaymentsGraph) {
         ?>
         <div class="graphs">
           <?php
+          if ($showActualPaymentsGraph) {
+            ?>
+            <section class="graph">
+              <header>
+                <?= translate('actual_payments', $i18n) ?>
+                <div class="sub-header"><?= translate('from_payment_history', $i18n) ?></div>
+              </header>
+              <div id="actualPaymentsChart" style="width: 100%;"></div>
+            </section>
+            <?php
+          }
           if ($showYearlyNewGraph) {
             ?>
             <section class="graph">
@@ -706,6 +762,7 @@ if ($showAnyGraph) {
       loadGraph("currencySplitChart", <?php echo json_encode($currencyDataPoints, JSON_NUMERIC_CHECK); ?>, "<?= $code ?>", <?= $showCurrencyGraph ? 1 : 0 ?>);
       loadBarGraph("priceHistogramChart", <?php echo json_encode($histogramDataPoints, JSON_NUMERIC_CHECK); ?>, "", <?= $showHistogramGraph ? 1 : 0 ?>, null);
       loadBarGraph("newPerYearChart", <?php echo json_encode($newPerYearDataPoints, JSON_NUMERIC_CHECK); ?>, "", <?= $showYearlyNewGraph ? 1 : 0 ?>, null);
+      loadBarGraph("actualPaymentsChart", <?php echo json_encode($actualPaymentsDataPoints, JSON_NUMERIC_CHECK); ?>, "<?= $code ?>", <?= $showActualPaymentsGraph ? 1 : 0 ?>, null);
       loadHorizontalBarGraph("lifetimeSpendChart", <?php echo json_encode($lifetimeDataPoints, JSON_NUMERIC_CHECK); ?>, "<?= $code ?>", <?= $showLifetimeGraph ? 1 : 0 ?>);
     }
   </script>

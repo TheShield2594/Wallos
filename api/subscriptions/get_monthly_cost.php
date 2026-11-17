@@ -28,6 +28,7 @@ Example response:
 */
 
 require_once '../../includes/connect_endpoint.php';
+require_once '../../includes/recurrence.php';
 
 header('Content-Type: application/json; charset=UTF-8');
 
@@ -112,54 +113,26 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" || $_SERVER["REQUEST_METHOD"] === "GET
         }
     }
 
-    // Calculate the monthly cost based on the next_payment_date, payment cycle, and payment frequency
+    // Every payment date of each subscription inside the requested month,
+    // from the shared recurrence engine (calendar-anchored months, start
+    // date, end of a fixed-term plan).
+    $monthStart = new DateTime(sprintf('%04d-%02d-01', $year, $month));
+    $monthEnd = (clone $monthStart)->modify('last day of this month');
     foreach ($subscriptions as $subscription) {
-        $nextPaymentDate = strtotime($subscription['next_payment']);
-        $cycle = $subscription['cycle']; // Integer from 1 to 4
-        $frequency = $subscription['frequency'];
-
-        // Determine the strtotime increment string based on cycle
-        switch ($cycle) {
-            case 1: // Days
-                $incrementString = "+{$frequency} days";
-                break;
-            case 2: // Weeks
-                $incrementString = "+{$frequency} weeks";
-                break;
-            case 3: // Months
-                $incrementString = "+{$frequency} months";
-                break;
-            case 4: // Years
-                $incrementString = "+{$frequency} years";
-                break;
-            default:
-                $incrementString = "+{$frequency} months"; // Default case, if needed
+        $occurrences = count(wallos_occurrences_in_range($subscription, $monthStart, $monthEnd));
+        if ($occurrences === 0) {
+            continue;
         }
-
-        // Calculate the start of the month
-        $startOfMonth = strtotime($year . '-' . str_pad($month, 2, '0', STR_PAD_LEFT) . '-01');
-
-        // Find the first payment date of the month by moving backwards
-        $startDate = $nextPaymentDate;
-        while ($startDate > $startOfMonth) {
-            $startDate = strtotime("-" . $incrementString, $startDate);
+        $price = $subscription['price'];
+        if (
+            $userCurrencyId !== $subscription['currency_id']
+            && $canConvertCurrency
+            && isset($currencies[$userCurrencyId], $currencies[$subscription['currency_id']])
+            && (float)$currencies[$subscription['currency_id']] !== 0.0
+        ) {
+            $price *= $currencies[$userCurrencyId] / $currencies[$subscription['currency_id']];
         }
-
-        // Calculate the monthly cost
-        for ($date = $startDate; $date <= strtotime("+1 month", $startOfMonth); $date = strtotime($incrementString, $date)) {
-            if (date('Y-m', $date) == $year . '-' . str_pad($month, 2, '0', STR_PAD_LEFT)) {
-                $price = $subscription['price'];
-                if (
-                    $userCurrencyId !== $subscription['currency_id']
-                    && $canConvertCurrency
-                    && isset($currencies[$userCurrencyId], $currencies[$subscription['currency_id']])
-                    && (float)$currencies[$subscription['currency_id']] !== 0.0
-                ) {
-                    $price *= $currencies[$userCurrencyId] / $currencies[$subscription['currency_id']];
-                }
-                $monthlyCost += $price;
-            }
-        }
+        $monthlyCost += $price * $occurrences;
     }
 
     $formatter = new NumberFormatter('en_US', NumberFormatter::CURRENCY);

@@ -7,6 +7,7 @@ require_once '../../includes/getsettings.php';
 require_once '../../includes/ssrf_helper.php';
 require_once '../../includes/logo_theme_variant.php';
 require_once '../../includes/logo_cleanup.php';
+require_once '../../includes/recurrence.php';
 
 if (!file_exists('../../images/uploads/logos')) {
     mkdir('../../images/uploads/logos', 0777, true);
@@ -297,6 +298,54 @@ if ($cycle === 5) {
     $autoRenew = false;
 }
 
+if (wallos_parse_date($nextPayment) === null) {
+    rejectForeignId('Invalid next payment date.');
+}
+if ($startDate !== null && $startDate !== '' && wallos_parse_date($startDate) === null) {
+    rejectForeignId('Invalid start date.');
+}
+
+// Schedule options: variable amount, renew from the day of payment, and an
+// optional end (a date, or a number of payments) for fixed-term plans.
+$variableAmount = isset($_POST['variable_amount']) ? 1 : 0;
+$renewFromAction = isset($_POST['renew_from_action']) && !$autoRenew ? 1 : 0;
+$endsMode = in_array($_POST['ends_mode'] ?? 'never', ['never', 'date', 'count'], true) ? ($_POST['ends_mode'] ?? 'never') : 'never';
+if ($cycle === 5) {
+    $endsMode = 'never';
+}
+if ($endsMode === 'date' && wallos_parse_date($_POST['end_date'] ?? null) === null) {
+    rejectForeignId('Invalid end date.');
+}
+if ($endsMode === 'count' && (!ctype_digit((string) ($_POST['total_payments'] ?? '')) || (int) $_POST['total_payments'] < 1 || (int) $_POST['total_payments'] > 10000)) {
+    rejectForeignId('Invalid number of payments.');
+}
+
+$existingSchedule = [];
+if ($isEdit) {
+    $scheduleStmt = $db->prepare("SELECT billing_anchor_day, payments_made, ended_reason FROM subscriptions WHERE id = :id AND user_id = :userId");
+    $scheduleStmt->bindValue(':id', $_POST['id'], SQLITE3_INTEGER);
+    $scheduleStmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
+    $scheduleResult = $scheduleStmt->execute();
+    $existingSchedule = ($scheduleResult ? $scheduleResult->fetchArray(SQLITE3_ASSOC) : false) ?: [];
+}
+
+$billingAnchorDay = wallos_anchor_day_for_save($nextPayment, $startDate, $cycle, $existingSchedule['billing_anchor_day'] ?? null);
+$plan = wallos_plan_fields([
+    'next_payment' => $nextPayment,
+    'start_date' => $startDate,
+    'cycle' => $cycle,
+    'frequency' => $frequency,
+    'billing_anchor_day' => $billingAnchorDay,
+    'payments_made' => $existingSchedule['payments_made'] ?? 0,
+], $endsMode, $_POST['end_date'] ?? null, $_POST['total_payments'] ?? null);
+$endDate = $plan['end_date'];
+$totalPayments = $plan['total_payments'];
+$paymentsMade = $plan['payments_made'];
+
+// A finished plan stays finished while it is disabled; enabling it again
+// (or extending it) makes it an ordinary subscription.
+$endedReason = ($inactive && ($existingSchedule['ended_reason'] ?? null) === 'completed') ? 'completed' : null;
+
 $currStmt = $db->prepare("SELECT id FROM currencies WHERE id = :id AND user_id = :userId");
 $currStmt->bindParam(':id', $currencyId, SQLITE3_INTEGER);
 $currStmt->bindParam(':userId', $userId, SQLITE3_INTEGER);
@@ -393,12 +442,16 @@ if (!$isEdit) {
                         name, logo, price, currency_id, next_payment, cycle, frequency, notes,
                         payment_method_id, payer_user_id, category_id, notify, inactive, url,
                         notify_days_before, user_id, cancellation_date, replacement_subscription_id,
-                        auto_renew, start_date, logo_text_color, logo_variant
+                        auto_renew, start_date, logo_text_color, logo_variant,
+                        billing_anchor_day, renew_from_action, variable_amount, end_date,
+                        total_payments, payments_made, ended_reason
                     ) VALUES (
                         :name, :logo, :price, :currencyId, :nextPayment, :cycle, :frequency, :notes,
                         :paymentMethodId, :payerUserId, :categoryId, :notify, :inactive, :url,
                         :notifyDaysBefore, :userId, :cancellationDate, :replacement_subscription_id,
-                        :autoRenew, :startDate, :logoTextColor, :logoVariant
+                        :autoRenew, :startDate, :logoTextColor, :logoVariant,
+                        :billingAnchorDay, :renewFromAction, :variableAmount, :endDate,
+                        :totalPayments, :paymentsMade, :endedReason
                     )";
 } else {
     $id = $_POST['id'];
@@ -436,7 +489,14 @@ if (!$isEdit) {
                         url = :url, 
                         notify_days_before = :notifyDaysBefore, 
                         cancellation_date = :cancellationDate, 
-                        replacement_subscription_id = :replacement_subscription_id";
+                        replacement_subscription_id = :replacement_subscription_id,
+                        billing_anchor_day = :billingAnchorDay,
+                        renew_from_action = :renewFromAction,
+                        variable_amount = :variableAmount,
+                        end_date = :endDate,
+                        total_payments = :totalPayments,
+                        payments_made = :paymentsMade,
+                        ended_reason = :endedReason";
 
     if ($logo != "") {
         $sql .= ", logo = :logo, logo_text_color = :logoTextColor, logo_variant = :logoVariant";
@@ -473,6 +533,13 @@ if ($isEdit) {
 }
 $stmt->bindParam(':userId', $userId, SQLITE3_INTEGER);
 $stmt->bindParam(':replacement_subscription_id', $replacementSubscriptionId, SQLITE3_INTEGER);
+$stmt->bindValue(':billingAnchorDay', $billingAnchorDay, $billingAnchorDay === null ? SQLITE3_NULL : SQLITE3_INTEGER);
+$stmt->bindValue(':renewFromAction', $renewFromAction, SQLITE3_INTEGER);
+$stmt->bindValue(':variableAmount', $variableAmount, SQLITE3_INTEGER);
+$stmt->bindValue(':endDate', $endDate, $endDate === null ? SQLITE3_NULL : SQLITE3_TEXT);
+$stmt->bindValue(':totalPayments', $totalPayments, $totalPayments === null ? SQLITE3_NULL : SQLITE3_INTEGER);
+$stmt->bindValue(':paymentsMade', $paymentsMade, SQLITE3_INTEGER);
+$stmt->bindValue(':endedReason', $endedReason, $endedReason === null ? SQLITE3_NULL : SQLITE3_TEXT);
 
 if ($stmt->execute()) {
     $success['status'] = "Success";

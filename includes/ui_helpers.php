@@ -38,7 +38,7 @@ function render_tile($name, $logoSrc = '', $variantSrc = null, $textColor = null
 /*
   One row of a grouped list: tile, name, subtitle and a trailing value.
   $row keys: id, name, logo, logo_variant, logo_text_color, subtitle,
-  subtitle_tone ('' | 'danger'), trailing, trailing_sub, dim (bool),
+  subtitle_tone ('' | 'danger' | 'warning' | 'success'), trailing, trailing_sub, dim (bool),
   progress (null | 0..100). Name and text values are escaped here.
 */
 function render_list_row($row)

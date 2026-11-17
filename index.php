@@ -6,6 +6,7 @@ require_once 'includes/logo_theme_variant.php';
 require_once 'includes/upcoming_payments.php';
 require_once 'includes/upcoming_cancellations.php';
 require_once 'includes/ui_helpers.php';
+require_once 'includes/payment_ledger.php';
 
 function formatPrice($price, $currencyCode, $currencies)
 {
@@ -91,6 +92,11 @@ while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
     $overdueSubscriptions[] = $row;
 }
 $hasOverdueSubscriptions = !empty($overdueSubscriptions);
+
+// Cycles the renewal cron moved past that still need the user: amounts to
+// enter for variable bills, and unconfirmed renewals when the user asked to
+// confirm every one.
+$paymentsToReview = wallos_ledger_open_items($db, $userId, !empty($settings['require_payment_confirmation']));
 
 // Fetch the subscriptions whose cancellation reminder is still ahead (shared with
 // the statistics page, so both stay in step).
@@ -257,6 +263,30 @@ $dashboardRow = function ($subscription, $subtitle, $tone = '') use ($dashboardP
                                 <?= $dashboardRow($subscription, $overdueText, 'danger') ?>
                                 <button type="button" class="btn btn-small" onClick="renewSubscription(event, <?= (int) $subscription['id'] ?>)">
                                     <?= translate('mark_as_paid', $i18n) ?>
+                                </button>
+                            </div>
+                        <?php } ?>
+                    </div>
+                </section>
+            <?php } ?>
+
+            <?php if (!empty($paymentsToReview)) { ?>
+                <section class="card">
+                    <header class="card-header">
+                        <h2 class="card-title"><?= translate('payments_to_review', $i18n) ?></h2>
+                    </header>
+                    <div class="card-list">
+                        <?php foreach ($paymentsToReview as $item) {
+                            $needsAmount = $item['status'] === 'pending_amount';
+                            $reviewText = translate($needsAmount ? 'amount_needed' : 'unconfirmed', $i18n)
+                                . ' · ' . sprintf(translate('was_due', $i18n), formatDate($item['due_date'], $lang));
+                            $defaultAmount = $item['ledger_amount'] ?? $item['price'];
+                            ?>
+                            <div class="list-row-group">
+                                <?= $dashboardRow($item, $reviewText, $needsAmount ? 'warning' : '') ?>
+                                <button type="button" class="btn btn-small"
+                                    onClick="confirmLedgerPayment(event, <?= (int) $item['payment_id'] ?>, <?= htmlspecialchars(json_encode((float) $defaultAmount), ENT_QUOTES) ?>, <?= $needsAmount ? 'true' : 'false' ?>)">
+                                    <?= translate($needsAmount ? 'enter_amount' : 'confirm', $i18n) ?>
                                 </button>
                             </div>
                         <?php } ?>

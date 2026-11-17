@@ -38,6 +38,7 @@ require_once __DIR__ . '/getdbkeys.php';
 
     <div class="detail-actions">
       <button type="button" class="btn btn-primary hide" id="details-renew-button"><?= translate('mark_as_paid', $i18n) ?></button>
+      <button type="button" class="btn hide" id="details-undo-button"><?= translate('undo_payment', $i18n) ?></button>
       <button type="button" class="btn" id="details-edit-button"><?= translate('edit', $i18n) ?></button>
       <button type="button" class="btn" id="details-clone-button"><?= translate('clone', $i18n) ?></button>
       <button type="button" class="btn" id="details-export-button"><?= translate('add_to_calendar', $i18n) ?></button>
@@ -56,6 +57,10 @@ require_once __DIR__ . '/getdbkeys.php';
           <div class="kv-row">
             <dt><?= translate('billing_cycle', $i18n) ?></dt>
             <dd id="details-cycle"></dd>
+          </div>
+          <div class="kv-row hide" id="details-plan-item">
+            <dt><?= translate('plan', $i18n) ?></dt>
+            <dd id="details-plan"></dd>
           </div>
           <div class="kv-row" id="details-renewal-item">
             <dt><?= translate('renewal', $i18n) ?></dt>
@@ -113,6 +118,17 @@ require_once __DIR__ . '/getdbkeys.php';
           <p class="card-footnote" id="details-notify-note"></p>
         </section>
 
+        <section class="card hide" id="details-history-card">
+          <h3 class="card-title"><?= translate('payment_history', $i18n) ?></h3>
+          <svg class="history-sparkline hide" id="details-history-sparkline" viewBox="0 0 240 48" preserveAspectRatio="none"
+            role="img" aria-labelledby="details-history-sparkline-label">
+            <title id="details-history-sparkline-label"><?= translate('payment_history', $i18n) ?></title>
+            <polyline fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" points=""></polyline>
+          </svg>
+          <ul class="history-list" id="details-history-list"></ul>
+          <p class="card-footnote" id="details-history-empty"><?= translate('no_payments_recorded', $i18n) ?></p>
+        </section>
+
         <section class="card hide" id="details-notes-item">
           <h3 class="card-title"><?= translate('notes', $i18n) ?></h3>
           <div class="detail-notes" id="details-notes"></div>
@@ -160,6 +176,22 @@ $detailsLookups = [
     'overdue_since' => translate('overdue_since', $i18n),
     'reminder_note_on' => translate('reminder_note_on', $i18n),
     'reminder_note_off' => translate('reminder_note_off', $i18n),
+    'estimated' => translate('estimated', $i18n),
+    'paid_badge' => translate('paid_badge', $i18n),
+    'payment_n_of_total' => translate('payment_n_of_total', $i18n),
+    'ends_on' => translate('ends_on', $i18n),
+    'plan_completed_label' => translate('plan_completed_label', $i18n),
+    'n_payments' => translate('n_payments', $i18n),
+    'status_paid' => translate('status_paid', $i18n),
+    'status_assumed' => translate('status_assumed', $i18n),
+    'status_pending_amount' => translate('status_pending_amount', $i18n),
+    'enter_amount_paid' => translate('enter_amount_paid', $i18n),
+    'edit' => translate('edit', $i18n),
+    'delete' => translate('delete', $i18n),
+    'undo_payment' => translate('undo_payment', $i18n),
+    'confirm_delete_payment' => translate('confirm_delete_payment', $i18n),
+    'invalid_amount' => translate('invalid_amount', $i18n),
+    'error' => translate('error', $i18n),
   ],
 ];
 foreach ($categories as $categoryId => $category) {

@@ -1,6 +1,7 @@
 <?php
 require_once '../../includes/connect_endpoint.php';
 require_once '../../includes/markdown.php';
+require_once '../../includes/payment_ledger.php';
 
 if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
     if (isset($_GET['id']) && $_GET['id'] != "") {
@@ -37,6 +38,16 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
             $subscriptionData['notify_days_before'] = $row['notify_days_before'];
             $subscriptionData['cancellation_date'] = $row['cancellation_date'];
             $subscriptionData['replacement_subscription_id'] = $row['replacement_subscription_id'];
+            $subscriptionData['renew_from_action'] = (int) ($row['renew_from_action'] ?? 0);
+            $subscriptionData['variable_amount'] = (int) ($row['variable_amount'] ?? 0);
+            $subscriptionData['end_date'] = $row['end_date'] ?? null;
+            $subscriptionData['total_payments'] = $row['total_payments'] === null ? null : (int) $row['total_payments'];
+            $subscriptionData['payments_made'] = (int) ($row['payments_made'] ?? 0);
+            $subscriptionData['ended_reason'] = $row['ended_reason'] ?? null;
+            $subscriptionData['ends_mode'] = !empty($row['end_date']) ? 'date' : 'never';
+            $lastPaid = wallos_ledger_last_paid_map($db, $userId)[(int) $row['id']] ?? null;
+            $subscriptionData['paid_badge'] = wallos_paid_badge_date($row, $lastPaid);
+            $subscriptionData['paid_due_date'] = $subscriptionData['paid_badge'] !== null ? $lastPaid['due_date'] : null;
 
             $subscriptionJson = json_encode($subscriptionData);
             header('Content-Type: application/json');

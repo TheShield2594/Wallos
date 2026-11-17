@@ -1089,6 +1089,11 @@ function setShowSubscriptionProgress() {
   storeSettingsOnDB('subscription_progress', value);
 }
 
+function setRequirePaymentConfirmation() {
+  const checkbox = document.querySelector("#requirepaymentconfirmation");
+  storeSettingsOnDB('payment_confirmation', checkbox.checked);
+}
+
 function loadApiUsage(endpoint, containerId, countId, fillId) {
   const usageContainer = document.getElementById(containerId);
   if (!usageContainer) {
