@@ -281,4 +281,4 @@ if ($weekStartsSunday) {
 <script src="scripts/calendar.js?<?= $version ?>"></script>
 <?php
 require_once 'includes/footer.php';
-?>
+?>

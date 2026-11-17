@@ -566,4 +566,4 @@ if ($stmt->execute()) {
     echo translate('error', $i18n) . ": " . $db->lastErrorMsg();
 }
 $db->close();
-?>
+?>

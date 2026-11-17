@@ -385,4 +385,4 @@ while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
 
 $showTotalMonthlyCostGraph = count($totalMonthlyCostDataPoints) > 1;
 
-?>
+?>

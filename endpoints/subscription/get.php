@@ -64,4 +64,4 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
     echo json_encode(['error' => translate('session_expired', $i18n)]);
 }
 $db->close();
-?>
+?>

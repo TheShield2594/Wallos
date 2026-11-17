@@ -324,4 +324,4 @@ if ($row !== false) {
     $mainCurrencyId = $currencies[1]['id'];
 }
 
-?>
+?>

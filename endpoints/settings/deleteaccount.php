@@ -216,4 +216,4 @@ if ($userIdToDelete == 1 || $userIdToDelete != $userId) {
         "message" => translate('success', $i18n)
     ]));
 
-}
+}

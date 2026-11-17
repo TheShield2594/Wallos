@@ -50,4 +50,4 @@ $stmt->bindParam(':formattedDate', $currentDateString, SQLITE3_TEXT);
 $result = $stmt->execute();
 
 echo "Updated next payment dates";
-?>
+?>
