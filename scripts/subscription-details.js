@@ -208,7 +208,9 @@ function renderSubscriptionDetails(subscription, focusPanel) {
 
   detailsRenderTile(document.querySelector('#details-logo'), subscription);
   document.querySelector('#details-name').textContent = subscription.name;
-  document.querySelector('#details-price').textContent = detailsFormatPrice(subscription.price, subscription.currency_id);
+  // During a free trial or promo the header shows what is charged now.
+  const headerPrice = subscription.intro_active ? subscription.current_price : subscription.price;
+  document.querySelector('#details-price').textContent = detailsFormatPrice(headerPrice, subscription.currency_id);
   document.querySelector('#details-billing-cycle').textContent = detailsPerText(subscription);
 
   const status = detailsStatus(subscription);
@@ -247,6 +249,14 @@ function renderSubscriptionDetails(subscription, focusPanel) {
   document.querySelector('#details-cycle').textContent = detailsBillingCycleText(subscription.cycle, subscription.frequency);
   document.querySelector('#details-renewal-item').classList.toggle('hide', isOneTime);
   document.querySelector('#details-renewal').textContent = isManual ? strings.manual_renewal : strings.automatic;
+  const introItem = document.querySelector('#details-intro-item');
+  introItem.classList.toggle('hide', !subscription.intro_active);
+  if (subscription.intro_active) {
+    document.querySelector('#details-intro-label').textContent = subscription.intro_type === 'trial' ? strings.free_trial : strings.intro_price;
+    document.querySelector('#details-intro').textContent = strings.intro_then
+      .replace('%1$s', detailsFormatDate(subscription.intro_end_date))
+      .replace('%2$s', detailsFormatPrice(subscription.price, subscription.currency_id));
+  }
   const planItem = document.querySelector('#details-plan-item');
   const planTotal = Number(subscription.total_payments) || 0;
   planItem.classList.toggle('hide', !planTotal && !subscription.end_date);

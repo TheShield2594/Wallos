@@ -29,6 +29,7 @@ Example response:
 
 require_once '../../includes/connect_endpoint.php';
 require_once '../../includes/recurrence.php';
+require_once '../../includes/intro_pricing.php';
 
 header('Content-Type: application/json; charset=UTF-8');
 
@@ -119,11 +120,12 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" || $_SERVER["REQUEST_METHOD"] === "GET
     $monthStart = new DateTime(sprintf('%04d-%02d-01', $year, $month));
     $monthEnd = (clone $monthStart)->modify('last day of this month');
     foreach ($subscriptions as $subscription) {
-        $occurrences = count(wallos_occurrences_in_range($subscription, $monthStart, $monthEnd));
-        if ($occurrences === 0) {
+        $dates = wallos_occurrences_in_range($subscription, $monthStart, $monthEnd);
+        if ($dates === []) {
             continue;
         }
-        $price = $subscription['price'];
+        // Each payment at its own price (an intro price during a trial or promo).
+        $price = wallos_price_of_occurrences($subscription, $dates);
         if (
             $userCurrencyId !== $subscription['currency_id']
             && $canConvertCurrency
@@ -132,7 +134,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" || $_SERVER["REQUEST_METHOD"] === "GET
         ) {
             $price *= $currencies[$userCurrencyId] / $currencies[$subscription['currency_id']];
         }
-        $monthlyCost += $price * $occurrences;
+        $monthlyCost += $price;
     }
 
     $formatter = new NumberFormatter('en_US', NumberFormatter::CURRENCY);
@@ -149,4 +151,4 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" || $_SERVER["REQUEST_METHOD"] === "GET
     ], JSON_UNESCAPED_UNICODE);
 
 }
-?>
+?>

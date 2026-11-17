@@ -132,7 +132,7 @@ function addListRowFields(&$printRow, $subscription, $mainCurrencyId, $db)
     $printRow['next_payment_raw'] = $subscription['next_payment'];
     $printRow['start_date'] = $subscription['start_date'] ?? '';
     $printRow['cycle'] = (int) $subscription['cycle'];
-    $monthly = getPricePerMonth((int) $subscription['cycle'], (int) $subscription['frequency'], floatval($subscription['price']));
+    $monthly = getPricePerMonth((int) $subscription['cycle'], (int) $subscription['frequency'], wallos_current_price($subscription));
     if ($subscription['currency_id'] != $mainCurrencyId) {
         $monthly = getPriceConverted($monthly, $subscription['currency_id'], $db);
     }
@@ -153,6 +153,8 @@ function addListRowFields(&$printRow, $subscription, $mainCurrencyId, $db)
     $deadline = wallos_cancel_deadline($subscription);
     $printRow['cancel_by'] = ($deadline !== null && $deadline['cancel_by'] >= date('Y-m-d')) ? $deadline['cancel_by'] : null;
     $printRow['locked_until'] = wallos_cancel_locked_until($subscription);
+    $printRow['intro_type'] = wallos_intro_active($subscription) ? $subscription['intro_type'] : null;
+    $printRow['intro_end_date'] = $printRow['intro_type'] !== null ? $subscription['intro_end_date'] : null;
     if ($printRow['plan_total']) {
         $printRow['progress'] = (int) floor(min($printRow['plan_made'], $printRow['plan_total']) / $printRow['plan_total'] * 100);
     } else {
@@ -194,6 +196,11 @@ function listRowSubtitle($subscription, $i18n, $lang)
     $isOverdue = $subscription['auto_renew'] != 1 && $subscription['next_payment_raw'] < date('Y-m-d');
     if ($isOverdue) {
         return [translate('overdue', $i18n) . ' · ' . sprintf(translate('was_due', $i18n), formatDate($subscription['next_payment_raw'], $lang)), 'danger'];
+    }
+    if (!empty($subscription['intro_type'])) {
+        // "Free trial · ends Nov 4" while the intro period runs.
+        $label = translate($subscription['intro_type'] === 'trial' ? 'free_trial' : 'intro_price', $i18n);
+        return [$label . ' · ' . sprintf(translate('ends_on', $i18n), formatDate($subscription['intro_end_date'], $lang)), 'accent'];
     }
     $planText = listRowPlanText($subscription, $i18n, $lang);
     $schedule = $planText !== '' ? formatDate($subscription['next_payment_raw'], $lang) . ' · ' . $planText
@@ -281,7 +288,11 @@ function printSubscriptions($subscriptions, $sort, $categories, $members, $i18n,
                 foreach ($group['rows'] as $subscription) {
                     [$subtitle, $tone] = listRowSubtitle($subscription, $i18n, $lang);
                     $trailingSub = '';
-                    if (isset($subscription['original_price']) && $subscription['original_price'] != $subscription['price']) {
+                    $trailingStrike = false;
+                    if (!empty($subscription['intro_type']) && isset($subscription['regular_price']) && $subscription['regular_price'] != $subscription['price']) {
+                        $trailingSub = formatPrice($subscription['regular_price'], $subscription['currency_code'], $currencies);
+                        $trailingStrike = true;
+                    } elseif (isset($subscription['original_price']) && $subscription['original_price'] != $subscription['price']) {
                         $trailingSub = formatPrice($subscription['original_price'], $subscription['original_currency_code'], $currencies);
                     }
                     echo render_list_row([
@@ -294,6 +305,7 @@ function printSubscriptions($subscriptions, $sort, $categories, $members, $i18n,
                         'subtitle_tone' => $tone,
                         'trailing' => (!empty($subscription['variable_amount']) ? '≈ ' : '') . formatPrice($subscription['price'], $subscription['currency_code'], $currencies),
                         'trailing_sub' => $trailingSub,
+                        'trailing_sub_strike' => $trailingStrike,
                         'dim' => (bool) $subscription['inactive'],
                         'progress' => ($showProgress && !$subscription['inactive'] && !$subscription['one_time']) ? min(100, $subscription['progress']) : null,
                     ]);

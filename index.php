@@ -445,6 +445,9 @@ $dashboardRow = function ($subscription, $subtitle, $tone = '') use ($dashboardP
                     </header>
                     <dl class="kv-list">
                         <div class="kv-row"><dt><?= translate('inactive_subscriptions', $i18n) ?></dt><dd><?= (int) $inactiveSubscriptions ?></dd></div>
+                        <?php if (!empty($cancelledTrials)) { ?>
+                            <div class="kv-row"><dt><?= translate('cancelled_trials', $i18n) ?></dt><dd><?= (int) $cancelledTrials ?></dd></div>
+                        <?php } ?>
                         <?php if (isset($totalSavingsPerMonth) && $totalSavingsPerMonth > 0) { ?>
                             <div class="kv-row"><dt><?= translate('monthly_savings', $i18n) ?></dt><dd><?= $money($totalSavingsPerMonth) ?></dd></div>
                             <div class="kv-row"><dt><?= translate('yearly_savings', $i18n) ?></dt><dd><?= $money($totalSavingsPerMonth * 12) ?></dd></div>

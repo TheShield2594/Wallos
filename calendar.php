@@ -2,6 +2,7 @@
 require_once 'includes/header.php';
 require_once 'includes/currency_rates.php';
 require_once 'includes/recurrence.php';
+require_once 'includes/intro_pricing.php';
 
 function getPriceConverted($price, $currency, $database, $userId)
 {
@@ -175,7 +176,8 @@ if ($weekStartsSunday) {
 
     $registerPayment = function ($date, $subscription) use (&$paymentsByDay, &$totalCostThisMonth, &$numberOfSubscriptionsToPayThisMonth, &$amountDueThisMonth, $today, $db, $userId) {
       $paymentsByDay[(int) date('j', $date)][] = $subscription;
-      $convertedPrice = getPriceConverted($subscription['price'], $subscription['currency_id'], $db, $userId);
+      // A payment inside a free trial or promo costs the intro price.
+      $convertedPrice = getPriceConverted(wallos_price_on($subscription, date('Y-m-d', $date)), $subscription['currency_id'], $db, $userId);
       $totalCostThisMonth += $convertedPrice;
       $numberOfSubscriptionsToPayThisMonth++;
       if ($date >= $today) {
@@ -281,4 +283,4 @@ if ($weekStartsSunday) {
 <script src="scripts/calendar.js?<?= $version ?>"></script>
 <?php
 require_once 'includes/footer.php';
-?>
+?>

@@ -9,6 +9,7 @@ require_once '../../includes/logo_theme_variant.php';
 require_once '../../includes/logo_cleanup.php';
 require_once '../../includes/payment_ledger.php';
 require_once '../../includes/cancellation_deadline.php';
+require_once '../../includes/intro_pricing.php';
 
 if (!file_exists('../../images/uploads/logos')) {
     mkdir('../../images/uploads/logos', 0777, true);
@@ -328,6 +329,21 @@ if ($cancelNotice['error'] !== null) {
 }
 $cancellationDate = $cancelNotice['fields']['cancellation_date'];
 
+// Free trial or intro price (see includes/intro_pricing.php). A trial's next
+// payment is the first paid one.
+$intro = wallos_intro_fields_from_input($_POST, [
+    'cycle' => $cycle,
+    'frequency' => $frequency,
+    'start_date' => $startDate,
+    'next_payment' => $nextPayment,
+]);
+if ($intro['error'] !== null) {
+    rejectForeignId($intro['error']);
+}
+if ($intro['next_payment'] !== null) {
+    $nextPayment = $intro['next_payment'];
+}
+
 $existingSchedule = [];
 if ($isEdit) {
     $scheduleStmt = $db->prepare("SELECT id, billing_anchor_day, payments_made, ended_reason, next_payment, start_date, cycle, frequency, renew_from_action
@@ -564,7 +580,9 @@ $stmt->bindValue(':endedReason', $endedReason, $endedReason === null ? SQLITE3_N
 $stmt->bindValue(':planMode', $planMode, $planMode === null ? SQLITE3_NULL : SQLITE3_TEXT);
 
 if ($stmt->execute()) {
-    wallos_store_cancel_fields($db, $isEdit ? $id : $db->lastInsertRowID(), $userId, $cancelNotice['fields']);
+    $savedId = $isEdit ? $id : $db->lastInsertRowID();
+    wallos_store_cancel_fields($db, $savedId, $userId, $cancelNotice['fields']);
+    wallos_store_intro_fields($db, $savedId, $userId, $intro['fields']);
 
     $success['status'] = "Success";
     $text = $isEdit ? "updated" : "added";

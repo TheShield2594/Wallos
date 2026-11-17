@@ -3,6 +3,7 @@ require_once '../../includes/connect_endpoint.php';
 require_once '../../includes/markdown.php';
 require_once '../../includes/payment_ledger.php';
 require_once '../../includes/cancellation_deadline.php';
+require_once '../../includes/intro_pricing.php';
 
 if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
     if (isset($_GET['id']) && $_GET['id'] != "") {
@@ -46,6 +47,12 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
             $subscriptionData['cancel_by'] = $deadline['cancel_by'] ?? null;
             $subscriptionData['cancel_renewal'] = $deadline['renewal'] ?? null;
             $subscriptionData['locked_until'] = wallos_cancel_locked_until($row);
+            $subscriptionData['intro_type'] = wallos_has_intro($row) ? $row['intro_type'] : null;
+            $subscriptionData['intro_price'] = $row['intro_price'] === null ? null : (float) $row['intro_price'];
+            $subscriptionData['intro_end_date'] = $row['intro_end_date'] ?? null;
+            $subscriptionData['intro_notify_days'] = (int) ($row['intro_notify_days'] ?? 3);
+            $subscriptionData['intro_active'] = wallos_intro_active($row);
+            $subscriptionData['current_price'] = wallos_current_price($row);
             $subscriptionData['replacement_subscription_id'] = $row['replacement_subscription_id'];
             $subscriptionData['renew_from_action'] = (int) ($row['renew_from_action'] ?? 0);
             $subscriptionData['variable_amount'] = (int) ($row['variable_amount'] ?? 0);

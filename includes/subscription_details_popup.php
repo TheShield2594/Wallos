@@ -62,6 +62,10 @@ require_once __DIR__ . '/getdbkeys.php';
             <dt><?= translate('plan', $i18n) ?></dt>
             <dd id="details-plan"></dd>
           </div>
+          <div class="kv-row hide" id="details-intro-item">
+            <dt id="details-intro-label"><?= translate('free_trial', $i18n) ?></dt>
+            <dd id="details-intro"></dd>
+          </div>
           <div class="kv-row" id="details-renewal-item">
             <dt><?= translate('renewal', $i18n) ?></dt>
             <dd id="details-renewal"></dd>
@@ -188,6 +192,9 @@ $detailsLookups = [
     'n_payments' => translate('n_payments', $i18n),
     'cancellation_notification' => translate('cancellation_notification', $i18n),
     'cancel_by_label' => translate('cancel_by_label', $i18n),
+    'free_trial' => translate('free_trial', $i18n),
+    'intro_price' => translate('intro_price', $i18n),
+    'intro_then' => translate('intro_then', $i18n),
     'locked_in_until' => translate('locked_in_until', $i18n),
     'status_paid' => translate('status_paid', $i18n),
     'status_assumed' => translate('status_assumed', $i18n),

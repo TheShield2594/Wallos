@@ -202,7 +202,10 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
     $print[$id]['payment_method_id'] = $paymentMethodId;
     $print[$id]['category_id'] = $subscription['category_id'];
     $print[$id]['payer_user_id'] = $subscription['payer_user_id'];
-    $print[$id]['price'] = floatval($subscription['price']);
+    // The price that applies today: the intro price during a free trial or
+    // promo, with the regular price shown struck through next to it.
+    $print[$id]['price'] = wallos_current_price($subscription);
+    $print[$id]['regular_price'] = floatval($subscription['price']);
     $print[$id]['progress'] = getSubscriptionProgress($cycle, $frequency, $subscription['next_payment']);
     $print[$id]['inactive'] = $subscription['inactive'];
     $print[$id]['url'] = $subscription['url'] ?? "";
@@ -212,20 +215,22 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
 
     if (isset($settings['convertCurrency']) && $settings['convertCurrency'] === 'true' && $currencyId != $mainCurrencyId) {
       $print[$id]['price'] = getPriceConverted($print[$id]['price'], $currencyId, $db);
+      $print[$id]['regular_price'] = getPriceConverted($print[$id]['regular_price'], $currencyId, $db);
       $print[$id]['currency_code'] = $currencies[$mainCurrencyId]['code'];
     }
     if (isset($settings['showMonthlyPrice']) && $settings['showMonthlyPrice'] === 'true') {
       $print[$id]['price'] = getPricePerMonth($cycle, $frequency, $print[$id]['price']);
+      $print[$id]['regular_price'] = getPricePerMonth($cycle, $frequency, $print[$id]['regular_price']);
     }
     // Sort on the price in the main currency, whether or not it is displayed
     // converted, so mixed currencies order by value rather than raw number.
-    $sortPrice = $currencyId != $mainCurrencyId ? getPriceConverted(floatval($subscription['price']), $currencyId, $db) : floatval($subscription['price']);
+    $sortPrice = $currencyId != $mainCurrencyId ? getPriceConverted(wallos_current_price($subscription), $currencyId, $db) : wallos_current_price($subscription);
     if (isset($settings['showMonthlyPrice']) && $settings['showMonthlyPrice'] === 'true') {
       $sortPrice = getPricePerMonth($cycle, $frequency, $sortPrice);
     }
     $print[$id]['sort_price'] = $sortPrice;
     if (isset($settings['showOriginalPrice']) && $settings['showOriginalPrice'] === 'true') {
-      $print[$id]['original_price'] = floatval($subscription['price']);
+      $print[$id]['original_price'] = wallos_current_price($subscription);
       $print[$id]['original_currency_code'] = $currencies[$subscription['currency_id']]['code'];
     }
   }

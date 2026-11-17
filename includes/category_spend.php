@@ -18,6 +18,7 @@
 
 require_once __DIR__ . '/recurrence.php';
 require_once __DIR__ . '/currency_rates.php';
+require_once __DIR__ . '/intro_pricing.php';
 
 /**
  * Hue of a category's dot, as the sidebar draws it.
@@ -108,7 +109,7 @@ function wallos_category_spend_in_period(array $subscriptions, array $names, Dat
             continue;
         }
         $categoryId = (int) ($subscription['category_id'] ?? 1);
-        $amount = (float) $subscription['price'] * count($occurrences);
+        $amount = wallos_price_of_occurrences($subscription, $occurrences);
         $costs[$categoryId] = ($costs[$categoryId] ?? 0) + $convert($amount, $subscription['currency_id']);
     }
 

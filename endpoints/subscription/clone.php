@@ -53,9 +53,10 @@ foreach (['end_date', 'ended_reason', 'plan_mode'] as $scheduleColumn) {
 if ($cloneStmt->execute()) {
     $newId = $db->lastInsertRowID();
 
-    // Settings carried over as they are: the cancellation notice (the
-    // reminder state starts fresh).
-    $carriedColumns = ['cancel_notice_mode', 'cancel_notice_value', 'cancel_notice_unit', 'min_term_end'];
+    // Settings carried over as they are: the cancellation notice and an
+    // intro period (the reminder state starts fresh).
+    $carriedColumns = ['cancel_notice_mode', 'cancel_notice_value', 'cancel_notice_unit', 'min_term_end',
+        'intro_type', 'intro_price', 'intro_end_date', 'intro_notify_days'];
     $columnList = implode(', ', $carriedColumns);
     $carryStmt = $db->prepare("UPDATE subscriptions SET ($columnList) = (SELECT $columnList FROM subscriptions WHERE id = :sourceId AND user_id = :userId)
         WHERE id = :newId AND user_id = :userId");

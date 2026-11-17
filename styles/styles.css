@@ -4536,3 +4536,7 @@ input[type="color"]::-moz-color-swatch {
 #min-term-field {
   margin-top: 12px;
 }
+
+.list-row-subtitle.is-accent {
+  color: var(--tint);
+}

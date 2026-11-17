@@ -195,27 +195,32 @@ foreach ($subscriptions as $subscription) {
   $print[$id]['payment_method_id'] = $paymentMethodId;
   $print[$id]['category_id'] = $subscription['category_id'];
   $print[$id]['payer_user_id'] = $subscription['payer_user_id'];
-  $print[$id]['price'] = floatval($subscription['price']);
+  // The price that applies today: the intro price during a free trial or
+  // promo, with the regular price shown struck through next to it.
+  $print[$id]['price'] = wallos_current_price($subscription);
+  $print[$id]['regular_price'] = floatval($subscription['price']);
   $print[$id]['progress'] = getSubscriptionProgress($cycle, $frequency, $subscription['next_payment']);
   $print[$id]['inactive'] = $subscription['inactive'];
   addListRowFields($print[$id], $subscription, $mainCurrencyId, $db);
 
   if (isset($settings['convertCurrency']) && $settings['convertCurrency'] === 'true' && $currencyId != $mainCurrencyId) {
     $print[$id]['price'] = getPriceConverted($print[$id]['price'], $currencyId, $db);
+    $print[$id]['regular_price'] = getPriceConverted($print[$id]['regular_price'], $currencyId, $db);
     $print[$id]['currency_code'] = $currencies[$mainCurrencyId]['code'];
   }
   if (isset($settings['showMonthlyPrice']) && $settings['showMonthlyPrice'] === 'true') {
     $print[$id]['price'] = getPricePerMonth($cycle, $frequency, $print[$id]['price']);
+    $print[$id]['regular_price'] = getPricePerMonth($cycle, $frequency, $print[$id]['regular_price']);
   }
   // Sort on the price in the main currency, whether or not it is displayed
   // converted, so mixed currencies order by value rather than raw number.
-  $sortPrice = $currencyId != $mainCurrencyId ? getPriceConverted(floatval($subscription['price']), $currencyId, $db) : floatval($subscription['price']);
+  $sortPrice = $currencyId != $mainCurrencyId ? getPriceConverted(wallos_current_price($subscription), $currencyId, $db) : wallos_current_price($subscription);
   if (isset($settings['showMonthlyPrice']) && $settings['showMonthlyPrice'] === 'true') {
     $sortPrice = getPricePerMonth($cycle, $frequency, $sortPrice);
   }
   $print[$id]['sort_price'] = $sortPrice;
   if (isset($settings['showOriginalPrice']) && $settings['showOriginalPrice'] === 'true') {
-    $print[$id]['original_price'] = floatval($subscription['price']);
+    $print[$id]['original_price'] = wallos_current_price($subscription);
     $print[$id]['original_currency_code'] = $currencies[$subscription['currency_id']]['code'];
   }
 }
@@ -440,6 +445,55 @@ if ($db->querySingle("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND 
           </div>
         </div>
       </div>
+    </div>
+
+    <div class="form-group" id="intro-group">
+      <div class="inline">
+        <div class="split50">
+          <label for="intro_type"><?= translate('intro_period', $i18n) ?></label>
+          <select id="intro_type" name="intro_type" onchange="toggleIntroFields()">
+            <option value="none"><?= translate('none', $i18n) ?></option>
+            <option value="trial"><?= translate('free_trial', $i18n) ?></option>
+            <option value="promo"><?= translate('intro_price', $i18n) ?></option>
+          </select>
+        </div>
+        <div class="split50 hide" id="intro-price-field">
+          <label for="intro_price"><?= translate('intro_price_per_payment', $i18n) ?></label>
+          <input type="number" step="0.01" min="0" id="intro_price" name="intro_price" autocomplete="off">
+        </div>
+      </div>
+      <div class="inline intro-row hide" id="intro-length-fields">
+        <div class="split50">
+          <label for="intro_length_mode"><?= translate('intro_length', $i18n) ?></label>
+          <select id="intro_length_mode" name="intro_length_mode" onchange="toggleIntroFields()">
+            <option value="cycles"><?= translate('intro_length_cycles', $i18n) ?></option>
+            <option value="date"><?= translate('intro_length_date', $i18n) ?></option>
+          </select>
+        </div>
+        <div class="split50" id="intro-cycles-field">
+          <label for="intro_cycles"><?= translate('billing_cycles', $i18n) ?></label>
+          <input type="number" min="1" max="1000" step="1" id="intro_cycles" name="intro_cycles" autocomplete="off" oninput="updateIntroHint()">
+        </div>
+        <div class="split50 hide" id="intro-end-field">
+          <label for="intro_end_date"><?= translate('first_full_price_payment', $i18n) ?></label>
+          <div class="date-wrapper">
+            <input type="date" id="intro_end_date" name="intro_end_date" autocomplete="off" onchange="updateIntroHint()">
+          </div>
+        </div>
+      </div>
+      <div class="intro-row hide" id="intro-notify-field">
+        <label for="intro_notify_days"><?= translate('remind_me_before_it_ends', $i18n) ?></label>
+        <select id="intro_notify_days" name="intro_notify_days">
+          <option value="0"><?= translate('on_due_date', $i18n) ?></option>
+          <option value="1">1 <?= translate('day_before', $i18n) ?></option>
+          <?php for ($i = 2; $i <= 30; $i++) { ?>
+            <option value="<?= $i ?>" <?= $i === 3 ? 'selected' : '' ?>><?= $i ?> <?= translate('days_before', $i18n) ?></option>
+          <?php } ?>
+        </select>
+      </div>
+      <p class="form-hint" id="intro-hint" aria-live="polite"
+        data-trial="<?= htmlspecialchars(translate('trial_hint', $i18n), ENT_QUOTES) ?>"
+        data-promo="<?= htmlspecialchars(translate('promo_hint', $i18n), ENT_QUOTES) ?>"></p>
     </div>
 
     <div class="form-group" id="ends-group">

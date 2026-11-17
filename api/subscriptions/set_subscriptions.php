@@ -29,6 +29,10 @@ For 'add' and 'edit' actions (all optional for 'edit'):
 - cancel_notice_mode: 'none', 'fixed' (remind on cancellation_date) or 'before_renewal'.
 - cancel_notice_value / cancel_notice_unit: the notice before each renewal ('days', 'weeks' or 'months'), for 'before_renewal'.
 - min_term_end: end of a minimum term (YYYY-MM-DD), for 'before_renewal'.
+- intro_type: 'none', 'trial' (free) or 'promo' (intro_price per payment).
+- intro_end_date: the first payment at the regular price (YYYY-MM-DD); or intro_cycles: the number of billing cycles from the start date.
+- intro_price: the promo price per payment (float), for 'promo'.
+- intro_notify_days: days before the end to send the "trial ending" reminder (default 3).
 - replacement_subscription_id: the ID of the replacement subscription (integer).
 
 It returns a JSON object with the following properties:
@@ -53,9 +57,11 @@ require_once '../../includes/inputvalidation.php';
 require_once '../../includes/ssrf_helper.php';
 require_once '../../includes/logo_theme_variant.php';
 require_once '../../includes/cancellation_deadline.php';
+require_once '../../includes/intro_pricing.php';
 
 /**
- * Settings saved after the subscription row itself: the cancellation notice.
+ * Settings saved after the subscription row itself: the cancellation notice
+ * and the intro period.
  * Validated before anything is written; the caller exits on an error.
  *
  * @param array|null $existing the stored row on edit, null on add
@@ -80,8 +86,35 @@ function api_extra_fields($existing, $cycle)
         return ['error' => $cancel['error'], 'apply' => null];
     }
 
-    return ['error' => null, 'apply' => function ($db, $subscriptionId, $userId) use ($cancel) {
+    // Intro period: kept as stored unless the request sets intro_type.
+    $intro = null;
+    if (isset($_POST['intro_type'])) {
+        $introInput = $_POST;
+        $introInput['intro_length_mode'] = isset($_POST['intro_cycles']) && !isset($_POST['intro_end_date']) ? 'cycles' : 'date';
+        $intro = wallos_intro_fields_from_input($introInput, [
+            'cycle' => $cycle,
+            'frequency' => $_POST['frequency'] ?? ($existing['frequency'] ?? 1),
+            'start_date' => $_POST['start_date'] ?? ($existing['start_date'] ?? null),
+            'next_payment' => $_POST['next_payment'] ?? ($existing['next_payment'] ?? null),
+        ]);
+        if ($intro['error'] !== null) {
+            return ['error' => $intro['error'], 'apply' => null];
+        }
+    }
+
+    return ['error' => null, 'apply' => function ($db, $subscriptionId, $userId) use ($cancel, $intro) {
         wallos_store_cancel_fields($db, $subscriptionId, $userId, $cancel['fields']);
+        if ($intro !== null) {
+            wallos_store_intro_fields($db, $subscriptionId, $userId, $intro['fields']);
+            if ($intro['next_payment'] !== null) {
+                // A trial's next payment is its first paid one.
+                $stmt = $db->prepare('UPDATE subscriptions SET next_payment = :next WHERE id = :id AND user_id = :userId');
+                $stmt->bindValue(':next', $intro['next_payment'], SQLITE3_TEXT);
+                $stmt->bindValue(':id', (int) $subscriptionId, SQLITE3_INTEGER);
+                $stmt->bindValue(':userId', (int) $userId, SQLITE3_INTEGER);
+                $stmt->execute();
+            }
+        }
     }];
 }
 

@@ -50,6 +50,7 @@ function resetForm() {
   toggleVariableAmount();
   toggleRenewFromAction();
   toggleCancelNoticeFields(false);
+  toggleIntroFields();
   closeLogoSearch();
   const deleteButton = document.querySelector("#deletesub");
   deleteButton.style = 'display: none';
@@ -136,6 +137,13 @@ function fillEditFormFields(subscription) {
   toggleVariableAmount();
   toggleRenewFromAction();
   toggleCancelNoticeFields(false);
+  document.querySelector("#intro_type").value = subscription.intro_type || 'none';
+  document.querySelector("#intro_price").value = subscription.intro_price ?? '';
+  document.querySelector("#intro_length_mode").value = subscription.intro_type ? 'date' : 'cycles';
+  document.querySelector("#intro_cycles").value = '';
+  document.querySelector("#intro_end_date").value = subscription.intro_end_date || '';
+  document.querySelector("#intro_notify_days").value = subscription.intro_notify_days ?? 3;
+  toggleIntroFields();
 
   const notifyDaysBefore = document.querySelector("#notify_days_before");
   notifyDaysBefore.value = subscription.notify_days_before ?? 0;
@@ -603,6 +611,8 @@ document.addEventListener('DOMContentLoaded', function () {
       if (cancellationDate) cancellationDate.value = "";
       const cancelNoticeMode = document.querySelector("#cancel_notice_mode");
       if (cancelNoticeMode) cancelNoticeMode.value = "none";
+      const introType = document.querySelector("#intro_type");
+      if (introType) introType.value = "none";
       const notifyDays = document.querySelector("#notify_days_before");
       if (notifyDays) notifyDays.value = -1;
     }
@@ -898,6 +908,12 @@ function toggleOneTimeCycleUI(isOneTime) {
   const notifyDaysCancellationGroup = document.querySelector("#notify-days-cancellation-group");
   const cancelNoticeGroup = document.querySelector("#cancel-notice-group");
   if (cancelNoticeGroup) cancelNoticeGroup.classList.toggle('hide', isOneTime);
+  const introGroup = document.querySelector("#intro-group");
+  if (introGroup) introGroup.classList.toggle('hide', isOneTime);
+  ['#intro_type', '#intro_price', '#intro_length_mode', '#intro_cycles', '#intro_end_date', '#intro_notify_days'].forEach((selector) => {
+    const field = document.querySelector(selector);
+    if (field) field.disabled = isOneTime;
+  });
   ['#cancel_notice_mode', '#cancellation_date', '#cancel_notice_value', '#cancel_notice_unit', '#min_term_end'].forEach((selector) => {
     const field = document.querySelector(selector);
     if (field) field.disabled = isOneTime;
@@ -1207,10 +1223,14 @@ document.addEventListener('DOMContentLoaded', function () {
     if (field) {
       field.addEventListener('change', updateEndsHint);
       field.addEventListener('change', updateCancelNoticeHint);
+      field.addEventListener('change', updateIntroHint);
     }
   });
   if (document.querySelector("#cancel_notice_mode")) {
     toggleCancelNoticeFields(false);
+  }
+  if (document.querySelector("#intro_type")) {
+    toggleIntroFields();
   }
   if (document.querySelector("#ends_mode")) {
     toggleEndsFields();
@@ -1283,5 +1303,74 @@ function updateCancelNoticeHint() {
       .replace('%1$s', format(minTermEnd)).replace('%2$s', format(cancelBy)).replace('%3$s', format(renewal));
   } else {
     hint.textContent = hint.dataset.cancelBy.replace('%1$s', format(cancelBy)).replace('%2$s', format(renewal));
+  }
+}
+
+/*
+  Free trial or intro price (mirrors includes/intro_pricing.php): N billing
+  cycles from the start date, or until a date that is the first payment at
+  the regular price. For a trial that date is also the next payment.
+*/
+function toggleIntroFields() {
+  const type = document.querySelector("#intro_type").value;
+  const lengthMode = document.querySelector("#intro_length_mode").value;
+  const active = type !== 'none';
+  document.querySelector("#intro-price-field").classList.toggle('hide', type !== 'promo');
+  document.querySelector("#intro-length-fields").classList.toggle('hide', !active);
+  document.querySelector("#intro-notify-field").classList.toggle('hide', !active);
+  document.querySelector("#intro-cycles-field").classList.toggle('hide', lengthMode !== 'cycles');
+  document.querySelector("#intro-end-field").classList.toggle('hide', lengthMode !== 'date');
+  document.querySelector("#intro_price").required = type === 'promo';
+  document.querySelector("#intro_cycles").required = active && lengthMode === 'cycles';
+  document.querySelector("#intro_end_date").required = active && lengthMode === 'date';
+  updateIntroHint();
+}
+
+function introEndDate() {
+  const type = document.querySelector("#intro_type").value;
+  if (type === 'none') {
+    return null;
+  }
+  if (document.querySelector("#intro_length_mode").value === 'date') {
+    return parseFormDate(document.querySelector("#intro_end_date").value);
+  }
+  const cycles = Number(document.querySelector("#intro_cycles").value);
+  if (!Number.isInteger(cycles) || cycles < 1) {
+    return null;
+  }
+  const schedule = formSchedule();
+  const from = parseFormDate(document.querySelector("#start_date").value) || schedule.next;
+  if (!from) {
+    return null;
+  }
+  const startAnchor = ['3', '4'].includes(String(schedule.cycle)) ? from.getDate() : null;
+  return stepOccurrence(from, schedule.cycle, schedule.frequency, cycles, startAnchor);
+}
+
+// "Free until Dec 4, 2026; the first payment at the regular price is then."
+function updateIntroHint() {
+  const hint = document.querySelector("#intro-hint");
+  if (!hint) {
+    return;
+  }
+  hint.textContent = '';
+  const type = document.querySelector("#intro_type").value;
+  const end = introEndDate();
+  if (!end) {
+    return;
+  }
+  const formatted = end.toLocaleDateString(window.lang || 'en', { day: 'numeric', month: 'short', year: 'numeric' });
+  hint.textContent = (type === 'trial' ? hint.dataset.trial : hint.dataset.promo).replace('%s', formatted);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  if (type === 'trial' && end >= today) {
+    // A trial's next payment is the first paid one.
+    const next = document.querySelector("#next_payment");
+    const value = formatFormDate(end);
+    if (next.value !== value) {
+      next.value = value;
+      updateEndsHint();
+      updateCancelNoticeHint();
+    }
   }
 }

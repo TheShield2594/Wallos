@@ -8,6 +8,7 @@ require_once __DIR__ . '/../../includes/connect_endpoint_crontabs.php';
 require_once __DIR__ . '/../../includes/ssrf_helper.php';
 require_once __DIR__ . '/../../includes/webhook_helper.php';
 require_once __DIR__ . '/../../includes/cancellation_deadline.php';
+require_once __DIR__ . '/../../includes/intro_pricing.php';
 
 require __DIR__ . '/../../libs/PHPMailer/PHPMailer.php';
 require __DIR__ . '/../../libs/PHPMailer/SMTP.php';
@@ -211,6 +212,45 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
             $notify[$rowSubscription['payer_user_id']][$i]['payer'] = $household[$rowSubscription['payer_user_id']]['name'];
             $notify[$rowSubscription['payer_user_id']][$i]['date'] = $rowSubscription['next_payment'];
             $notify[$rowSubscription['payer_user_id']][$i]['cancel_by'] = $deadline['cancel_by'];
+            $notify[$rowSubscription['payer_user_id']][$i]['deadline_note'] = $deadlineNote;
+            $notify[$rowSubscription['payer_user_id']][$i]['url'] = $rowSubscription['url'];
+            $notify[$rowSubscription['payer_user_id']][$i]['notes'] = $rowSubscription['notes'];
+            $i++;
+        }
+
+        // Free trials and promos: a reminder before the regular price starts,
+        // and a one-off notice once it has (see includes/intro_pricing.php).
+        // They go out through the same channels as cancellation reminders,
+        // since both are the moment to decide whether to keep paying.
+        $query = "SELECT * FROM subscriptions WHERE user_id = :user_id AND inactive = 0 AND (intro_type IS NOT NULL OR intro_converted_on IS NOT NULL) ORDER BY payer_user_id ASC";
+        $stmt = $db->prepare($query);
+        $stmt->bindValue(':user_id', $userId, SQLITE3_INTEGER);
+        $resultIntro = $stmt->execute();
+
+        $remindedIntros = [];
+        while ($rowSubscription = $resultIntro->fetchArray(SQLITE3_ASSOC)) {
+            $symbol = $currencies[$rowSubscription['currency_id']]['symbol'];
+            if (wallos_intro_ending_due($rowSubscription, $currentDate)) {
+                $remindedIntros[$rowSubscription['id']] = $rowSubscription['intro_end_date'];
+                $deadlineNote = ($rowSubscription['intro_type'] === 'trial' ? " (free trial ends " : " (intro price ends ")
+                    . $rowSubscription['intro_end_date'] . ", then " . $rowSubscription['price'] . $symbol . ")";
+                $cancelBy = $rowSubscription['intro_end_date'];
+                $price = wallos_intro_price($rowSubscription) . $symbol;
+            } elseif (wallos_intro_converted_due($rowSubscription, $currentDate)) {
+                $remindedIntros[$rowSubscription['id']] = 'converted:' . $rowSubscription['intro_converted_on'];
+                $deadlineNote = " (intro period ended " . $rowSubscription['intro_converted_on'] . "; the regular price now applies)";
+                $cancelBy = $rowSubscription['intro_converted_on'];
+                $price = $rowSubscription['price'] . $symbol;
+            } else {
+                continue;
+            }
+            $notify[$rowSubscription['payer_user_id']][$i]['name'] = $rowSubscription['name'];
+            $notify[$rowSubscription['payer_user_id']][$i]['price'] = $price;
+            $notify[$rowSubscription['payer_user_id']][$i]['currency'] = $currencies[$rowSubscription['currency_id']]['name'];
+            $notify[$rowSubscription['payer_user_id']][$i]['category'] = $categories[$rowSubscription['category_id']]['name'];
+            $notify[$rowSubscription['payer_user_id']][$i]['payer'] = $household[$rowSubscription['payer_user_id']]['name'];
+            $notify[$rowSubscription['payer_user_id']][$i]['date'] = $rowSubscription['next_payment'];
+            $notify[$rowSubscription['payer_user_id']][$i]['cancel_by'] = $cancelBy;
             $notify[$rowSubscription['payer_user_id']][$i]['deadline_note'] = $deadlineNote;
             $notify[$rowSubscription['payer_user_id']][$i]['url'] = $rowSubscription['url'];
             $notify[$rowSubscription['payer_user_id']][$i]['notes'] = $rowSubscription['notes'];
@@ -696,6 +736,14 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
             $markStmt = $db->prepare('UPDATE subscriptions SET last_cancel_notified_for = :cancelBy WHERE id = :id AND user_id = :userId');
             foreach ($remindedDeadlines as $subscriptionId => $cancelBy) {
                 $markStmt->bindValue(':cancelBy', $cancelBy, SQLITE3_TEXT);
+                $markStmt->bindValue(':id', $subscriptionId, SQLITE3_INTEGER);
+                $markStmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
+                $markStmt->execute();
+                $markStmt->reset();
+            }
+            $markStmt = $db->prepare('UPDATE subscriptions SET intro_notified_for = :marker WHERE id = :id AND user_id = :userId');
+            foreach ($remindedIntros as $subscriptionId => $marker) {
+                $markStmt->bindValue(':marker', $marker, SQLITE3_TEXT);
                 $markStmt->bindValue(':id', $subscriptionId, SQLITE3_INTEGER);
                 $markStmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
                 $markStmt->execute();

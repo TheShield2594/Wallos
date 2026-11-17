@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/intro_pricing.php';
+
 const UPCOMING_PAYMENTS_LIMITS = [3, 5, 10, 20];
 
 /**
@@ -40,7 +42,8 @@ function get_upcoming_payments($db, $userId, $limit)
 {
     $limit = normalize_upcoming_payments_limit($limit);
 
-    $stmt = $db->prepare("SELECT id, logo, logo_text_color, logo_variant, name, price, currency_id, next_payment, inactive
+    $stmt = $db->prepare("SELECT id, logo, logo_text_color, logo_variant, name, price, currency_id, next_payment, inactive,
+            intro_type, intro_price, intro_end_date
         FROM subscriptions
         WHERE user_id = :userId
           AND next_payment >= date('now')
@@ -54,6 +57,9 @@ function get_upcoming_payments($db, $userId, $limit)
 
     $subscriptions = [];
     while ($result && ($row = $result->fetchArray(SQLITE3_ASSOC))) {
+        // What the next payment actually costs (an intro price during a
+        // free trial or promo).
+        $row['price'] = wallos_price_on($row, $row['next_payment']);
         $subscriptions[] = $row;
     }
 
