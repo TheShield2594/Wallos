@@ -3,6 +3,8 @@ require_once __DIR__ . '/budget_period_calculations.php';
 require_once __DIR__ . '/currency_rates.php';
 require_once __DIR__ . '/default_names.php';
 require_once __DIR__ . '/recurrence.php';
+require_once __DIR__ . '/intro_pricing.php';
+require_once __DIR__ . '/households.php';
 
 function getPricePerMonth($cycle, $frequency, $price)
 {
@@ -98,6 +100,7 @@ while ($row = $r->fetchArray(SQLITE3_ASSOC)) {
 
 $activeSubscriptions = 0;
 $inactiveSubscriptions = 0;
+$cancelledTrials = 0;
 // Calculate total monthly price
 $mostExpensiveSubscription = array();
 $mostExpensiveSubscription['price'] = 0;
@@ -108,7 +111,7 @@ $totalSavingsPerMonth = 0;
 $totalCostsInReplacementsPerMonth = 0;
 
 $statsSubtitleParts = [];
-$query = "SELECT name, price, logo, logo_text_color, logo_variant, frequency, cycle, currency_id, next_payment, payer_user_id, category_id, payment_method_id, inactive, replacement_subscription_id, start_date, auto_renew, billing_anchor_day, end_date, total_payments, payments_made, ended_reason FROM subscriptions";
+$query = "SELECT name, price, logo, logo_text_color, logo_variant, frequency, cycle, currency_id, next_payment, payer_user_id, category_id, payment_method_id, inactive, replacement_subscription_id, start_date, auto_renew, billing_anchor_day, end_date, total_payments, payments_made, ended_reason, intro_type, intro_price, intro_end_date, intro_converted_on FROM subscriptions";
 $conditions = [];
 $params = [];
 
@@ -169,6 +172,15 @@ if ($result) {
     while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
         $subscriptions[] = $row;
     }
+    // "Household" scope (statistics page): add what other members share with
+    // the account's household, unless the figures are filtered by the
+    // account's own members, categories or payment methods. Their currency
+    // is mapped onto the account's currencies (see includes/households.php).
+    if (($statsScope ?? 'mine') === 'household' && empty($_GET['member']) && empty($_GET['category']) && empty($_GET['payment'])) {
+        foreach (wallos_shared_subscriptions($db, $userId) as $sharedRow) {
+            $subscriptions[] = $sharedRow;
+        }
+    }
     if (isset($subscriptions)) {
         $replacementSubscriptions = array();
 
@@ -197,15 +209,22 @@ if ($result) {
             }
             $inactive = $subscription['inactive'];
             $replacementSubscriptionId = $subscription['replacement_subscription_id'];
-            $originalSubscriptionPrice = getPriceConverted($price, $currency, $db, $userId);
+            // During a free trial or promo the monthly cost is the intro
+            // price; a cancelled trial is saved at the regular price.
+            $hasIntro = wallos_intro_active($subscription);
+            $originalSubscriptionPrice = getPriceConverted($inactive == 0 ? wallos_current_price($subscription) : $price, $currency, $db, $userId);
             $price = getPricePerMonth($cycle, $frequency, $originalSubscriptionPrice);
 
             if ($inactive == 0) {
                 // A fixed-term plan only costs the payments it has left in
-                // the coming year; everything else costs twelve months.
-                if ($cycle != 5 && !empty($subscription['end_date'])) {
+                // the coming year, and an intro period only its own months;
+                // everything else costs twelve months.
+                if ($cycle != 5 && (!empty($subscription['end_date']) || $hasIntro)) {
                     $yearAhead = (new DateTime('today'))->modify('+1 year -1 day');
-                    $totalCostPerYearSum += count(wallos_occurrences_in_range($subscription, new DateTime('today'), $yearAhead)) * $originalSubscriptionPrice;
+                    $totalCostPerYearSum += getPriceConverted(
+                        wallos_price_of_occurrences($subscription, wallos_occurrences_in_range($subscription, new DateTime('today'), $yearAhead)),
+                        $currency, $db, $userId
+                    );
                 } else {
                     $totalCostPerYearSum += $price * 12;
                 }
@@ -234,13 +253,13 @@ if ($result) {
                     // Amount due for the rest of this month: every payment
                     // date from today to the end of the month, up to the end
                     // of a fixed-term plan.
-                    $timesToPay = count(wallos_occurrences_in_range(
+                    $dueThisMonth = wallos_occurrences_in_range(
                         $subscription,
                         new DateTime('today'),
                         new DateTime('last day of this month'),
                         false
-                    ));
-                    $amountDueThisMonth += $originalSubscriptionPrice * $timesToPay;
+                    );
+                    $amountDueThisMonth += getPriceConverted(wallos_price_of_occurrences($subscription, $dueThisMonth), $currency, $db, $userId);
                 }
             } elseif (($subscription['ended_reason'] ?? null) === 'completed') {
                 // A plan that ran its course was paid off, not cancelled:
@@ -249,6 +268,9 @@ if ($result) {
             } else {
                 $inactiveSubscriptions++;
                 $totalSavingsPerMonth += $price;
+                if (wallos_is_cancelled_trial(array_merge($subscription, ['inactive' => 1]))) {
+                    $cancelledTrials++;
+                }
 
                 // Check if it has a replacement subscription and if it was not already counted
                 if ($replacementSubscriptionId && !in_array($replacementSubscriptionId, $replacementSubscriptions)) {
@@ -385,4 +407,4 @@ while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
 
 $showTotalMonthlyCostGraph = count($totalMonthlyCostDataPoints) > 1;
 
-?>
+?>

@@ -22,6 +22,7 @@
 
 require_once __DIR__ . '/recurrence.php';
 require_once __DIR__ . '/currency_rates.php';
+require_once __DIR__ . '/intro_pricing.php';
 
 const WALLOS_LEDGER_STATUSES = ['paid', 'assumed', 'pending_amount'];
 
@@ -58,7 +59,8 @@ function wallos_ledger_record_cycles(SQLite3 $db, array $subscription, array $du
         $stmt->bindValue(':userId', (int) $subscription['user_id'], SQLITE3_INTEGER);
         $stmt->bindValue(':dueDate', $dueDate, SQLITE3_TEXT);
         $stmt->bindValue(':paidDate', $variable ? null : $dueDate, $variable ? SQLITE3_NULL : SQLITE3_TEXT);
-        $stmt->bindValue(':amount', $variable ? null : (float) $subscription['price'], $variable ? SQLITE3_NULL : SQLITE3_FLOAT);
+        // A cycle inside a free trial or promo is recorded at the intro price.
+        $stmt->bindValue(':amount', $variable ? null : wallos_price_on($subscription, $dueDate), $variable ? SQLITE3_NULL : SQLITE3_FLOAT);
         $stmt->bindValue(':currencyId', (int) $subscription['currency_id'], SQLITE3_INTEGER);
         $stmt->bindValue(':status', $variable ? 'pending_amount' : 'assumed', SQLITE3_TEXT);
         if ($stmt->execute() === false) {
@@ -258,7 +260,7 @@ function wallos_mark_paid_locked(SQLite3 $db, array $subscription, DateTimeInter
         $open = $stmt->execute()->fetchArray(SQLITE3_ASSOC);
 
         $dueDate = $open !== false ? $open['due_date'] : $next->format('Y-m-d');
-        $value = $amount ?? ($open !== false && $open['amount'] !== null ? $open['amount'] : $subscription['price']);
+        $value = $amount ?? ($open !== false && $open['amount'] !== null ? $open['amount'] : wallos_price_on($subscription, $dueDate));
         if (!wallos_ledger_upsert_paid($db, $subscription, $dueDate, $todayString, $value, 'manual')) {
             return ['success' => false, 'error' => 'write_failed'];
         }
@@ -311,7 +313,7 @@ function wallos_mark_paid_locked(SQLite3 $db, array $subscription, DateTimeInter
         $fields['next_payment'] = $newNext->format('Y-m-d');
     }
 
-    if (!wallos_ledger_upsert_paid($db, $subscription, $dueDate, $todayString, $amount ?? $subscription['price'], 'manual')
+    if (!wallos_ledger_upsert_paid($db, $subscription, $dueDate, $todayString, $amount ?? wallos_price_on($subscription, $dueDate), 'manual')
         || !wallos_update_schedule($db, $subscription, $fields)) {
         return ['success' => false, 'error' => 'write_failed'];
     }
@@ -399,7 +401,7 @@ function wallos_undo_paid_locked(SQLite3 $db, array $subscription, $dueDate)
         paid_date = :paidDate, amount = :amount WHERE id = :id");
     $revert->bindValue(':status', $variable ? 'pending_amount' : 'assumed', SQLITE3_TEXT);
     $revert->bindValue(':paidDate', $variable ? null : $row['due_date'], $variable ? SQLITE3_NULL : SQLITE3_TEXT);
-    $revert->bindValue(':amount', $variable ? null : (float) $subscription['price'], $variable ? SQLITE3_NULL : SQLITE3_FLOAT);
+    $revert->bindValue(':amount', $variable ? null : wallos_price_on($subscription, $row['due_date']), $variable ? SQLITE3_NULL : SQLITE3_FLOAT);
     $revert->bindValue(':id', (int) $row['id'], SQLITE3_INTEGER);
 
     return ['success' => $revert->execute() !== false];

@@ -8,6 +8,9 @@ require_once '../../includes/ssrf_helper.php';
 require_once '../../includes/logo_theme_variant.php';
 require_once '../../includes/logo_cleanup.php';
 require_once '../../includes/payment_ledger.php';
+require_once '../../includes/cancellation_deadline.php';
+require_once '../../includes/intro_pricing.php';
+require_once '../../includes/households.php';
 
 if (!file_exists('../../images/uploads/logos')) {
     mkdir('../../images/uploads/logos', 0777, true);
@@ -253,8 +256,43 @@ $logoError = "";
 $notify = isset($_POST['notifications']) ? true : false;
 $notifyDaysBefore = $_POST['notify_days_before'];
 $inactive = isset($_POST['inactive']) ? true : false;
-$cancellationDate = $_POST['cancellation_date'] ?? null;
 $replacementSubscriptionId = $_POST['replacement_subscription_id'];
+
+// Editing: the account's own subscription, or one shared with its household
+// where it is an editor. A shared edit acts on the owner's row and keeps the
+// owner's records (currency, category, payer, payment method, replacement,
+// reminders and sharing), which the editor's own lists cannot name.
+$sharedEdit = false;
+if ($isEdit) {
+    $editable = wallos_load_accessible_subscription($db, $userId, $_POST['id'], 'edit');
+    if ($editable === false) {
+        header('Content-Type: application/json');
+        echo json_encode(['status' => 'Error', 'message' => translate('error', $i18n)]);
+        exit();
+    }
+    if ($editable['access'] !== 'owner') {
+        $sharedEdit = true;
+        $viewerCurrencies = wallos_household_viewer_currencies($db, $userId);
+        $ownerCurrencyCode = $db->querySingle('SELECT code FROM currencies WHERE id = ' . (int) $editable['currency_id']);
+        $userId = (int) $editable['user_id'];
+        $currencyId = $editable['currency_id'];
+        $categoryId = $editable['category_id'];
+        $payerUserId = $editable['payer_user_id'];
+        $paymentMethodId = $editable['payment_method_id'];
+        $replacementSubscriptionId = $editable['replacement_subscription_id'];
+        $notify = (bool) $editable['notify'];
+        $notifyDaysBefore = $editable['notify_days_before'];
+        // The price was shown in the editor's currency of the same code; when
+        // the editor has none it was converted for display and stays as stored.
+        if (!isset($viewerCurrencies['by_code'][$ownerCurrencyCode])) {
+            $price = $editable['price'];
+            $_POST['intro_price'] = $editable['intro_price'];
+        }
+        foreach (['cancel_notice_mode', 'cancellation_date', 'cancel_notice_value', 'cancel_notice_unit', 'min_term_end'] as $column) {
+            $_POST[$column] = $editable[$column];
+        }
+    }
+}
 
 if ($replacementSubscriptionId == 0 || $inactive == 0) {
     $replacementSubscriptionId = null;
@@ -318,6 +356,29 @@ if ($endsMode === 'date' && wallos_parse_date($_POST['end_date'] ?? null) === nu
 }
 if ($endsMode === 'count' && (!ctype_digit((string) ($_POST['total_payments'] ?? '')) || (int) $_POST['total_payments'] < 1 || (int) $_POST['total_payments'] > 10000)) {
     rejectForeignId('Invalid number of payments.');
+}
+
+// Cancellation reminder: none, a fixed date, or N days/weeks/months before
+// each renewal (see includes/cancellation_deadline.php).
+$cancelNotice = wallos_cancel_fields_from_input($_POST, $cycle);
+if ($cancelNotice['error'] !== null) {
+    rejectForeignId($cancelNotice['error']);
+}
+$cancellationDate = $cancelNotice['fields']['cancellation_date'];
+
+// Free trial or intro price (see includes/intro_pricing.php). A trial's next
+// payment is the first paid one.
+$intro = wallos_intro_fields_from_input($_POST, [
+    'cycle' => $cycle,
+    'frequency' => $frequency,
+    'start_date' => $startDate,
+    'next_payment' => $nextPayment,
+]);
+if ($intro['error'] !== null) {
+    rejectForeignId($intro['error']);
+}
+if ($intro['next_payment'] !== null) {
+    $nextPayment = $intro['next_payment'];
 }
 
 $existingSchedule = [];
@@ -555,7 +616,31 @@ $stmt->bindValue(':paymentsMade', $paymentsMade, SQLITE3_INTEGER);
 $stmt->bindValue(':endedReason', $endedReason, $endedReason === null ? SQLITE3_NULL : SQLITE3_TEXT);
 $stmt->bindValue(':planMode', $planMode, $planMode === null ? SQLITE3_NULL : SQLITE3_TEXT);
 
-if ($stmt->execute()) {
+// The row, its cancellation notice, intro period and sharing are saved as
+// one unit: if any part fails, nothing is saved and the form stays open.
+$saved = @$db->exec('BEGIN IMMEDIATE') !== false;
+if ($saved) {
+    $saved = $stmt->execute() !== false;
+    if ($saved) {
+        $savedId = $isEdit ? $id : $db->lastInsertRowID();
+        $saved = wallos_store_cancel_fields($db, $savedId, $userId, $cancelNotice['fields'])
+            && wallos_store_intro_fields($db, $savedId, $userId, $intro['fields']);
+        if ($saved && !$sharedEdit) {
+            // Private, or shared with the owner's household.
+            $saved = wallos_set_subscription_sharing($db, $userId, $savedId, ($_POST['visibility'] ?? 'private') === 'household'
+                && wallos_household_membership($db, $userId) !== null)['success'];
+        }
+    }
+    if ($saved && $db->exec('COMMIT') === false) {
+        $saved = false;
+    }
+    if (!$saved) {
+        $db->exec('ROLLBACK');
+    }
+}
+
+if ($saved) {
+
     $success['status'] = "Success";
     $text = $isEdit ? "updated" : "added";
     $success['message'] = translate('subscription_' . $text . '_successfuly', $i18n);
@@ -577,7 +662,8 @@ if ($stmt->execute()) {
     echo json_encode($success);
     exit();
 } else {
-    echo translate('error', $i18n) . ": " . $db->lastErrorMsg();
+    header('Content-Type: application/json');
+    echo json_encode(['status' => 'Error', 'message' => translate('error', $i18n) . ": " . $db->lastErrorMsg()]);
 }
 $db->close();
-?>
+?>

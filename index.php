@@ -7,6 +7,8 @@ require_once 'includes/upcoming_payments.php';
 require_once 'includes/upcoming_cancellations.php';
 require_once 'includes/ui_helpers.php';
 require_once 'includes/payment_ledger.php';
+require_once 'includes/category_spend.php';
+require_once 'includes/households.php';
 
 function formatPrice($price, $currencyCode, $currencies)
 {
@@ -83,6 +85,20 @@ $upcomingSubscriptions = get_upcoming_payments(
     $settings['upcoming_payments_limit'] ?? 3
 );
 
+// Upcoming payments of subscriptions other household members share, with
+// their owner's name, in the same list.
+$upcomingLimit = normalize_upcoming_payments_limit($settings['upcoming_payments_limit'] ?? 3);
+$todayString = (new DateTime('today'))->format('Y-m-d');
+foreach (wallos_shared_subscriptions($db, $userId, true) as $sharedRow) {
+    if ((int) $sharedRow['cycle'] === 5 || $sharedRow['next_payment'] < $todayString) {
+        continue;
+    }
+    $sharedRow['price'] = wallos_price_on($sharedRow, $sharedRow['next_payment']);
+    $upcomingSubscriptions[] = $sharedRow;
+}
+usort($upcomingSubscriptions, fn($a, $b) => strcmp($a['next_payment'], $b['next_payment']));
+$upcomingSubscriptions = array_slice($upcomingSubscriptions, 0, $upcomingLimit);
+
 // Fetch enabled subscriptions with manual renewal that are overdue
 $stmt = $db->prepare("SELECT id, logo, logo_text_color, logo_variant, name, price, currency_id, next_payment, inactive, auto_renew FROM subscriptions WHERE user_id = :userId AND next_payment < date('now') AND auto_renew = 0 AND inactive = 0 AND cycle != 5 ORDER BY next_payment ASC");
 $stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
@@ -118,6 +134,32 @@ $mainCurrencyCode = $currencies[$userData['main_currency']]['code'];
 $money = function ($amount) use ($mainCurrencyCode, $currencies) {
     return formatPrice($amount, $mainCurrencyCode, $currencies);
 };
+
+// "By category" card: the monthly split, and what each category is charged
+// in the current pay period.
+$showCategoryCard = !isset($settings['show_category_card']) || (int) $settings['show_category_card'] === 1;
+$categorySpend = null;
+if ($showCategoryCard && !empty($categoryCost)) {
+    $categoryNames = [];
+    foreach ($categories as $categoryRowId => $categoryRow) {
+        $categoryNames[$categoryRowId] = (int) $categoryRowId === 1 ? translate('no_category', $i18n) : html_entity_decode($categoryRow['name']);
+    }
+    $categorySpendMonthly = wallos_category_spend_monthly($categoryCost, $categoryNames);
+    $categorySpendPeriod = wallos_category_spend_in_period(
+        $subscriptions ?? [],
+        $categoryNames,
+        $budgetPeriodStart,
+        $budgetPeriodEnd,
+        function ($price, $currencyId) use ($db, $userId) {
+            return getPriceConverted($price, $currencyId, $db, $userId);
+        }
+    );
+    // One category says nothing about a split.
+    if ($categorySpendMonthly['categories'] >= 2) {
+        $categorySpend = ['monthly' => $categorySpendMonthly, 'period' => $categorySpendPeriod];
+    }
+}
+$categoryCardLimit = 6;
 
 $todayLabel = (new IntlDateFormatter($lang, IntlDateFormatter::FULL, IntlDateFormatter::NONE, null, null, 'EEEE, MMMM d'))->format(new DateTime());
 $monthLabel = (new IntlDateFormatter($lang, IntlDateFormatter::FULL, IntlDateFormatter::NONE, null, null, 'MMMM yyyy'))->format(new DateTime());
@@ -240,7 +282,11 @@ $dashboardRow = function ($subscription, $subtitle, $tone = '') use ($dashboardP
                     <?php
                 } else {
                     foreach ($upcomingSubscriptions as $subscription) {
-                        echo $dashboardRow($subscription, due_text($subscription['next_payment'], $lang, $i18n));
+                        $dueText = due_text($subscription['next_payment'], $lang, $i18n);
+                        if (!empty($subscription['shared_owner_name'])) {
+                            $dueText = sprintf(translate('shared_by', $i18n), $subscription['shared_owner_name']) . ' · ' . $dueText;
+                        }
+                        echo $dashboardRow($subscription, $dueText);
                     }
                 }
                 ?>
@@ -301,9 +347,62 @@ $dashboardRow = function ($subscription, $subtitle, $tone = '') use ($dashboardP
                     </header>
                     <div class="card-list">
                         <?php foreach ($upcomingCancellations as $subscription) {
-                            echo $dashboardRow($subscription, translate('cancellation', $i18n) . ' · ' . formatDate($subscription['cancellation_date'], $lang));
+                            if (!empty($subscription['locked_until'])) {
+                                $cancelText = sprintf(translate('locked_in_until', $i18n), formatDate($subscription['locked_until'], $lang))
+                                    . ' · ' . sprintf(translate('cancel_by', $i18n), formatDate($subscription['cancellation_date'], $lang));
+                            } elseif (!empty($subscription['renewal'])) {
+                                $cancelText = sprintf(translate('cancel_by_to_avoid_renewal_short', $i18n), formatDate($subscription['cancellation_date'], $lang));
+                            } else {
+                                $cancelText = translate('cancellation', $i18n) . ' · ' . formatDate($subscription['cancellation_date'], $lang);
+                            }
+                            $cancelSoon = days_until_date($subscription['cancellation_date']) <= 7;
+                            echo $dashboardRow($subscription, $cancelText, $cancelSoon ? 'warning' : '');
                         } ?>
                     </div>
+                </section>
+            <?php } ?>
+
+            <?php if ($categorySpend !== null) { ?>
+                <section class="card category-card" id="category-card">
+                    <header class="card-header">
+                        <h2 class="card-title"><?= translate('by_category', $i18n) ?></h2>
+                        <div class="segmented" role="group" aria-label="<?= translate('by_category', $i18n) ?>">
+                            <button type="button" class="segmented-option is-selected" data-category-view="monthly" aria-pressed="true"><?= translate('Monthly', $i18n) ?></button>
+                            <button type="button" class="segmented-option" data-category-view="period" aria-pressed="false"
+                                title="<?= htmlspecialchars($budgetPeriodLabel ?? '', ENT_QUOTES, 'UTF-8') ?>"><?= translate('this_pay_period', $i18n) ?></button>
+                        </div>
+                    </header>
+                    <?php foreach (['monthly', 'period'] as $view) {
+                        $spend = $categorySpend[$view];
+                        $visibleRows = array_slice($spend['rows'], 0, $categoryCardLimit);
+                        $moreCount = count($spend['rows']) - count($visibleRows);
+                        ?>
+                        <div class="category-spend<?= $view === 'monthly' ? '' : ' hide' ?>" data-category-panel="<?= $view ?>">
+                            <?php if ($view === 'period') { ?>
+                                <p class="category-spend-note"><?= htmlspecialchars($budgetPeriodLabel ?? '', ENT_QUOTES, 'UTF-8') ?></p>
+                            <?php } ?>
+                            <?php if (empty($visibleRows)) { ?>
+                                <p class="card-empty"><?= translate('no_payments_this_period', $i18n) ?></p>
+                            <?php } else { ?>
+                                <ul class="category-spend-list">
+                                    <?php foreach ($visibleRows as $row) { ?>
+                                        <li>
+                                            <a class="category-spend-row" href="subscriptions.php?category=<?= (int) $row['id'] ?>">
+                                                <span class="category-dot" style="--dot-hue: <?= (int) $row['hue'] ?>" aria-hidden="true"></span>
+                                                <span class="category-spend-name"><?= htmlspecialchars($row['name']) ?></span>
+                                                <span class="category-spend-value"><?= $money($row['cost']) ?></span>
+                                                <span class="category-spend-bar" style="--dot-hue: <?= (int) $row['hue'] ?>" role="presentation"><span style="width: <?= number_format($row['share'], 1, '.', '') ?>%"></span></span>
+                                                <span class="visually-hidden"><?= number_format($row['share'], 0) ?>%</span>
+                                            </a>
+                                        </li>
+                                    <?php } ?>
+                                </ul>
+                                <?php if ($moreCount > 0) { ?>
+                                    <a class="category-spend-more link-button" href="stats.php"><?= sprintf(translate('n_more', $i18n), $moreCount) ?></a>
+                                <?php } ?>
+                            <?php } ?>
+                        </div>
+                    <?php } ?>
                 </section>
             <?php } ?>
 
@@ -365,6 +464,9 @@ $dashboardRow = function ($subscription, $subtitle, $tone = '') use ($dashboardP
                     </header>
                     <dl class="kv-list">
                         <div class="kv-row"><dt><?= translate('inactive_subscriptions', $i18n) ?></dt><dd><?= (int) $inactiveSubscriptions ?></dd></div>
+                        <?php if (!empty($cancelledTrials)) { ?>
+                            <div class="kv-row"><dt><?= translate('cancelled_trials', $i18n) ?></dt><dd><?= (int) $cancelledTrials ?></dd></div>
+                        <?php } ?>
                         <?php if (isset($totalSavingsPerMonth) && $totalSavingsPerMonth > 0) { ?>
                             <div class="kv-row"><dt><?= translate('monthly_savings', $i18n) ?></dt><dd><?= $money($totalSavingsPerMonth) ?></dd></div>
                             <div class="kv-row"><dt><?= translate('yearly_savings', $i18n) ?></dt><dd><?= $money($totalSavingsPerMonth * 12) ?></dd></div>

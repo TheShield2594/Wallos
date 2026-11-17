@@ -3,6 +3,7 @@
 require_once 'validate.php';
 require_once __DIR__ . '/../../includes/connect_endpoint_crontabs.php';
 require_once __DIR__ . '/../../includes/payment_ledger.php';
+require_once __DIR__ . '/../../includes/intro_pricing.php';
 
 require 'settimezone.php';
 
@@ -62,6 +63,14 @@ foreach ($failed as $row) {
     }
 }
 
+// Free trials and promos whose end date has come: the regular price takes
+// over (after the cycles above were recorded at the intro price). The
+// cancellation cron announces each conversion once.
+$converted = wallos_convert_ended_intros($db, $currentDateString);
+if ($converted > 0) {
+    echo "Ended " . $converted . " intro period(s).<br />\n";
+}
+
 $formattedDate = $currentDate->format('Y-m-d');
 
 $deleteQuery = "DELETE FROM last_update_next_payment_date";
@@ -78,4 +87,4 @@ if ($stillFailed !== []) {
         . implode(', ', $stillFailed) . "); they will be retried on the next run.<br />\n";
 }
 echo "Updated next payment dates";
-?>
+?>

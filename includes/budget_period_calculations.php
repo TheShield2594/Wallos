@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/currency_rates.php';
 require_once __DIR__ . '/recurrence.php';
+require_once __DIR__ . '/intro_pricing.php';
 
 if (!function_exists('sanitizeBudgetPeriodType')) {
     function sanitizeBudgetPeriodType($periodType)
@@ -162,14 +163,14 @@ if (!function_exists('computeAmountNeededInPeriod')) {
                 continue;
             }
 
-            $price = convertPriceToMainCurrency(
-                $subscription['price'],
+            // Each payment at its own price: an intro price before the end
+            // of a free trial or promo, the regular price after it.
+            $amountNeeded += convertPriceToMainCurrency(
+                wallos_price_of_occurrences($subscription, $occurrences),
                 $subscription['currency_id'],
                 $database,
                 $userId
             );
-
-            $amountNeeded += $price * count($occurrences);
         }
 
         return $amountNeeded;

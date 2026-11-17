@@ -26,24 +26,28 @@ function cancellation_cron_query()
 }
 
 /**
- * Runs the cron's query for one user and returns the subscription names it picks.
+ * Runs the cron's query for one user, then its due check, and returns the
+ * subscription names it would notify.
  *
  * @param SQLite3 $db
  * @param int     $userId
  * @return array
  */
-function cancellation_cron_names($db, $userId)
+function cancellation_cron_names($db, $userId, $today = null)
 {
+    require_once WALLOS_ROOT . '/includes/cancellation_deadline.php';
+
     $stmt = $db->prepare(cancellation_cron_query());
     $stmt->bindValue(':user_id', $userId, SQLITE3_INTEGER);
     $stmt->bindValue(':inactive', 0, SQLITE3_INTEGER);
-    $stmt->bindValue(':cancellationDate', date('Y-m-d'), SQLITE3_TEXT);
     $stmt->bindValue(':oneTimeCycle', 5, SQLITE3_INTEGER);
 
     $names = [];
     $result = $stmt->execute();
     while ($result && $row = $result->fetchArray(SQLITE3_ASSOC)) {
-        $names[] = $row['name'];
+        if (wallos_cancellation_due($row, $today ?? date('Y-m-d')) !== null) {
+            $names[] = $row['name'];
+        }
     }
     sort($names);
 
@@ -177,4 +181,56 @@ wallos_test('the cancellation cron keeps the account id while looping over house
         'household lookups are not by id alone');
     assert_same(7, substr_count($source, "household WHERE id = :id AND user_id = :ownerId"),
         'every channel looks up the payer within the owning account');
+});
+
+wallos_test('only delivered reminders are marked as sent, per reminder and per type', function () {
+    require_once WALLOS_ROOT . '/includes/cancellation_deadline.php';
+
+    // A webhook batch for one payer: the request for subscription 1 succeeded,
+    // the one for subscription 2 failed.
+    $delivered = [];
+    wallos_notifications_delivered($delivered, [['key' => wallos_notification_key('cancel', 1)]]);
+
+    assert_same([1 => '2026-12-01'], wallos_delivered_markers([1 => '2026-12-01', 2 => '2026-12-03'], $delivered, 'cancel'),
+        'the failed reminder in a partly delivered batch stays unmarked and is retried');
+    assert_same([], wallos_delivered_markers([1 => '2026-12-04'], $delivered, 'intro'),
+        'a delivered cancellation reminder does not mark the trial reminder of the same subscription');
+
+    // A per-payer message (email, Telegram, ...) delivers every reminder in it.
+    $delivered = [];
+    wallos_notifications_delivered($delivered, [
+        ['key' => wallos_notification_key('cancel', 3)],
+        ['key' => wallos_notification_key('intro', 4)],
+    ]);
+    assert_same([3 => 'a'], wallos_delivered_markers([3 => 'a'], $delivered, 'cancel'), 'the cancellation reminder in it');
+    assert_same([4 => 'converted:2026-12-04'], wallos_delivered_markers([4 => 'converted:2026-12-04'], $delivered, 'intro'), 'and the trial notice');
+
+    assert_same([], wallos_delivered_markers([5 => 'b'], [], 'cancel'), 'nothing delivered, nothing marked');
+});
+
+wallos_test('the cancellation cron counts an HTTP error answer as undelivered', function () {
+    $source = file_get_contents(WALLOS_ROOT . '/endpoints/cronjobs/sendcancellationnotifications.php');
+
+    assert_same(5, substr_count($source, '$httpCode < 200 || $httpCode >= 300'),
+        'Discord, Gotify, Pushover, ntfy and the webhook accept only a 2xx answer');
+    assert_contains('wallos_notification_http_delivered($httpCode, $result, true)', $source,
+        'Telegram also checks the "ok" field of its answer');
+    assert_same(6, substr_count($source, 'wallos_notifications_delivered($delivered, $perUser)'),
+        'every per-payer channel records the reminders it delivered');
+    assert_contains('wallos_notifications_delivered($delivered, [$subscription])', $source,
+        'the webhook records each reminder on its own');
+    assert_not_contains('deliveredPayers', $source, 'no per-payer shortcut is left');
+});
+
+wallos_test('a Telegram answer counts as delivered only with "ok": true', function () {
+    require_once WALLOS_ROOT . '/includes/cancellation_deadline.php';
+
+    assert_true(wallos_notification_http_delivered(200, '{"ok":true,"result":{}}', true), 'accepted message');
+    assert_true(!wallos_notification_http_delivered(200, '{"ok":false,"error_code":400,"description":"chat not found"}', true),
+        'a failure reported in a 200 answer');
+    assert_true(!wallos_notification_http_delivered(200, 'not json', true), 'an unreadable answer');
+    assert_true(!wallos_notification_http_delivered(403, '{"ok":false}', true), 'a rejected request');
+    assert_true(!wallos_notification_http_delivered(0, false, true), 'no answer at all');
+    assert_true(wallos_notification_http_delivered(204, '', false), 'other services: any 2xx');
+    assert_true(!wallos_notification_http_delivered(500, 'error', false), 'other services: a 5xx');
 });

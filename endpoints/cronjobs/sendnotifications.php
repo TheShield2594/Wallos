@@ -10,6 +10,7 @@ require_once __DIR__ . '/../../includes/webhook_helper.php';
 require_once __DIR__ . '/../../includes/webpush_helper.php';
 require_once __DIR__ . '/../../includes/instance_config.php';
 require_once __DIR__ . '/../../includes/renewal_reminders.php';
+require_once __DIR__ . '/../../includes/intro_pricing.php';
 
 require __DIR__ . '/../../libs/PHPMailer/PHPMailer.php';
 require __DIR__ . '/../../libs/PHPMailer/SMTP.php';
@@ -339,7 +340,7 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
         $activeBudgetPeriod = getActiveBudgetPeriod($currentDate, $budgetPeriodType, $budgetPeriodAnchorDate);
         $isPeriodStart = $activeBudgetPeriod['start']->format('Y-m-d') === $currentDate->format('Y-m-d');
 
-        $query = "SELECT price, currency_id, next_payment, cycle, frequency, inactive, auto_renew, start_date, billing_anchor_day, end_date FROM subscriptions WHERE user_id = :userId AND inactive = 0";
+        $query = "SELECT price, currency_id, next_payment, cycle, frequency, inactive, auto_renew, start_date, billing_anchor_day, end_date, intro_type, intro_price, intro_end_date FROM subscriptions WHERE user_id = :userId AND inactive = 0";
         $stmt = $db->prepare($query);
         $stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
         $result = $stmt->execute();
@@ -384,6 +385,11 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
             }
 
             $nextPaymentDay = $nextPaymentDate->format('Y-m-d');
+            // A payment inside a free trial or promo gets the "trial ending"
+            // reminder (sendcancellationnotifications.php) instead.
+            if (wallos_intro_suppresses_payment_reminder($rowSubscription)) {
+                continue;
+            }
             if (isRenewalReminderDue($difference, $daysToCompare, $nextPaymentDay, $currentDate->format('Y-m-d'), $rowSubscription['last_notified_payment'] ?? null)) {
                 $remindedPayments[$rowSubscription['id']] = $nextPaymentDay;
                 echo "Subscription: " . $rowSubscription['name'] . "<br />";

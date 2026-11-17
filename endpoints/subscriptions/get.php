@@ -106,9 +106,10 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
       } elseif ($type === 'cancellation') {
         // One-time purchases are never treated as cancellable, matching the
         // dashboard, statistics page and cancellation notification cron.
-        $notifConditions[] = "(cancellation_date IS NOT NULL AND cancellation_date != '' AND cycle != 5)";
+        // The same rule as wallos_cancel_mode(), which filters shared rows.
+        $notifConditions[] = "(cycle != 5 AND " . WALLOS_CANCEL_NOTICE_SQL . ")";
       } elseif ($type === 'none') {
-        $notifConditions[] = "(notify = 0 AND (cancellation_date IS NULL OR cancellation_date = '' OR cycle = 5))";
+        $notifConditions[] = "(notify = 0 AND (cycle = 5 OR NOT " . WALLOS_CANCEL_NOTICE_SQL . "))";
       }
     }
     if (!empty($notifConditions)) {
@@ -174,6 +175,35 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
     }
   }
 
+  // Subscriptions shared with the account's household join the list unless
+  // it is filtered by the account's own categories, members or payment methods.
+  $listFiltered = !empty($_GET['categories']) || !empty($_GET['payments']) || !empty($_GET['members']);
+  if (!$listFiltered) {
+    // The renewal-type and notification filters apply to shared rows as
+    // they do to the account's own (see the SQL above).
+    $renewalFilter = $_GET['renewalType'] ?? '';
+    $notificationFilter = array_filter(explode(',', $_GET['notifications'] ?? ''), fn($t) => in_array($t, ['reminder', 'cancellation', 'none'], true));
+    $sharedFilter = function ($row) use ($renewalFilter, $notificationFilter) {
+      if ($renewalFilter !== '') {
+        $isOneTime = (int) $row['cycle'] === 5;
+        if ($renewalFilter === 'onetime' ? !$isOneTime : ($isOneTime || (string) $row['auto_renew'] !== (string) $renewalFilter)) {
+          return false;
+        }
+      }
+      if ($notificationFilter !== []) {
+        $hasCancellation = (int) $row['cycle'] !== 5 && wallos_cancel_mode($row) !== 'none';
+        $matches = (in_array('reminder', $notificationFilter, true) && (int) $row['notify'] === 1)
+          || (in_array('cancellation', $notificationFilter, true) && $hasCancellation)
+          || (in_array('none', $notificationFilter, true) && (int) $row['notify'] === 0 && !$hasCancellation);
+        if (!$matches) {
+          return false;
+        }
+      }
+      return true;
+    };
+    $subscriptions = mergeSharedSubscriptions($subscriptions ?? [], $db, $userId, $sort, $order, $settings['disabledToBottom'] === 'true', $_GET['state'] ?? null, $sharedFilter);
+  }
+
   foreach ($subscriptions as $subscription) {
     if ($subscription['inactive'] == 1 && isset($settings['hideDisabledSubscriptions']) && $settings['hideDisabledSubscriptions'] === 'true') {
       continue;
@@ -202,30 +232,36 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
     $print[$id]['payment_method_id'] = $paymentMethodId;
     $print[$id]['category_id'] = $subscription['category_id'];
     $print[$id]['payer_user_id'] = $subscription['payer_user_id'];
-    $print[$id]['price'] = floatval($subscription['price']);
+    // The price that applies today: the intro price during a free trial or
+    // promo, with the regular price shown struck through next to it.
+    $print[$id]['price'] = wallos_current_price($subscription);
+    $print[$id]['regular_price'] = floatval($subscription['price']);
     $print[$id]['progress'] = getSubscriptionProgress($cycle, $frequency, $subscription['next_payment']);
     $print[$id]['inactive'] = $subscription['inactive'];
     $print[$id]['url'] = $subscription['url'] ?? "";
     $print[$id]['notes'] = $subscription['notes'] ?? "";
     $print[$id]['replacement_subscription_id'] = $subscription['replacement_subscription_id'];
     addListRowFields($print[$id], $subscription, $mainCurrencyId, $db);
+    addSharedRowFields($print[$id], $subscription);
 
     if (isset($settings['convertCurrency']) && $settings['convertCurrency'] === 'true' && $currencyId != $mainCurrencyId) {
       $print[$id]['price'] = getPriceConverted($print[$id]['price'], $currencyId, $db);
+      $print[$id]['regular_price'] = getPriceConverted($print[$id]['regular_price'], $currencyId, $db);
       $print[$id]['currency_code'] = $currencies[$mainCurrencyId]['code'];
     }
     if (isset($settings['showMonthlyPrice']) && $settings['showMonthlyPrice'] === 'true') {
       $print[$id]['price'] = getPricePerMonth($cycle, $frequency, $print[$id]['price']);
+      $print[$id]['regular_price'] = getPricePerMonth($cycle, $frequency, $print[$id]['regular_price']);
     }
     // Sort on the price in the main currency, whether or not it is displayed
     // converted, so mixed currencies order by value rather than raw number.
-    $sortPrice = $currencyId != $mainCurrencyId ? getPriceConverted(floatval($subscription['price']), $currencyId, $db) : floatval($subscription['price']);
+    $sortPrice = $currencyId != $mainCurrencyId ? getPriceConverted(wallos_current_price($subscription), $currencyId, $db) : wallos_current_price($subscription);
     if (isset($settings['showMonthlyPrice']) && $settings['showMonthlyPrice'] === 'true') {
       $sortPrice = getPricePerMonth($cycle, $frequency, $sortPrice);
     }
     $print[$id]['sort_price'] = $sortPrice;
     if (isset($settings['showOriginalPrice']) && $settings['showOriginalPrice'] === 'true') {
-      $print[$id]['original_price'] = floatval($subscription['price']);
+      $print[$id]['original_price'] = wallos_current_price($subscription);
       $print[$id]['original_currency_code'] = $currencies[$subscription['currency_id']]['code'];
     }
   }

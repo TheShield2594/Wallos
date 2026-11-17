@@ -6,6 +6,9 @@ require_once 'includes/logo_theme_variant.php';
 
 include_once 'includes/list_subscriptions.php';
 require_once 'includes/ui_helpers.php';
+require_once 'includes/households.php';
+
+$householdMembership = wallos_household_membership($db, $userId);
 
 $sort = "next_payment";
 $sortOrder = $sort;
@@ -126,7 +129,18 @@ if ($result) {
   }
 }
 
+// Subscriptions shared with the account's household join the list unless it
+// is filtered by the account's own categories, members or payment methods.
+if (!isset($_GET['member']) && !isset($_GET['category']) && !isset($_GET['payment'])) {
+  $stateFilter = (!isset($settings['hideDisabledSubscriptions']) || $settings['hideDisabledSubscriptions'] !== 'true') ? ($_GET['state'] ?? null) : null;
+  $subscriptions = mergeSharedSubscriptions($subscriptions ?? [], $db, $userId, $sort, $order, $settings['disabledToBottom'] === 'true', $stateFilter);
+}
+
 foreach ($subscriptions as $subscription) {
+  if (!empty($subscription['shared_owner_name'])) {
+    // Someone else's records; they are not ours to count.
+    continue;
+  }
   // API-created rows can leave payer, category or payment method unset.
   $memberId = $subscription['payer_user_id'];
   if (isset($memberId, $members[$memberId])) {
@@ -195,27 +209,33 @@ foreach ($subscriptions as $subscription) {
   $print[$id]['payment_method_id'] = $paymentMethodId;
   $print[$id]['category_id'] = $subscription['category_id'];
   $print[$id]['payer_user_id'] = $subscription['payer_user_id'];
-  $print[$id]['price'] = floatval($subscription['price']);
+  // The price that applies today: the intro price during a free trial or
+  // promo, with the regular price shown struck through next to it.
+  $print[$id]['price'] = wallos_current_price($subscription);
+  $print[$id]['regular_price'] = floatval($subscription['price']);
   $print[$id]['progress'] = getSubscriptionProgress($cycle, $frequency, $subscription['next_payment']);
   $print[$id]['inactive'] = $subscription['inactive'];
   addListRowFields($print[$id], $subscription, $mainCurrencyId, $db);
+  addSharedRowFields($print[$id], $subscription);
 
   if (isset($settings['convertCurrency']) && $settings['convertCurrency'] === 'true' && $currencyId != $mainCurrencyId) {
     $print[$id]['price'] = getPriceConverted($print[$id]['price'], $currencyId, $db);
+    $print[$id]['regular_price'] = getPriceConverted($print[$id]['regular_price'], $currencyId, $db);
     $print[$id]['currency_code'] = $currencies[$mainCurrencyId]['code'];
   }
   if (isset($settings['showMonthlyPrice']) && $settings['showMonthlyPrice'] === 'true') {
     $print[$id]['price'] = getPricePerMonth($cycle, $frequency, $print[$id]['price']);
+    $print[$id]['regular_price'] = getPricePerMonth($cycle, $frequency, $print[$id]['regular_price']);
   }
   // Sort on the price in the main currency, whether or not it is displayed
   // converted, so mixed currencies order by value rather than raw number.
-  $sortPrice = $currencyId != $mainCurrencyId ? getPriceConverted(floatval($subscription['price']), $currencyId, $db) : floatval($subscription['price']);
+  $sortPrice = $currencyId != $mainCurrencyId ? getPriceConverted(wallos_current_price($subscription), $currencyId, $db) : wallos_current_price($subscription);
   if (isset($settings['showMonthlyPrice']) && $settings['showMonthlyPrice'] === 'true') {
     $sortPrice = getPricePerMonth($cycle, $frequency, $sortPrice);
   }
   $print[$id]['sort_price'] = $sortPrice;
   if (isset($settings['showOriginalPrice']) && $settings['showOriginalPrice'] === 'true') {
-    $print[$id]['original_price'] = floatval($subscription['price']);
+    $print[$id]['original_price'] = wallos_current_price($subscription);
     $print[$id]['original_currency_code'] = $currencies[$subscription['currency_id']]['code'];
   }
 }
@@ -442,6 +462,54 @@ if ($db->querySingle("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND 
       </div>
     </div>
 
+    <div class="form-group" id="intro-group">
+      <div class="inline">
+        <div class="split50">
+          <label for="intro_type"><?= translate('intro_period', $i18n) ?></label>
+          <select id="intro_type" name="intro_type" onchange="toggleIntroFields()">
+            <option value="none"><?= translate('none', $i18n) ?></option>
+            <option value="trial"><?= translate('free_trial', $i18n) ?></option>
+            <option value="promo"><?= translate('intro_price', $i18n) ?></option>
+          </select>
+        </div>
+        <div class="split50 hide" id="intro-price-field">
+          <label for="intro_price"><?= translate('intro_price_per_payment', $i18n) ?></label>
+          <input type="number" step="0.01" min="0" id="intro_price" name="intro_price" autocomplete="off">
+        </div>
+      </div>
+      <div class="inline intro-row hide" id="intro-length-fields">
+        <div class="split50">
+          <label for="intro_length_mode"><?= translate('intro_length', $i18n) ?></label>
+          <select id="intro_length_mode" name="intro_length_mode" onchange="toggleIntroFields()">
+            <option value="cycles"><?= translate('intro_length_cycles', $i18n) ?></option>
+            <option value="date"><?= translate('intro_length_date', $i18n) ?></option>
+          </select>
+        </div>
+        <div class="split50" id="intro-cycles-field">
+          <label for="intro_cycles"><?= translate('billing_cycles', $i18n) ?></label>
+          <input type="number" min="1" max="1000" step="1" id="intro_cycles" name="intro_cycles" autocomplete="off" oninput="updateIntroHint()">
+        </div>
+        <div class="split50 hide" id="intro-end-field">
+          <label for="intro_end_date"><?= translate('first_full_price_payment', $i18n) ?></label>
+          <div class="date-wrapper">
+            <input type="date" id="intro_end_date" name="intro_end_date" autocomplete="off" onchange="updateIntroHint()">
+          </div>
+        </div>
+      </div>
+      <div class="intro-row hide" id="intro-notify-field">
+        <label for="intro_notify_days"><?= translate('remind_me_before_it_ends', $i18n) ?></label>
+        <select id="intro_notify_days" name="intro_notify_days">
+          <option value="1">1 <?= translate('day_before', $i18n) ?></option>
+          <?php for ($i = 2; $i <= 30; $i++) { ?>
+            <option value="<?= $i ?>" <?= $i === 3 ? 'selected' : '' ?>><?= $i ?> <?= translate('days_before', $i18n) ?></option>
+          <?php } ?>
+        </select>
+      </div>
+      <p class="form-hint" id="intro-hint" aria-live="polite"
+        data-trial="<?= htmlspecialchars(translate('trial_hint', $i18n), ENT_QUOTES) ?>"
+        data-promo="<?= htmlspecialchars(translate('promo_hint', $i18n), ENT_QUOTES) ?>"></p>
+    </div>
+
     <div class="form-group" id="ends-group">
       <div class="inline">
         <div class="split50">
@@ -530,30 +598,73 @@ if ($db->querySingle("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND 
     </div>
 
     <div class="form-group" id="notify-days-cancellation-group">
+      <label for="notify_days_before"><?= translate('notify_me', $i18n) ?></label>
+      <select id="notify_days_before" name="notify_days_before" disabled>
+        <option value="-1"><?= translate('default_value_from_settings', $i18n) ?></option>
+        <option value="0"><?= translate('on_due_date', $i18n) ?></option>
+        <option value="1">1 <?= translate('day_before', $i18n) ?></option>
+        <?php
+        for ($i = 2; $i <= 180; $i++) {
+          ?>
+          <option value="<?= $i ?>"><?= $i ?>   <?= translate('days_before', $i18n) ?></option>
+          <?php
+        }
+        ?>
+      </select>
+    </div>
+
+    <div class="form-group" id="cancel-notice-group"
+      data-default-value="<?= isset($settings['default_cancel_notice_value']) && $settings['default_cancel_notice_value'] !== null ? (int) $settings['default_cancel_notice_value'] : '' ?>"
+      data-default-unit="<?= htmlspecialchars($settings['default_cancel_notice_unit'] ?? 'months') ?>">
       <div class="inline">
-        <div class="split66 mobile-split-50">
-          <label for="notify_days_before"><?= translate('notify_me', $i18n) ?></label>
-          <select id="notify_days_before" name="notify_days_before" disabled>
-            <option value="-1"><?= translate('default_value_from_settings', $i18n) ?></option>
-            <option value="0"><?= translate('on_due_date', $i18n) ?></option>
-            <option value="1">1 <?= translate('day_before', $i18n) ?></option>
-            <?php
-            for ($i = 2; $i <= 180; $i++) {
-              ?>
-              <option value="<?= $i ?>"><?= $i ?>   <?= translate('days_before', $i18n) ?></option>
-              <?php
-            }
-            ?>
+        <div class="split50">
+          <label for="cancel_notice_mode"><?= translate('cancellation_notification', $i18n) ?></label>
+          <select id="cancel_notice_mode" name="cancel_notice_mode" onchange="toggleCancelNoticeFields(true)">
+            <option value="none"><?= translate('cancel_notice_none', $i18n) ?></option>
+            <option value="fixed"><?= translate('cancel_notice_fixed', $i18n) ?></option>
+            <option value="before_renewal"><?= translate('cancel_notice_before_renewal', $i18n) ?></option>
           </select>
         </div>
-        <div class="split33 mobile-split-50">
-          <label for="cancellation_date"><?= translate('cancellation_notification', $i18n) ?></label>
+        <div class="split50 hide" id="cancellation-date-field">
+          <label for="cancellation_date"><?= translate('remind_me_on', $i18n) ?></label>
           <div class="date-wrapper">
             <input type="date" id="cancellation_date" name="cancellation_date" autocomplete="off">
           </div>
         </div>
+        <div class="split50 hide" id="cancel-notice-field">
+          <label for="cancel_notice_value"><?= translate('notice_period', $i18n) ?></label>
+          <div class="inline">
+            <input type="number" id="cancel_notice_value" name="cancel_notice_value" min="0" max="3650" step="1"
+              autocomplete="off" oninput="updateCancelNoticeHint()">
+            <select id="cancel_notice_unit" name="cancel_notice_unit" onchange="updateCancelNoticeHint()"
+              aria-label="<?= translate('notice_period', $i18n) ?>">
+              <option value="days"><?= translate('days', $i18n) ?></option>
+              <option value="weeks"><?= translate('weeks', $i18n) ?></option>
+              <option value="months"><?= translate('months', $i18n) ?></option>
+            </select>
+          </div>
+        </div>
       </div>
+      <div class="hide" id="min-term-field">
+        <label for="min_term_end"><?= translate('minimum_term_until', $i18n) ?></label>
+        <div class="date-wrapper">
+          <input type="date" id="min_term_end" name="min_term_end" autocomplete="off" onchange="updateCancelNoticeHint()">
+        </div>
+      </div>
+      <p class="form-hint" id="cancel-notice-hint" aria-live="polite"
+        data-cancel-by="<?= htmlspecialchars(translate('cancel_by_to_avoid_renewal', $i18n), ENT_QUOTES) ?>"
+        data-locked="<?= htmlspecialchars(translate('locked_in_until_cancel_by', $i18n), ENT_QUOTES) ?>"></p>
     </div>
+
+    <?php if ($householdMembership !== null) { ?>
+      <div class="form-group" id="visibility-group">
+        <label for="visibility"><?= translate('visibility', $i18n) ?></label>
+        <select id="visibility" name="visibility">
+          <option value="private"><?= translate('visibility_private', $i18n) ?></option>
+          <option value="household"><?= sprintf(translate('visibility_household', $i18n), htmlspecialchars($householdMembership['name'])) ?></option>
+        </select>
+      </div>
+    <?php } ?>
 
     <div class="form-group">
       <input type="text" id="url" name="url" autocomplete="off" placeholder="<?= translate('url', $i18n) ?>">
@@ -599,7 +710,7 @@ if ($db->querySingle("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND 
         <option value="0"><?= translate('none', $i18n) ?></option>
         <?php
         foreach ($orderedSubscriptions as $sub) {
-          if ($sub['inactive'] == 0) {
+          if ($sub['inactive'] == 0 && empty($sub['shared_owner_name'])) {
             ?>
             <option value="<?= htmlspecialchars($sub['id']) ?>"><?= htmlspecialchars($sub['name']) ?>
             </option>

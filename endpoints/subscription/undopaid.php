@@ -7,6 +7,7 @@
 require_once '../../includes/connect_endpoint.php';
 require_once '../../includes/validate_endpoint.php';
 require_once '../../includes/payment_ledger.php';
+require_once '../../includes/households.php';
 
 header('Content-Type: application/json');
 
@@ -14,7 +15,8 @@ $data = json_decode(file_get_contents("php://input"), true);
 $subscriptionId = is_array($data) ? (int) ($data['id'] ?? 0) : 0;
 $dueDate = is_array($data) ? wallos_parse_date($data['due_date'] ?? null) : null;
 
-$subscription = wallos_ledger_load_subscription($db, $userId, $subscriptionId);
+// The owner, or a household editor of a shared subscription.
+$subscription = wallos_load_accessible_subscription($db, $userId, $subscriptionId, 'edit');
 if ($subscription === false || $dueDate === null) {
     die(json_encode(["success" => false, "message" => translate("error", $i18n)]));
 }

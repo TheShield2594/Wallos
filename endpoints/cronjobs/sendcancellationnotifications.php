@@ -7,6 +7,8 @@ require_once 'validate.php';
 require_once __DIR__ . '/../../includes/connect_endpoint_crontabs.php';
 require_once __DIR__ . '/../../includes/ssrf_helper.php';
 require_once __DIR__ . '/../../includes/webhook_helper.php';
+require_once __DIR__ . '/../../includes/cancellation_deadline.php';
+require_once __DIR__ . '/../../includes/intro_pricing.php';
 
 require __DIR__ . '/../../libs/PHPMailer/PHPMailer.php';
 require __DIR__ . '/../../libs/PHPMailer/SMTP.php';
@@ -179,26 +181,83 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
         $currentDate = new DateTime('now');
         $currentDate = $currentDate->format('Y-m-d');
 
-        // One-time purchases have no recurring commitment to cancel, and the
-        // subscription form clears their cancellation date, so never notify for them.
-        $query = "SELECT * FROM subscriptions WHERE user_id = :user_id AND inactive = :inactive AND cancellation_date = :cancellationDate AND cycle != :oneTimeCycle ORDER BY payer_user_id ASC";
+        // Candidates: active, recurring subscriptions with a cancellation
+        // notice. Whether the reminder is due today is decided by
+        // wallos_cancellation_due(): from the cancel-by date (a fixed date, or
+        // N days/months before the next renewal) until that renewal, once.
+        // One-time purchases have no recurring commitment to cancel.
+        $query = "SELECT * FROM subscriptions WHERE user_id = :user_id AND inactive = :inactive AND cycle != :oneTimeCycle AND (cancel_notice_mode = 'before_renewal' OR (cancellation_date IS NOT NULL AND cancellation_date != '' AND COALESCE(cancel_notice_mode, 'fixed') = 'fixed')) ORDER BY payer_user_id ASC";
         $stmt = $db->prepare($query);
         $stmt->bindValue(':user_id', $userId, SQLITE3_INTEGER);
         $stmt->bindValue(':inactive', 0, SQLITE3_INTEGER);
-        $stmt->bindValue(':cancellationDate', $currentDate, SQLITE3_TEXT);
         $stmt->bindValue(':oneTimeCycle', 5, SQLITE3_INTEGER);
         $resultSubscriptions = $stmt->execute();
 
         $notify = [];
+        $remindedDeadlines = [];
+        // Reminders at least one channel delivered (keyed by
+        // wallos_notification_key()); only those are marked as sent, so a
+        // failed delivery is tried again next run.
+        $delivered = [];
         $i = 0;
-        $currentDate = new DateTime('now');
         while ($rowSubscription = $resultSubscriptions->fetchArray(SQLITE3_ASSOC)) {
+            $deadline = wallos_cancellation_due($rowSubscription, $currentDate);
+            if ($deadline === null) {
+                continue;
+            }
+            $remindedDeadlines[$rowSubscription['id']] = $deadline['cancel_by'];
+            $deadlineNote = $deadline['renewal'] !== null
+                ? " (cancel by " . $deadline['cancel_by'] . " to avoid the renewal on " . $deadline['renewal'] . ")"
+                : "";
             $notify[$rowSubscription['payer_user_id']][$i]['name'] = $rowSubscription['name'];
             $notify[$rowSubscription['payer_user_id']][$i]['price'] = $rowSubscription['price'] . $currencies[$rowSubscription['currency_id']]['symbol'];
             $notify[$rowSubscription['payer_user_id']][$i]['currency'] = $currencies[$rowSubscription['currency_id']]['name'];
             $notify[$rowSubscription['payer_user_id']][$i]['category'] = $categories[$rowSubscription['category_id']]['name'];
             $notify[$rowSubscription['payer_user_id']][$i]['payer'] = $household[$rowSubscription['payer_user_id']]['name'];
             $notify[$rowSubscription['payer_user_id']][$i]['date'] = $rowSubscription['next_payment'];
+            $notify[$rowSubscription['payer_user_id']][$i]['cancel_by'] = $deadline['cancel_by'];
+            $notify[$rowSubscription['payer_user_id']][$i]['deadline_note'] = $deadlineNote;
+            $notify[$rowSubscription['payer_user_id']][$i]['key'] = wallos_notification_key('cancel', $rowSubscription['id']);
+            $notify[$rowSubscription['payer_user_id']][$i]['url'] = $rowSubscription['url'];
+            $notify[$rowSubscription['payer_user_id']][$i]['notes'] = $rowSubscription['notes'];
+            $i++;
+        }
+
+        // Free trials and promos: a reminder before the regular price starts,
+        // and a one-off notice once it has (see includes/intro_pricing.php).
+        // They go out through the same channels as cancellation reminders,
+        // since both are the moment to decide whether to keep paying.
+        $query = "SELECT * FROM subscriptions WHERE user_id = :user_id AND inactive = 0 AND (intro_type IS NOT NULL OR intro_converted_on IS NOT NULL) ORDER BY payer_user_id ASC";
+        $stmt = $db->prepare($query);
+        $stmt->bindValue(':user_id', $userId, SQLITE3_INTEGER);
+        $resultIntro = $stmt->execute();
+
+        $remindedIntros = [];
+        while ($rowSubscription = $resultIntro->fetchArray(SQLITE3_ASSOC)) {
+            $symbol = $currencies[$rowSubscription['currency_id']]['symbol'];
+            if (wallos_intro_ending_due($rowSubscription, $currentDate)) {
+                $remindedIntros[$rowSubscription['id']] = $rowSubscription['intro_end_date'];
+                $deadlineNote = ($rowSubscription['intro_type'] === 'trial' ? " (free trial ends " : " (intro price ends ")
+                    . $rowSubscription['intro_end_date'] . ", then " . $rowSubscription['price'] . $symbol . ")";
+                $cancelBy = $rowSubscription['intro_end_date'];
+                $price = wallos_intro_price($rowSubscription) . $symbol;
+            } elseif (wallos_intro_converted_due($rowSubscription, $currentDate)) {
+                $remindedIntros[$rowSubscription['id']] = 'converted:' . $rowSubscription['intro_converted_on'];
+                $deadlineNote = " (intro period ended " . $rowSubscription['intro_converted_on'] . "; the regular price now applies)";
+                $cancelBy = $rowSubscription['intro_converted_on'];
+                $price = $rowSubscription['price'] . $symbol;
+            } else {
+                continue;
+            }
+            $notify[$rowSubscription['payer_user_id']][$i]['name'] = $rowSubscription['name'];
+            $notify[$rowSubscription['payer_user_id']][$i]['price'] = $price;
+            $notify[$rowSubscription['payer_user_id']][$i]['currency'] = $currencies[$rowSubscription['currency_id']]['name'];
+            $notify[$rowSubscription['payer_user_id']][$i]['category'] = $categories[$rowSubscription['category_id']]['name'];
+            $notify[$rowSubscription['payer_user_id']][$i]['payer'] = $household[$rowSubscription['payer_user_id']]['name'];
+            $notify[$rowSubscription['payer_user_id']][$i]['date'] = $rowSubscription['next_payment'];
+            $notify[$rowSubscription['payer_user_id']][$i]['cancel_by'] = $cancelBy;
+            $notify[$rowSubscription['payer_user_id']][$i]['deadline_note'] = $deadlineNote;
+            $notify[$rowSubscription['payer_user_id']][$i]['key'] = wallos_notification_key('intro', $rowSubscription['id']);
             $notify[$rowSubscription['payer_user_id']][$i]['url'] = $rowSubscription['url'];
             $notify[$rowSubscription['payer_user_id']][$i]['notes'] = $rowSubscription['notes'];
             $i++;
@@ -225,7 +284,7 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
                             $message = "The following subscriptions are up for cancellation:\n";
 
                             foreach ($perUser as $subscription) {
-                                $message .= $subscription['name'] . " for " . $subscription['price'] ."\n";
+                                $message .= $subscription['name'] . " for " . $subscription['price'] . $subscription['deadline_note'] ."\n";
                             }
 
                             $smtpAuth = (isset($email["smtpUsername"]) && $email["smtpUsername"] != "") || (isset($email["smtpPassword"]) && $email["smtpPassword"] != "");
@@ -278,6 +337,7 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
 
                                 if ($mail->send()) {
                                     echo "Email Notifications sent<br />";
+                                    wallos_notifications_delivered($delivered, $perUser);
                                 } else {
                                     echo "Error sending notifications: " . $mail->ErrorInfo . "<br />";
                                 }
@@ -318,7 +378,7 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
                             }
 
                             foreach ($perUser as $subscription) {
-                                $message .= $subscription['name'] . " for " . $subscription['price'] . "\n";
+                                $message .= $subscription['name'] . " for " . $subscription['price'] . $subscription['deadline_note'] . "\n";
                             }
 
                             $postfields = [
@@ -348,10 +408,13 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
 
                             $response = curl_exec($ch);
                         
-                            if ($response === false) {
-                                echo "Error sending notifications: " . curl_error($ch) . "<br />";
+                            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                            // A 4xx/5xx answer is not a delivery: the reminder is tried again.
+                            if ($response === false || $httpCode < 200 || $httpCode >= 300) {
+                                echo "Error sending notifications: " . ($response === false ? curl_error($ch) : "HTTP " . $httpCode) . "<br />";
                             } else {
                                 echo "Discord Notifications sent<br />";
+                                wallos_notifications_delivered($delivered, $perUser);
                             }
                         
                             unset($ch);
@@ -386,7 +449,7 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
                             }
 
                             foreach ($perUser as $subscription) {
-                                $message .= $subscription['name'] . " for " . $subscription['price'] . "\n";
+                                $message .= $subscription['name'] . " for " . $subscription['price'] . $subscription['deadline_note'] . "\n";
                             }
 
                             $data = array(
@@ -418,10 +481,13 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
                             curl_setopt($ch, CURLOPT_RESOLVE, ["{$ssrf['host']}:{$ssrf['port']}:{$ssrf['ip']}"]);
 
                             $result = curl_exec($ch);
-                            if ($result === false) {
-                                echo "Error sending notifications: " . curl_error($ch) . "<br />";
+                            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                            // A 4xx/5xx answer is not a delivery: the reminder is tried again.
+                            if ($result === false || $httpCode < 200 || $httpCode >= 300) {
+                                echo "Error sending notifications: " . ($result === false ? curl_error($ch) : "HTTP " . $httpCode) . "<br />";
                             } else {
                                 echo "Gotify Notifications sent<br />";
+                                wallos_notifications_delivered($delivered, $perUser);
                             }
                         }
                     }
@@ -450,7 +516,7 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
                         }
 
                         foreach ($perUser as $subscription) {
-                            $message .= $subscription['name'] . " for " . $subscription['price'] . "\n";
+                            $message .= $subscription['name'] . " for " . $subscription['price'] . $subscription['deadline_note'] . "\n";
                         }
 
                         $data = array(
@@ -476,10 +542,13 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
                         );
 
                         $result = curl_exec($ch);
-                        if ($result === false) {
-                            echo "Error sending notifications: " . curl_error($ch) . "<br />";
+                        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                        // A 4xx/5xx answer is not a delivery: the reminder is tried again.
+                        if (!wallos_notification_http_delivered($httpCode, $result, true)) {
+                            echo "Error sending notifications: " . ($result === false ? curl_error($ch) : "HTTP " . $httpCode) . "<br />";
                         } else {
                             echo "Telegram Notifications sent<br />";
+                            wallos_notifications_delivered($delivered, $perUser);
                         }
                     }
                 } catch (\Throwable $e) {
@@ -507,7 +576,7 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
                         }
 
                         foreach ($perUser as $subscription) {
-                            $message .= $subscription['name'] . " for " . $subscription['price'] . "\n";
+                            $message .= $subscription['name'] . " for " . $subscription['price'] . $subscription['deadline_note'] . "\n";
                         }
 
                         $ch = curl_init();
@@ -524,10 +593,13 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
 
                         $result = curl_exec($ch);
 
-                        if ($result === false) {
-                            echo "Error sending notifications: " . curl_error($ch) . "<br />";
+                        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                        // A 4xx/5xx answer is not a delivery: the reminder is tried again.
+                        if ($result === false || $httpCode < 200 || $httpCode >= 300) {
+                            echo "Error sending notifications: " . ($result === false ? curl_error($ch) : "HTTP " . $httpCode) . "<br />";
                         } else {
                             echo "Pushover Notifications sent<br />";
+                            wallos_notifications_delivered($delivered, $perUser);
                         }
                     
                         unset($ch);
@@ -561,7 +633,7 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
                             }
 
                             foreach ($perUser as $subscription) {
-                                $message .= $subscription['name'] . " for " . $subscription['price'] . "\n";
+                                $message .= $subscription['name'] . " for " . $subscription['price'] . $subscription['deadline_note'] . "\n";
                             }
 
                             // Empty or non-JSON headers made array_keys(null) throw, so
@@ -589,10 +661,13 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
 
                             $response = curl_exec($ch);
                         
-                            if ($response === false) {
-                                echo "Error sending notifications: " . curl_error($ch) . "<br />";
+                            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                            // A 4xx/5xx answer is not a delivery: the reminder is tried again.
+                            if ($response === false || $httpCode < 200 || $httpCode >= 300) {
+                                echo "Error sending notifications: " . ($response === false ? curl_error($ch) : "HTTP " . $httpCode) . "<br />";
                             } else {
                                 echo "Ntfy Notifications sent<br />";
+                                wallos_notifications_delivered($delivered, $perUser);
                             }
                         
                             unset($ch);
@@ -630,6 +705,7 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
                                     'subscription_category' => $subscription['category'],
                                     'subscription_payer' => $payer,
                                     'subscription_date' => $subscription['date'],
+                                    'subscription_cancel_by' => $subscription['cancel_by'],
                                     'subscription_url' => $subscription['url'],
                                     'subscription_notes' => $subscription['notes'],
                                 ]);
@@ -656,11 +732,12 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
                                 $response = curl_exec($ch);
                                 $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
                 
-                                if ($response === false || $httpCode >= 400) {
+                                if ($response === false || $httpCode < 200 || $httpCode >= 300) {
                                     $errorDetail = $response === false ? curl_error($ch) : "HTTP " . $httpCode;
                                     echo "Error sending cancellation notifications: " . $errorDetail . "<br />";
                                 } else {
                                     echo "Webhook Cancellation Notification sent for subscription: " . $subscription['name'] . "<br />";
+                                    wallos_notifications_delivered($delivered, [$subscription]);
                                 }
                             
                                 unset($ch);
@@ -676,6 +753,26 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
                 }
             }
             
+            // Mark what at least one channel delivered (a failing channel is
+            // logged above); without this the reminder would repeat on every
+            // run until the renewal. Undelivered ones are tried again.
+            $markStmt = $db->prepare('UPDATE subscriptions SET last_cancel_notified_for = :cancelBy WHERE id = :id AND user_id = :userId');
+            foreach (wallos_delivered_markers($remindedDeadlines, $delivered, 'cancel') as $subscriptionId => $cancelBy) {
+                $markStmt->bindValue(':cancelBy', $cancelBy, SQLITE3_TEXT);
+                $markStmt->bindValue(':id', $subscriptionId, SQLITE3_INTEGER);
+                $markStmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
+                $markStmt->execute();
+                $markStmt->reset();
+            }
+            $markStmt = $db->prepare('UPDATE subscriptions SET intro_notified_for = :marker WHERE id = :id AND user_id = :userId');
+            foreach (wallos_delivered_markers($remindedIntros, $delivered, 'intro') as $subscriptionId => $marker) {
+                $markStmt->bindValue(':marker', $marker, SQLITE3_TEXT);
+                $markStmt->bindValue(':id', $subscriptionId, SQLITE3_INTEGER);
+                $markStmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
+                $markStmt->execute();
+                $markStmt->reset();
+            }
+
 
         } else {
             if (php_sapi_name() !== 'cli') {

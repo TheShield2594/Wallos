@@ -208,7 +208,9 @@ function renderSubscriptionDetails(subscription, focusPanel) {
 
   detailsRenderTile(document.querySelector('#details-logo'), subscription);
   document.querySelector('#details-name').textContent = subscription.name;
-  document.querySelector('#details-price').textContent = detailsFormatPrice(subscription.price, subscription.currency_id);
+  // During a free trial or promo the header shows what is charged now.
+  const headerPrice = subscription.intro_active ? subscription.current_price : subscription.price;
+  document.querySelector('#details-price').textContent = detailsFormatPrice(headerPrice, subscription.currency_id);
   document.querySelector('#details-billing-cycle').textContent = detailsPerText(subscription);
 
   const status = detailsStatus(subscription);
@@ -220,16 +222,37 @@ function renderSubscriptionDetails(subscription, focusPanel) {
     document.querySelector('#details-billing-cycle').textContent += ` · ${strings.estimated}`;
   }
 
+  // Household sharing: someone else's subscription is read-only for a
+  // viewer; an editor may edit it and mark it as paid. Cloning, deleting and
+  // the reminders stay with its owner.
+  const access = subscription.access || 'owner';
+  const isOwner = access === 'owner';
+  const canEdit = access !== 'viewer';
+  const sharedLine = document.querySelector('#details-shared');
+  let sharedText = '';
+  if (!isOwner) {
+    sharedText = detailsFill(strings.shared_by, subscription.shared_owner_name || '') + (canEdit ? '' : ` · ${strings.view_only}`);
+  } else if (subscription.shared) {
+    sharedText = strings.shared_with_household;
+  }
+  sharedLine.textContent = sharedText;
+  sharedLine.classList.toggle('hide', sharedText === '');
+
   // Actions: every active recurring subscription can be marked as paid.
   const renewButton = document.querySelector('#details-renew-button');
-  renewButton.classList.toggle('hide', isInactive || isOneTime);
+  renewButton.classList.toggle('hide', isInactive || isOneTime || !canEdit);
   renewButton.onclick = (event) => renewSubscription(event, subscription.id, subscription);
   const undoButton = document.querySelector('#details-undo-button');
-  undoButton.classList.toggle('hide', !subscription.paid_due_date || isInactive);
+  undoButton.classList.toggle('hide', !subscription.paid_due_date || isInactive || !canEdit);
   undoButton.onclick = (event) => undoPayment(event, subscription.id, subscription.paid_due_date);
-  document.querySelector('#details-edit-button').onclick = (event) => detailsEdit(event, subscription.id);
+  const editButton = document.querySelector('#details-edit-button');
+  editButton.classList.toggle('hide', !canEdit);
+  editButton.onclick = (event) => detailsEdit(event, subscription.id);
   const cloneButton = document.querySelector('#details-clone-button');
-  cloneButton.classList.toggle('hide', typeof openEditSubscription !== 'function');
+  cloneButton.classList.toggle('hide', typeof openEditSubscription !== 'function' || !isOwner);
+  document.querySelector('#details-delete-button').classList.toggle('hide', !isOwner);
+  document.querySelector('#details-export-button').classList.toggle('hide', !isOwner);
+  document.querySelector('#details-notifications-card').classList.toggle('hide', !isOwner);
   cloneButton.onclick = (event) => cloneSubscription(event, subscription.id);
   document.querySelector('#details-export-button').onclick = () => exportCalendar(subscription.id);
   document.querySelector('#details-delete-button').onclick = (event) => deleteSubscription(event, subscription.id);
@@ -247,6 +270,14 @@ function renderSubscriptionDetails(subscription, focusPanel) {
   document.querySelector('#details-cycle').textContent = detailsBillingCycleText(subscription.cycle, subscription.frequency);
   document.querySelector('#details-renewal-item').classList.toggle('hide', isOneTime);
   document.querySelector('#details-renewal').textContent = isManual ? strings.manual_renewal : strings.automatic;
+  const introItem = document.querySelector('#details-intro-item');
+  introItem.classList.toggle('hide', !subscription.intro_active);
+  if (subscription.intro_active) {
+    document.querySelector('#details-intro-label').textContent = subscription.intro_type === 'trial' ? strings.free_trial : strings.intro_price;
+    document.querySelector('#details-intro').textContent = strings.intro_then
+      .replace('%1$s', detailsFormatDate(subscription.intro_end_date))
+      .replace('%2$s', detailsFormatPrice(subscription.price, subscription.currency_id));
+  }
   const planItem = document.querySelector('#details-plan-item');
   const planTotal = Number(subscription.total_payments) || 0;
   planItem.classList.toggle('hide', !planTotal && !subscription.end_date);
@@ -266,23 +297,35 @@ function renderSubscriptionDetails(subscription, focusPanel) {
     document.querySelector('#details-plan').textContent = parts.join(' · ');
   }
   document.querySelector('#details-start-date').textContent = detailsFormatDate(subscription.start_date) || strings.none;
-  document.querySelector('#details-category').textContent = lookups.categories[subscription.category_id] || strings.none;
-  document.querySelector('#details-payer').textContent = lookups.members[subscription.payer_user_id] || strings.none;
+  // A shared subscription carries its owner's names; the ids are not ours.
+  const shared = (subscription.access || 'owner') !== 'owner';
+  document.querySelector('#details-category').textContent = (shared ? subscription.category_name : lookups.categories[subscription.category_id]) || strings.none;
+  document.querySelector('#details-payer').textContent = (shared ? subscription.payer_name : lookups.members[subscription.payer_user_id]) || strings.none;
 
-  const paymentMethod = lookups.paymentMethods[subscription.payment_method_id];
+  const paymentMethod = shared
+    ? (subscription.payment_method_name ? { name: subscription.payment_method_name, icon: '' } : null)
+    : lookups.paymentMethods[subscription.payment_method_id];
   const paymentIcon = document.querySelector('#details-payment-icon');
   if (paymentMethod) {
     paymentIcon.src = paymentMethod.icon;
-    paymentIcon.classList.remove('hide');
+    paymentIcon.classList.toggle('hide', !paymentMethod.icon);
     document.querySelector('#details-payment-name').textContent = paymentMethod.name;
   } else {
     paymentIcon.classList.add('hide');
     document.querySelector('#details-payment-name').textContent = strings.none;
   }
 
+  // Cancellation notice: a fixed reminder date, or the date to cancel by
+  // before the next renewal, and the minimum term while it still binds.
   const cancellationItem = document.querySelector('#details-cancellation-item');
-  cancellationItem.classList.toggle('hide', !subscription.cancellation_date);
-  document.querySelector('#details-cancellation').textContent = detailsFormatDate(subscription.cancellation_date);
+  cancellationItem.classList.toggle('hide', !subscription.cancel_by);
+  document.querySelector('#details-cancellation-label').textContent = subscription.cancel_renewal
+    ? strings.cancel_by_label : strings.cancellation_notification;
+  document.querySelector('#details-cancellation').textContent = detailsFormatDate(subscription.cancel_by);
+  const minTermItem = document.querySelector('#details-min-term-item');
+  minTermItem.classList.toggle('hide', !subscription.locked_until);
+  document.querySelector('#details-min-term').textContent = subscription.locked_until
+    ? detailsFill(strings.locked_in_until, detailsFormatDate(subscription.locked_until)) : '';
 
   const replacementName = subscription.replacement_subscription_id ? lookups.subscriptionNames[subscription.replacement_subscription_id] : null;
   document.querySelector('#details-replacement-item').classList.toggle('hide', !replacementName);
@@ -291,7 +334,7 @@ function renderSubscriptionDetails(subscription, focusPanel) {
   detailsLoadHistory(subscription);
 
   // Notifications (one-time purchases never notify)
-  document.querySelector('#details-notifications-card').classList.toggle('hide', isOneTime);
+  document.querySelector('#details-notifications-card').classList.toggle('hide', isOneTime || (subscription.access || 'owner') !== 'owner');
   detailsRenderNotify(subscription);
 
   // Notes: notes_html is rendered server-side through render_notes_markdown()
@@ -481,9 +524,13 @@ function detailsPost(url, body) {
 
 // Asks for the amount actually paid. Returns undefined when cancelled, and
 // null to keep the default.
-function detailsAskAmount(defaultAmount) {
+// currencyId names the currency the amount is entered in (shown in the
+// prompt); a household member enters it in the currency they are shown.
+function detailsAskAmount(defaultAmount, currencyId) {
   const strings = detailsStrings();
-  const answer = window.prompt(strings.enter_amount_paid, defaultAmount === null || defaultAmount === undefined ? "" : String(defaultAmount));
+  const currency = currencyId !== undefined ? window.subscriptionLookups.currencies[currencyId] : null;
+  const label = currency && currency.code ? `${strings.enter_amount_paid} (${currency.code})` : strings.enter_amount_paid;
+  const answer = window.prompt(label, defaultAmount === null || defaultAmount === undefined ? "" : String(defaultAmount));
   if (answer === null) {
     return undefined;
   }
@@ -509,12 +556,15 @@ function renewSubscription(event, id, subscription) {
 
   const body = { id: id };
   if (subscription && Number(subscription.variable_amount) === 1) {
-    const amount = detailsAskAmount(subscription.price);
+    const amount = detailsAskAmount(subscription.price, subscription.currency_id);
     if (amount === undefined) {
       return;
     }
     if (amount !== null) {
       body.amount = amount;
+      // The currency the amount was entered in; the server refuses it if a
+      // shared subscription is shown in another currency by now.
+      body.currency_id = subscription.currency_id;
     }
   }
 
@@ -607,7 +657,11 @@ function detailsRenderHistory(subscription, payments) {
 
     const amount = document.createElement('span');
     amount.className = 'history-amount';
-    amount.textContent = payment.amount === null ? '—' : detailsFormatPrice(payment.amount, payment.currency_id || subscription.currency_id);
+    const isOwner = (subscription.access || 'owner') === 'owner';
+    // For a household member the server converted each payment and set its
+    // currency_id to the member's currency it is shown in.
+    amount.textContent = payment.amount === null ? '—'
+      : detailsFormatPrice(payment.amount, payment.currency_id || subscription.currency_id);
 
     const edit = document.createElement('button');
     edit.type = 'button';
@@ -625,7 +679,11 @@ function detailsRenderHistory(subscription, payments) {
     remove.innerHTML = '<i class="fa-solid fa-trash" aria-hidden="true"></i>';
     remove.onclick = () => detailsDeletePayment(subscription, payment);
 
-    item.append(text, amount, edit, remove);
+    // The history is edited by the subscription's owner only.
+    item.append(text, amount);
+    if (isOwner) {
+      item.append(edit, remove);
+    }
     list.appendChild(item);
   });
 
@@ -647,7 +705,7 @@ function detailsRenderHistory(subscription, payments) {
 }
 
 function detailsEditPayment(subscription, payment) {
-  const amount = detailsAskAmount(payment.amount === null ? subscription.price : payment.amount);
+  const amount = detailsAskAmount(payment.amount === null ? subscription.price : payment.amount, payment.currency_id || subscription.currency_id);
   if (amount === undefined) {
     return;
   }

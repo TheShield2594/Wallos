@@ -26,6 +26,14 @@ For 'add' and 'edit' actions (all optional for 'edit'):
 - notify_days_before: how many days before to send notification (integer).
 - inactive: whether the subscription is inactive (1 or 0).
 - cancellation_date: the cancellation date (YYYY-MM-DD).
+- cancel_notice_mode: 'none', 'fixed' (remind on cancellation_date) or 'before_renewal'.
+- cancel_notice_value / cancel_notice_unit: the notice before each renewal ('days', 'weeks' or 'months'), for 'before_renewal'.
+- min_term_end: end of a minimum term (YYYY-MM-DD), for 'before_renewal'.
+- intro_type: 'none', 'trial' (free) or 'promo' (intro_price per payment).
+- intro_end_date: the first payment at the regular price (YYYY-MM-DD); or intro_cycles: the number of billing cycles from the start date.
+- intro_price: the promo price per payment (float), for 'promo'.
+- intro_notify_days: days before the end to send the "trial ending" reminder (default 3).
+- shared: 1 to share the subscription with your household, 0 to make it private.
 - replacement_subscription_id: the ID of the replacement subscription (integer).
 
 It returns a JSON object with the following properties:
@@ -49,6 +57,108 @@ require_once '../../includes/connect_endpoint.php';
 require_once '../../includes/inputvalidation.php';
 require_once '../../includes/ssrf_helper.php';
 require_once '../../includes/logo_theme_variant.php';
+require_once '../../includes/cancellation_deadline.php';
+require_once '../../includes/intro_pricing.php';
+require_once '../../includes/households.php';
+
+/**
+ * Settings saved after the subscription row itself: the cancellation notice
+ * and the intro period.
+ * Validated before anything is written; the caller exits on an error.
+ *
+ * @param array|null $existing the stored row on edit, null on add
+ * @return array{error: string|null, apply: callable}
+ */
+function api_extra_fields($existing, $cycle)
+{
+    $cancelKeys = ['cancel_notice_mode', 'cancellation_date', 'cancel_notice_value', 'cancel_notice_unit', 'min_term_end'];
+    $cancelInput = [];
+    foreach ($cancelKeys as $key) {
+        $cancelInput[$key] = array_key_exists($key, $_POST) ? $_POST[$key] : ($existing[$key] ?? null);
+    }
+    if ($existing !== null && !isset($_POST['cancel_notice_mode']) && isset($_POST['cancellation_date'])) {
+        // An older client editing only the date: a date means a fixed reminder.
+        $cancelInput['cancel_notice_mode'] = $_POST['cancellation_date'] === '' ? 'none' : 'fixed';
+    }
+    if ($existing !== null && !isset($_POST['cancel_notice_mode']) && !isset($_POST['cancellation_date'])) {
+        $cancelInput['cancel_notice_mode'] = wallos_cancel_mode($existing);
+    }
+    $cancel = wallos_cancel_fields_from_input($cancelInput, $cycle);
+    if ($cancel['error'] !== null) {
+        return ['error' => $cancel['error'], 'apply' => null];
+    }
+
+    // Intro period: kept as stored unless the request sets intro_type.
+    $intro = null;
+    if (isset($_POST['intro_type'])) {
+        $introInput = $_POST;
+        $introInput['intro_length_mode'] = isset($_POST['intro_cycles']) && !isset($_POST['intro_end_date']) ? 'cycles' : 'date';
+        $intro = wallos_intro_fields_from_input($introInput, [
+            'cycle' => $cycle,
+            'frequency' => $_POST['frequency'] ?? ($existing['frequency'] ?? 1),
+            'start_date' => $_POST['start_date'] ?? ($existing['start_date'] ?? null),
+            'next_payment' => $_POST['next_payment'] ?? ($existing['next_payment'] ?? null),
+        ]);
+        if ($intro['error'] !== null) {
+            return ['error' => $intro['error'], 'apply' => null];
+        }
+    }
+
+    $shared = null;
+    if (isset($_POST['shared'])) {
+        $shared = $_POST['shared'] === '1' || $_POST['shared'] === 1;
+        if ($shared && wallos_household_membership($GLOBALS['db'], $GLOBALS['userId']) === null) {
+            return ['error' => 'You are not in a household.', 'apply' => null];
+        }
+    }
+
+    // Returns false when a write failed; the caller rolls the save back.
+    return ['error' => null, 'apply' => function ($db, $subscriptionId, $userId) use ($cancel, $intro, $shared) {
+        if (!wallos_store_cancel_fields($db, $subscriptionId, $userId, $cancel['fields'])) {
+            return false;
+        }
+        if ($shared !== null && !wallos_set_subscription_sharing($db, $userId, $subscriptionId, $shared)['success']) {
+            return false;
+        }
+        if ($intro !== null) {
+            if (!wallos_store_intro_fields($db, $subscriptionId, $userId, $intro['fields'])) {
+                return false;
+            }
+            if ($intro['next_payment'] !== null) {
+                // A trial's next payment is its first paid one.
+                $stmt = $db->prepare('UPDATE subscriptions SET next_payment = :next WHERE id = :id AND user_id = :userId');
+                $stmt->bindValue(':next', $intro['next_payment'], SQLITE3_TEXT);
+                $stmt->bindValue(':id', (int) $subscriptionId, SQLITE3_INTEGER);
+                $stmt->bindValue(':userId', (int) $userId, SQLITE3_INTEGER);
+                if ($stmt->execute() === false) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }];
+}
+
+/**
+ * Runs the row write and the extra-field writes as one transaction.
+ *
+ * @param callable $writeRow fn(): int|false the saved subscription id
+ * @return int|false the id, or false when anything failed (nothing is saved)
+ */
+function api_save_atomically(SQLite3 $db, callable $writeRow, callable $apply, $userId)
+{
+    if (@$db->exec('BEGIN IMMEDIATE') === false) {
+        return false;
+    }
+    $id = $writeRow();
+    if ($id === false || !$apply($db, $id, $userId) || $db->exec('COMMIT') === false) {
+        $db->exec('ROLLBACK');
+        return false;
+    }
+
+    return $id;
+}
 
 header('Content-Type: application/json; charset=UTF-8');
 
@@ -455,6 +565,16 @@ switch ($action) {
             exit;
         }
 
+        $extraFields = api_extra_fields(null, $cycle);
+        if ($extraFields['error'] !== null) {
+            echo json_encode([
+                'success' => false,
+                'title' => 'Invalid parameter',
+                'message' => $extraFields['error']
+            ]);
+            exit;
+        }
+
         // Validate Foreign Keys
         // Currency
         $currStmt = $db->prepare("SELECT id FROM currencies WHERE id = :id AND user_id = :userId");
@@ -592,11 +712,14 @@ switch ($action) {
         $stmtInsert->bindParam(':autoRenew', $autoRenew, SQLITE3_INTEGER);
         $stmtInsert->bindParam(':startDate', $startDate, SQLITE3_TEXT);
 
-        if ($stmtInsert->execute()) {
+        $newSubscriptionId = api_save_atomically($db, function () use ($db, $stmtInsert) {
+            return $stmtInsert->execute() !== false ? $db->lastInsertRowID() : false;
+        }, $extraFields['apply'], $userId);
+        if ($newSubscriptionId !== false) {
             $addResponse = [
                 'success' => true,
                 'title' => 'Subscription added',
-                'subscriptionId' => $db->lastInsertRowID(),
+                'subscriptionId' => $newSubscriptionId,
                 'message' => 'Subscription added successfully.'
             ];
             if ($logoWarning !== '') {
@@ -754,6 +877,16 @@ switch ($action) {
                 'success' => false,
                 'title' => 'Invalid date',
                 'message' => 'Parameter "cancellation_date" must be a valid date in YYYY-MM-DD format.'
+            ]);
+            exit;
+        }
+
+        $extraFields = api_extra_fields($subscription, $cycle);
+        if ($extraFields['error'] !== null) {
+            echo json_encode([
+                'success' => false,
+                'title' => 'Invalid parameter',
+                'message' => $extraFields['error']
             ]);
             exit;
         }
@@ -922,7 +1055,10 @@ switch ($action) {
         $stmtUpdate->bindParam(':id', $subscriptionId, SQLITE3_INTEGER);
         $stmtUpdate->bindParam(':userId', $userId, SQLITE3_INTEGER);
 
-        if ($stmtUpdate->execute()) {
+        $updated = api_save_atomically($db, function () use ($stmtUpdate, $subscriptionId) {
+            return $stmtUpdate->execute() !== false ? (int) $subscriptionId : false;
+        }, $extraFields['apply'], $userId);
+        if ($updated !== false) {
             $updateResponse = [
                 'success' => true,
                 'title' => 'Subscription updated',

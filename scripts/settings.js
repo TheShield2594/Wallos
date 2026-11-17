@@ -1089,6 +1089,18 @@ function setShowSubscriptionProgress() {
   storeSettingsOnDB('subscription_progress', value);
 }
 
+function setShowCategoryCard() {
+  const checkbox = document.querySelector("#showcategorycard");
+  storeSettingsOnDB('category_card', checkbox.checked);
+}
+
+function setDefaultCancelNotice() {
+  const valueField = document.querySelector("#defaultcancelnoticevalue");
+  const unit = document.querySelector("#defaultcancelnoticeunit").value;
+  const value = valueField.value === '' ? null : Number(valueField.value);
+  storeSettingsOnDB('cancel_notice_default', { value: value, unit: unit });
+}
+
 function setRequirePaymentConfirmation() {
   const checkbox = document.querySelector("#requirepaymentconfirmation");
   storeSettingsOnDB('payment_confirmation', checkbox.checked);
@@ -1400,4 +1412,30 @@ function runAiRecommendations() {
       spinner.classList.add("hidden");
     });
 
+}
+
+// Shared household: create, invite, answer an invite, change roles, leave or
+// delete. The page reloads so every list reflects the new membership.
+function householdAction(payload, confirmText) {
+  if (confirmText && !confirm(confirmText)) {
+    return;
+  }
+  fetch('endpoints/households/manage.php', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRF-Token': window.csrfToken,
+    },
+    body: JSON.stringify(payload),
+  })
+    .then(response => response.json())
+    .then(data => {
+      if (data.success) {
+        showSuccessMessage(data.message);
+        setTimeout(() => window.location.reload(), 400);
+      } else {
+        showErrorMessage(data.message);
+      }
+    })
+    .catch(() => showErrorMessage(translate('unknown_error')));
 }

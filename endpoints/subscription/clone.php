@@ -50,11 +50,36 @@ foreach (['end_date', 'ended_reason', 'plan_mode'] as $scheduleColumn) {
     $cloneStmt->bindValue(':' . $scheduleColumn, $value, $value === null ? SQLITE3_NULL : SQLITE3_TEXT);
 }
 
-if ($cloneStmt->execute()) {
+// The new row and the settings copied onto it are one unit: a failed copy
+// leaves no half-made clone behind.
+$cloned = @$db->exec('BEGIN IMMEDIATE') !== false;
+if ($cloned) {
+    $cloned = $cloneStmt->execute() !== false;
+}
+if ($cloned) {
+    $newId = $db->lastInsertRowID();
+
+    // Settings carried over as they are: the cancellation notice and an
+    // intro period (the reminder state starts fresh).
+    $carriedColumns = ['cancel_notice_mode', 'cancel_notice_value', 'cancel_notice_unit', 'min_term_end',
+        'intro_type', 'intro_price', 'intro_end_date', 'intro_notify_days'];
+    $columnList = implode(', ', $carriedColumns);
+    $carryStmt = $db->prepare("UPDATE subscriptions SET ($columnList) = (SELECT $columnList FROM subscriptions WHERE id = :sourceId AND user_id = :userId)
+        WHERE id = :newId AND user_id = :userId");
+    $carryStmt->bindValue(':sourceId', $subscriptionId, SQLITE3_INTEGER);
+    $carryStmt->bindValue(':newId', $newId, SQLITE3_INTEGER);
+    $carryStmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
+    $cloned = $carryStmt->execute() !== false && $db->exec('COMMIT') !== false;
+}
+if (!$cloned) {
+    @$db->exec('ROLLBACK');
+}
+
+if ($cloned) {
     $response = [
         "success" => true,
         "message" => translate('success', $i18n),
-        "id" => $db->lastInsertRowID()
+        "id" => $newId
     ];
     echo json_encode($response);
 } else {
@@ -65,4 +90,4 @@ if ($cloneStmt->execute()) {
 }
 
 $db->close();
-?>
+?>

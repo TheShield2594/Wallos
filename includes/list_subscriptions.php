@@ -4,6 +4,8 @@ require_once 'i18n/getlang.php';
 require_once __DIR__ . '/currency_rates.php';
 require_once __DIR__ . '/ui_helpers.php';
 require_once __DIR__ . '/payment_ledger.php';
+require_once __DIR__ . '/cancellation_deadline.php';
+require_once __DIR__ . '/households.php';
 
 function getBillingCycle($cycle, $frequency, $i18n)
 {
@@ -121,6 +123,69 @@ function formatDate($date, $lang = 'en')
     return $formattedDate;
 }
 
+/**
+ * Adds the subscriptions other household members share with the account to
+ * its own list, in the same order. Not while the list is filtered by
+ * category, member or payment method: those are the account's own records.
+ *
+ * @param array       $own   the account's rows, already sorted by SQL
+ * @param string      $sort  the column sorted on
+ * @param string      $order 'ASC' or 'DESC'
+ * @param string|null   $state  the inactive filter ('0', '1' or null)
+ * @param callable|null $filter fn(array $row): bool, the list's other filters
+ * @return array
+ */
+function mergeSharedSubscriptions(array $own, SQLite3 $db, $userId, $sort, $order, $disabledToBottom, $state = null, ?callable $filter = null)
+{
+    $shared = wallos_shared_subscriptions($db, $userId);
+    if ($state !== null && $state !== '') {
+        $shared = array_values(array_filter($shared, fn($row) => (string) $row['inactive'] === (string) $state));
+    }
+    if ($filter !== null) {
+        $shared = array_values(array_filter($shared, $filter));
+    }
+    if ($shared === []) {
+        return $own;
+    }
+    if (in_array($sort, ['payer_user_id', 'category_id', 'payment_method_id'], true)) {
+        // Grouped by the account's own records: shared rows get a group of their own.
+        return array_merge($own, $shared);
+    }
+
+    $merged = array_merge($own, $shared);
+    $direction = strtoupper($order) === 'DESC' ? -1 : 1;
+    usort($merged, function ($a, $b) use ($sort, $direction, $disabledToBottom) {
+        if ($disabledToBottom && $sort !== 'inactive' && (int) $a['inactive'] !== (int) $b['inactive']) {
+            return (int) $a['inactive'] <=> (int) $b['inactive'];
+        }
+        $left = $a[$sort] ?? null;
+        $right = $b[$sort] ?? null;
+        $compare = is_numeric($left) && is_numeric($right) ? (float) $left <=> (float) $right : strnatcasecmp((string) $left, (string) $right);
+        if ($compare !== 0) {
+            return $compare * $direction;
+        }
+        if ((int) $a['inactive'] !== (int) $b['inactive']) {
+            return (int) $a['inactive'] <=> (int) $b['inactive'];
+        }
+
+        return strcmp((string) $a['next_payment'], (string) $b['next_payment']);
+    });
+
+    return $merged;
+}
+
+/**
+ * List fields of a row another household member shares: their name, and the
+ * payment method by its owner's name.
+ */
+function addSharedRowFields(&$printRow, $subscription)
+{
+    $printRow['shared_owner_name'] = $subscription['shared_owner_name'] ?? null;
+    if ($printRow['shared_owner_name'] !== null) {
+        $printRow['payment_method_name'] = $subscription['shared_payment_method_name'] ?? '';
+    }
+}
+
 /*
   Extra fields the list rows need on top of the display values each caller
   already computes: the raw dates, and the monthly cost in the main currency
@@ -131,7 +196,7 @@ function addListRowFields(&$printRow, $subscription, $mainCurrencyId, $db)
     $printRow['next_payment_raw'] = $subscription['next_payment'];
     $printRow['start_date'] = $subscription['start_date'] ?? '';
     $printRow['cycle'] = (int) $subscription['cycle'];
-    $monthly = getPricePerMonth((int) $subscription['cycle'], (int) $subscription['frequency'], floatval($subscription['price']));
+    $monthly = getPricePerMonth((int) $subscription['cycle'], (int) $subscription['frequency'], wallos_current_price($subscription));
     if ($subscription['currency_id'] != $mainCurrencyId) {
         $monthly = getPriceConverted($monthly, $subscription['currency_id'], $db);
     }
@@ -149,6 +214,11 @@ function addListRowFields(&$printRow, $subscription, $mainCurrencyId, $db)
     $printRow['end_date'] = $subscription['end_date'] ?? null;
     $printRow['plan_total'] = isset($subscription['total_payments']) ? (int) $subscription['total_payments'] : null;
     $printRow['plan_made'] = (int) ($subscription['payments_made'] ?? 0);
+    $deadline = wallos_cancel_deadline($subscription);
+    $printRow['cancel_by'] = ($deadline !== null && $deadline['cancel_by'] >= date('Y-m-d')) ? $deadline['cancel_by'] : null;
+    $printRow['locked_until'] = wallos_cancel_locked_until($subscription);
+    $printRow['intro_type'] = wallos_intro_active($subscription) ? $subscription['intro_type'] : null;
+    $printRow['intro_end_date'] = $printRow['intro_type'] !== null ? $subscription['intro_end_date'] : null;
     if ($printRow['plan_total']) {
         $printRow['progress'] = (int) floor(min($printRow['plan_made'], $printRow['plan_total']) / $printRow['plan_total'] * 100);
     } else {
@@ -175,6 +245,12 @@ function listRowPlanText($subscription, $i18n, $lang)
 
 function listRowSubtitle($subscription, $i18n, $lang)
 {
+    // Someone else's shared subscription is named after its owner.
+    $sharedPrefix = !empty($subscription['shared_owner_name']) ? sprintf(translate('shared_by', $i18n), $subscription['shared_owner_name']) . ' · ' : '';
+    if ($sharedPrefix !== '') {
+        [$text, $tone] = listRowSubtitle(array_merge($subscription, ['shared_owner_name' => null]), $i18n, $lang);
+        return [$sharedPrefix . $text, $tone];
+    }
     $cycle = $subscription['billing_cycle'];
     if (!empty($subscription['ended'])) {
         $total = (int) ($subscription['plan_total'] ?? 0);
@@ -191,9 +267,24 @@ function listRowSubtitle($subscription, $i18n, $lang)
     if ($isOverdue) {
         return [translate('overdue', $i18n) . ' · ' . sprintf(translate('was_due', $i18n), formatDate($subscription['next_payment_raw'], $lang)), 'danger'];
     }
+    if (!empty($subscription['intro_type'])) {
+        // "Free trial · ends Nov 4" while the intro period runs.
+        $label = translate($subscription['intro_type'] === 'trial' ? 'free_trial' : 'intro_price', $i18n);
+        return [$label . ' · ' . sprintf(translate('ends_on', $i18n), formatDate($subscription['intro_end_date'], $lang)), 'accent'];
+    }
     $planText = listRowPlanText($subscription, $i18n, $lang);
     $schedule = $planText !== '' ? formatDate($subscription['next_payment_raw'], $lang) . ' · ' . $planText
         : $cycle . ' · ' . formatDate($subscription['next_payment_raw'], $lang);
+    // Cancellation notice: locked in by a minimum term, or the date to cancel by.
+    if (!empty($subscription['locked_until'])) {
+        $schedule .= ' · ' . sprintf(translate('locked_in_until', $i18n), formatDate($subscription['locked_until'], $lang));
+    } elseif (!empty($subscription['cancel_by'])) {
+        $schedule .= ' · ' . sprintf(translate('cancel_by', $i18n), formatDate($subscription['cancel_by'], $lang));
+        $daysLeft = (int) (new DateTime('today'))->diff(new DateTime($subscription['cancel_by']))->format('%r%a');
+        if ($daysLeft <= 14 && empty($subscription['paid_badge'])) {
+            return [$schedule, 'warning'];
+        }
+    }
     if (!empty($subscription['paid_badge'])) {
         return [sprintf(translate('paid_badge', $i18n), formatDate($subscription['paid_badge'], $lang)) . ' · ' . $schedule, 'success'];
     }
@@ -219,6 +310,9 @@ function printSubscriptions($subscriptions, $sort, $categories, $members, $i18n,
         if ($subscription['one_time'] && !$subscription['inactive']) {
             $key = 'lifetime';
             $title = translate('lifetime_purchases', $i18n);
+        } elseif ($groupByField && !empty($subscription['shared_owner_name'])) {
+            $key = 'shared';
+            $title = translate('shared_with_you', $i18n);
         } elseif (!empty($subscription['ended']) && !$groupByField) {
             $key = 'completed';
             $title = translate('completed_plans', $i18n);
@@ -245,7 +339,7 @@ function printSubscriptions($subscriptions, $sort, $categories, $members, $i18n,
     }
 
     // Fixed order for the state groups; field groups keep the sorted order.
-    $order = ['active' => 0, 'completed' => 2, 'disabled' => 3, 'lifetime' => 4];
+    $order = ['active' => 0, 'completed' => 2, 'shared' => 3, 'disabled' => 4, 'lifetime' => 5];
     uksort($groups, function ($a, $b) use ($order, $groups) {
         $orderA = $order[$a] ?? 1;
         $orderB = $order[$b] ?? 1;
@@ -267,7 +361,11 @@ function printSubscriptions($subscriptions, $sort, $categories, $members, $i18n,
                 foreach ($group['rows'] as $subscription) {
                     [$subtitle, $tone] = listRowSubtitle($subscription, $i18n, $lang);
                     $trailingSub = '';
-                    if (isset($subscription['original_price']) && $subscription['original_price'] != $subscription['price']) {
+                    $trailingStrike = false;
+                    if (!empty($subscription['intro_type']) && isset($subscription['regular_price']) && $subscription['regular_price'] != $subscription['price']) {
+                        $trailingSub = formatPrice($subscription['regular_price'], $subscription['currency_code'], $currencies);
+                        $trailingStrike = true;
+                    } elseif (isset($subscription['original_price']) && $subscription['original_price'] != $subscription['price']) {
                         $trailingSub = formatPrice($subscription['original_price'], $subscription['original_currency_code'], $currencies);
                     }
                     echo render_list_row([
@@ -280,6 +378,7 @@ function printSubscriptions($subscriptions, $sort, $categories, $members, $i18n,
                         'subtitle_tone' => $tone,
                         'trailing' => (!empty($subscription['variable_amount']) ? '≈ ' : '') . formatPrice($subscription['price'], $subscription['currency_code'], $currencies),
                         'trailing_sub' => $trailingSub,
+                        'trailing_sub_strike' => $trailingStrike,
                         'dim' => (bool) $subscription['inactive'],
                         'progress' => ($showProgress && !$subscription['inactive'] && !$subscription['one_time']) ? min(100, $subscription['progress']) : null,
                     ]);
@@ -324,4 +423,4 @@ if ($row !== false) {
     $mainCurrencyId = $currencies[1]['id'];
 }
 
-?>
+?>

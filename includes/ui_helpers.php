@@ -38,7 +38,8 @@ function render_tile($name, $logoSrc = '', $variantSrc = null, $textColor = null
 /*
   One row of a grouped list: tile, name, subtitle and a trailing value.
   $row keys: id, name, logo, logo_variant, logo_text_color, subtitle,
-  subtitle_tone ('' | 'danger' | 'warning' | 'success'), trailing, trailing_sub, dim (bool),
+  subtitle_tone ('' | 'danger' | 'warning' | 'success' | 'accent'), trailing, trailing_sub,
+  trailing_sub_strike (bool: the sub value is a price no longer charged), dim (bool),
   progress (null | 0..100). Name and text values are escaped here.
 */
 function render_list_row($row)
@@ -61,7 +62,11 @@ function render_list_row($row)
         <span class="list-row-trailing">
             <span class="list-row-value"><?= htmlspecialchars($row['trailing'] ?? '') ?></span>
             <?php if (!empty($row['trailing_sub'])) { ?>
-                <span class="list-row-value-sub"><?= htmlspecialchars($row['trailing_sub']) ?></span>
+                <?php if (!empty($row['trailing_sub_strike'])) { ?>
+                    <s class="list-row-value-sub"><?= htmlspecialchars($row['trailing_sub']) ?></s>
+                <?php } else { ?>
+                    <span class="list-row-value-sub"><?= htmlspecialchars($row['trailing_sub']) ?></span>
+                <?php } ?>
             <?php } ?>
         </span>
     </button>
@@ -85,6 +90,13 @@ function due_text($date, $lang, $i18n)
         return sprintf(translate('in_days', $i18n), $days);
     }
     return formatDate($date, $lang);
+}
+
+function days_until_date($date)
+{
+    $today = new DateTime('today');
+    $due = new DateTime($date);
+    return (int) $today->diff($due)->format('%r%a');
 }
 
 function days_overdue($date)

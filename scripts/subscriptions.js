@@ -49,6 +49,10 @@ function resetForm() {
   toggleEndsFields();
   toggleVariableAmount();
   toggleRenewFromAction();
+  toggleCancelNoticeFields(false);
+  delete document.querySelector("#next_payment").dataset.trialBase;
+  toggleIntroFields();
+  setSharedEditMode(null);
   closeLogoSearch();
   const deleteButton = document.querySelector("#deletesub");
   deleteButton.style = 'display: none';
@@ -102,8 +106,11 @@ function fillEditFormFields(subscription) {
   startDate.value = subscription.start_date;
   const nextPament = document.querySelector("#next_payment");
   nextPament.value = subscription.next_payment;
-  const cancellationDate = document.querySelector("#cancellation_date");
-  cancellationDate.value = subscription.cancellation_date;
+  document.querySelector("#cancellation_date").value = subscription.cancellation_date || '';
+  document.querySelector("#cancel_notice_mode").value = subscription.cancel_notice_mode || 'none';
+  document.querySelector("#cancel_notice_value").value = subscription.cancel_notice_value ?? '';
+  document.querySelector("#cancel_notice_unit").value = subscription.cancel_notice_unit || 'months';
+  document.querySelector("#min_term_end").value = subscription.min_term_end || '';
 
   const notes = document.querySelector("#notes");
   notes.value = subscription.notes;
@@ -131,7 +138,19 @@ function fillEditFormFields(subscription) {
   toggleEndsFields();
   toggleVariableAmount();
   toggleRenewFromAction();
-
+  toggleCancelNoticeFields(false);
+  document.querySelector("#intro_type").value = subscription.intro_type || 'none';
+  document.querySelector("#intro_price").value = subscription.intro_price ?? '';
+  document.querySelector("#intro_length_mode").value = subscription.intro_type ? 'date' : 'cycles';
+  document.querySelector("#intro_cycles").value = '';
+  document.querySelector("#intro_end_date").value = subscription.intro_end_date || '';
+  document.querySelector("#intro_notify_days").value = subscription.intro_notify_days || 3;
+  delete document.querySelector("#next_payment").dataset.trialBase;
+  toggleIntroFields();
+  const visibility = document.querySelector("#visibility");
+  if (visibility) {
+    visibility.value = subscription.shared ? 'household' : 'private';
+  }
   const notifyDaysBefore = document.querySelector("#notify_days_before");
   notifyDaysBefore.value = subscription.notify_days_before ?? 0;
   if (subscription.notify === 1) {
@@ -151,6 +170,9 @@ function fillEditFormFields(subscription) {
   const deleteButton = document.querySelector("#deletesub");
   deleteButton.style = 'display: block';
   deleteButton.setAttribute("onClick", `deleteSubscription(event, ${subscription.id})`);
+
+  // Last, so nothing above re-enables a locked field or shows Delete again.
+  setSharedEditMode(subscription);
 
   setFormOpen(true);
 }
@@ -596,6 +618,10 @@ document.addEventListener('DOMContentLoaded', function () {
       if (freq) freq.value = 1;
       const cancellationDate = document.querySelector("#cancellation_date");
       if (cancellationDate) cancellationDate.value = "";
+      const cancelNoticeMode = document.querySelector("#cancel_notice_mode");
+      if (cancelNoticeMode) cancelNoticeMode.value = "none";
+      const introType = document.querySelector("#intro_type");
+      if (introType) introType.value = "none";
       const notifyDays = document.querySelector("#notify_days_before");
       if (notifyDays) notifyDays.value = -1;
     }
@@ -889,6 +915,18 @@ function toggleOneTimeCycleUI(isOneTime) {
   const labelOnetime = document.querySelector("#next-payment-label-onetime");
   const notificationsGroup = document.querySelector("#notifications-group");
   const notifyDaysCancellationGroup = document.querySelector("#notify-days-cancellation-group");
+  const cancelNoticeGroup = document.querySelector("#cancel-notice-group");
+  if (cancelNoticeGroup) cancelNoticeGroup.classList.toggle('hide', isOneTime);
+  const introGroup = document.querySelector("#intro-group");
+  if (introGroup) introGroup.classList.toggle('hide', isOneTime);
+  ['#intro_type', '#intro_price', '#intro_length_mode', '#intro_cycles', '#intro_end_date', '#intro_notify_days'].forEach((selector) => {
+    const field = document.querySelector(selector);
+    if (field) field.disabled = isOneTime;
+  });
+  ['#cancel_notice_mode', '#cancellation_date', '#cancel_notice_value', '#cancel_notice_unit', '#min_term_end'].forEach((selector) => {
+    const field = document.querySelector(selector);
+    if (field) field.disabled = isOneTime;
+  });
   const notificationsCheckbox = document.querySelector("#notifications");
   const endsGroup = document.querySelector("#ends-group");
   const renewFromActionGroup = document.querySelector("#renew-from-action-group");
@@ -1193,6 +1231,22 @@ document.addEventListener('DOMContentLoaded', function () {
     const field = document.querySelector(selector);
     if (field) {
       field.addEventListener('change', updateEndsHint);
+      field.addEventListener('change', updateCancelNoticeHint);
+      field.addEventListener('change', updateIntroHint);
+    }
+  });
+  if (document.querySelector("#cancel_notice_mode")) {
+    toggleCancelNoticeFields(false);
+  }
+  if (document.querySelector("#intro_type")) {
+    toggleIntroFields();
+  }
+  // A next payment or start date the user types is the new base for the
+  // trial's cycles (events from code do not fire these listeners).
+  ['#next_payment', '#start_date'].forEach((selector) => {
+    const field = document.querySelector(selector);
+    if (field) {
+      field.addEventListener('input', () => { delete document.querySelector("#next_payment").dataset.trialBase; });
     }
   });
   if (document.querySelector("#ends_mode")) {
@@ -1200,3 +1254,181 @@ document.addEventListener('DOMContentLoaded', function () {
     toggleRenewFromAction();
   }
 });
+
+/*
+  Cancellation reminder: none, a fixed date, or a notice period before each
+  renewal (mirrors includes/cancellation_deadline.php).
+*/
+function toggleCancelNoticeFields(fromUser) {
+  const mode = document.querySelector("#cancel_notice_mode").value;
+  document.querySelector("#cancellation-date-field").classList.toggle('hide', mode !== 'fixed');
+  document.querySelector("#cancel-notice-field").classList.toggle('hide', mode !== 'before_renewal');
+  document.querySelector("#min-term-field").classList.toggle('hide', mode !== 'before_renewal');
+  document.querySelector("#cancellation_date").required = mode === 'fixed';
+  const value = document.querySelector("#cancel_notice_value");
+  value.required = mode === 'before_renewal';
+  if (fromUser && mode === 'before_renewal' && value.value === '') {
+    // Prefill the default notice from Settings.
+    const group = document.querySelector("#cancel-notice-group");
+    if (group.dataset.defaultValue !== '') {
+      value.value = group.dataset.defaultValue;
+      document.querySelector("#cancel_notice_unit").value = group.dataset.defaultUnit || 'months';
+    }
+  }
+  updateCancelNoticeHint();
+}
+
+function subtractNotice(date, value, unit) {
+  if (unit === 'months') {
+    return addMonthsClamped(date, -value);
+  }
+  const result = new Date(date);
+  result.setDate(result.getDate() - (unit === 'weeks' ? 7 * value : value));
+  return result;
+}
+
+// "Cancel by Nov 12, 2026 to avoid the renewal on Dec 12, 2026"
+function updateCancelNoticeHint() {
+  const hint = document.querySelector("#cancel-notice-hint");
+  if (!hint) {
+    return;
+  }
+  hint.textContent = '';
+  if (document.querySelector("#cancel_notice_mode").value !== 'before_renewal') {
+    return;
+  }
+  const valueField = document.querySelector("#cancel_notice_value").value;
+  const value = Number(valueField);
+  const schedule = formSchedule();
+  if (!schedule.next || valueField === '' || !Number.isInteger(value) || value < 0) {
+    return;
+  }
+  const minTermEnd = parseFormDate(document.querySelector("#min_term_end").value);
+  let renewal = schedule.next;
+  let steps = 0;
+  while (minTermEnd && renewal && renewal < minTermEnd && steps < 10000) {
+    steps++;
+    renewal = stepOccurrence(schedule.next, schedule.cycle, schedule.frequency, steps, schedule.anchorDay);
+  }
+  if (!renewal) {
+    return;
+  }
+  const cancelBy = subtractNotice(renewal, value, document.querySelector("#cancel_notice_unit").value);
+  const format = (date) => date.toLocaleDateString(window.lang || 'en', { day: 'numeric', month: 'short', year: 'numeric' });
+  if (minTermEnd && schedule.next < minTermEnd) {
+    hint.textContent = hint.dataset.locked
+      .replace('%1$s', format(minTermEnd)).replace('%2$s', format(cancelBy)).replace('%3$s', format(renewal));
+  } else {
+    hint.textContent = hint.dataset.cancelBy.replace('%1$s', format(cancelBy)).replace('%2$s', format(renewal));
+  }
+}
+
+/*
+  Free trial or intro price (mirrors includes/intro_pricing.php): N billing
+  cycles from the start date, or until a date that is the first payment at
+  the regular price. For a trial that date is also the next payment.
+*/
+function toggleIntroFields() {
+  const type = document.querySelector("#intro_type").value;
+  const lengthMode = document.querySelector("#intro_length_mode").value;
+  const active = type !== 'none';
+  document.querySelector("#intro-price-field").classList.toggle('hide', type !== 'promo');
+  document.querySelector("#intro-length-fields").classList.toggle('hide', !active);
+  document.querySelector("#intro-notify-field").classList.toggle('hide', !active);
+  document.querySelector("#intro-cycles-field").classList.toggle('hide', lengthMode !== 'cycles');
+  document.querySelector("#intro-end-field").classList.toggle('hide', lengthMode !== 'date');
+  document.querySelector("#intro_price").required = type === 'promo';
+  document.querySelector("#intro_cycles").required = active && lengthMode === 'cycles';
+  document.querySelector("#intro_end_date").required = active && lengthMode === 'date';
+  updateIntroHint();
+}
+
+function introEndDate() {
+  const type = document.querySelector("#intro_type").value;
+  if (type === 'none') {
+    return null;
+  }
+  if (document.querySelector("#intro_length_mode").value === 'date') {
+    return parseFormDate(document.querySelector("#intro_end_date").value);
+  }
+  const cycles = Number(document.querySelector("#intro_cycles").value);
+  if (!Number.isInteger(cycles) || cycles < 1) {
+    return null;
+  }
+  const schedule = formSchedule();
+  // Without a start date the cycles count from the next payment the user
+  // entered, kept aside because a trial then overwrites #next_payment.
+  const nextField = document.querySelector("#next_payment");
+  if (!nextField.dataset.trialBase) {
+    nextField.dataset.trialBase = nextField.value;
+  }
+  const from = parseFormDate(document.querySelector("#start_date").value) || parseFormDate(nextField.dataset.trialBase);
+  if (!from) {
+    return null;
+  }
+  const startAnchor = ['3', '4'].includes(String(schedule.cycle)) ? from.getDate() : null;
+  return stepOccurrence(from, schedule.cycle, schedule.frequency, cycles, startAnchor);
+}
+
+// "Free until Dec 4, 2026; the first payment at the regular price is then."
+function updateIntroHint() {
+  const hint = document.querySelector("#intro-hint");
+  if (!hint) {
+    return;
+  }
+  hint.textContent = '';
+  const type = document.querySelector("#intro_type").value;
+  const end = introEndDate();
+  if (!end) {
+    return;
+  }
+  const formatted = end.toLocaleDateString(window.lang || 'en', { day: 'numeric', month: 'short', year: 'numeric' });
+  hint.textContent = (type === 'trial' ? hint.dataset.trial : hint.dataset.promo).replace('%s', formatted);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  if (type === 'trial' && end >= today) {
+    // A trial's next payment is the first paid one.
+    const next = document.querySelector("#next_payment");
+    const value = formatFormDate(end);
+    if (next.value !== value) {
+      if (!next.dataset.trialBase) {
+        next.dataset.trialBase = next.value;
+      }
+      next.value = value;
+      updateEndsHint();
+      updateCancelNoticeHint();
+    }
+  }
+}
+
+/*
+  Editing a subscription another household member shares: its currency,
+  category, payer, payment method, reminders and sharing are the owner's,
+  so those fields are shown but locked (the server keeps them as stored).
+*/
+function setSharedEditMode(subscription) {
+  const shared = !!subscription && (subscription.access || 'owner') !== 'owner';
+  ['#currency', '#category', '#payer_user', '#payment_method', '#visibility', '#notifications', '#notify_days_before',
+    '#cancel_notice_mode', '#cancellation_date', '#cancel_notice_value', '#cancel_notice_unit', '#min_term_end',
+    '#replacement_subscription_id'].forEach((selector) => {
+    const field = document.querySelector(selector);
+    if (field) {
+      field.disabled = shared || (selector === '#notify_days_before' && !document.querySelector('#notifications').checked);
+    }
+  });
+  // Without the owner's currency the prices were converted for display:
+  // they are shown but kept as stored (readOnly, so they are still sent).
+  const lockPrices = shared && subscription.price_editable === false;
+  document.querySelector("#price").readOnly = lockPrices;
+  document.querySelector("#intro_price").readOnly = lockPrices;
+  ['#visibility-group', '#cancel-notice-group'].forEach((selector) => {
+    const group = document.querySelector(selector);
+    if (group) {
+      group.classList.toggle('is-locked', shared);
+    }
+  });
+  const deleteButton = document.querySelector("#deletesub");
+  if (shared) {
+    deleteButton.style = 'display: none';
+  }
+}
