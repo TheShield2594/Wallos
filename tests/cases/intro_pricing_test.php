@@ -99,17 +99,23 @@ wallos_test('ended intro periods convert to the regular price and are announced 
     }
 
     assert_same(1, wallos_convert_ended_intros($db, '2026-12-04'), 'only the active, ended one converts');
+    assert_same(0, wallos_convert_ended_intros($db, '2026-12-05'), 'and only once');
     $rows = [];
-    $result = $db->query('SELECT name, intro_type, intro_converted_on FROM subscriptions ORDER BY name');
+    $result = $db->query('SELECT * FROM subscriptions ORDER BY name');
     while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
         $rows[$row['name']] = $row;
     }
-    assert_same(null, $rows['Ended trial']['intro_type'], 'the intro is cleared');
     assert_same('2026-12-04', $rows['Ended trial']['intro_converted_on'], 'the conversion day is kept for the notice');
-    assert_same('promo', $rows['Running promo']['intro_type'], 'a running promo stays');
-    assert_same('trial', $rows['Cancelled trial']['intro_type'], 'a cancelled trial keeps its intro (it is a saving)');
+    assert_same('trial', $rows['Ended trial']['intro_type'], 'the intro is kept, so earlier payments keep their price');
+    assert_same(0.0, wallos_price_on($rows['Ended trial'], '2026-11-20'), 'a payment inside the trial is still free');
+    assert_same(12.0, wallos_current_price($rows['Ended trial'], new DateTime('2026-12-05')), 'the regular price applies now');
+    assert_same(null, $rows['Running promo']['intro_converted_on'], 'a running promo is not converted');
+    assert_same(null, $rows['Cancelled trial']['intro_converted_on'], 'a cancelled trial is not converted');
+    assert_true(wallos_is_cancelled_trial($rows['Cancelled trial']), 'and counts as a cancelled trial');
+    assert_true(!wallos_is_cancelled_trial(array_merge($rows['Ended trial'], ['inactive' => 1])),
+        'a subscription disabled after its trial converted is not a cancelled trial');
 
-    $converted = intro_sub(['intro_type' => null, 'intro_end_date' => null, 'intro_converted_on' => '2026-12-04']);
+    $converted = intro_sub(['intro_end_date' => '2026-12-04', 'intro_converted_on' => '2026-12-04']);
     assert_true(wallos_intro_converted_due($converted, '2026-12-05'), 'the conversion is announced');
     assert_true(!wallos_intro_converted_due(array_merge($converted, ['intro_notified_for' => 'converted:2026-12-04']), '2026-12-05'), 'once');
     assert_true(!wallos_intro_converted_due($converted, '2026-12-20'), 'and not weeks later');
@@ -136,6 +142,21 @@ wallos_test('the renewal cron records intro cycles at the intro price before con
     $db->close();
 });
 
+wallos_test('a cycle the cron could not record before the conversion keeps its intro price', function () {
+    require_once WALLOS_ROOT . '/includes/payment_ledger.php';
+    $db = wallos_test_open_database();
+    wallos_test_create_user($db, 1, 'alice');
+    $db->exec("INSERT INTO subscriptions (id, user_id, name, price, currency_id, next_payment, start_date, cycle, frequency, auto_renew, inactive, intro_type, intro_price, intro_end_date)
+        VALUES (8, 1, 'Promo', 12, " . wallos_test_currency_id(1, 0) . ", '2026-11-04', '2026-10-04', 3, 1, 1, 0, 'promo', 1.5, '2026-12-04')");
+
+    // The conversion runs first (the advance failed that run), the cycle is recorded later.
+    wallos_convert_ended_intros($db, '2026-12-10');
+    wallos_apply_schedule_advance($db, wallos_ledger_load_subscription($db, 1, 8), new DateTime('2026-12-10'));
+    assert_same(1.5, $db->querySingle("SELECT amount FROM subscription_payments WHERE subscription_id = 8 AND due_date = '2026-11-04'"),
+        'the November payment is still recorded at the promo price');
+    $db->close();
+});
+
 wallos_test('save input works out the end date from cycles and moves a trial to its first paid date', function () {
     $schedule = ['cycle' => 3, 'frequency' => 1, 'start_date' => '2099-01-31', 'next_payment' => '2099-01-31'];
 
@@ -154,4 +175,6 @@ wallos_test('save input works out the end date from cycles and moves a trial to 
     assert_true(wallos_intro_fields_from_input(['intro_type' => 'promo', 'intro_end_date' => '2099-06-01', 'intro_price' => '-1'], $schedule)['error'] !== null, 'negative price');
     assert_true(wallos_intro_fields_from_input(['intro_type' => 'promo', 'intro_end_date' => 'soon', 'intro_price' => '1'], $schedule)['error'] !== null, 'bad date');
     assert_true(wallos_intro_fields_from_input(['intro_type' => 'gift'], $schedule)['error'] !== null, 'unknown type');
+    assert_true(wallos_intro_fields_from_input(['intro_type' => 'trial', 'intro_end_date' => '2099-06-01', 'intro_notify_days' => '0'], $schedule)['error'] !== null,
+        'a reminder on the end date itself is refused: the regular price already applies then');
 });

@@ -13,8 +13,11 @@
                        reminder.
     intro_notified_for The intro_end_date the "ending" reminder was sent for,
                        or 'converted:<date>' once the conversion was announced.
-    intro_converted_on The day the renewal cron ended the intro period and
-                       the regular price took over (shown once, notified once).
+    intro_converted_on The day the renewal cron saw the intro period end and
+                       the regular price take over (notified once). The intro
+                       columns are kept: prices are decided per payment date,
+                       so earlier payments keep their intro price for a retry
+                       of a missed cycle or an undone payment.
 
   While an intro period runs:
     - the price of a payment is wallos_price_on() (intro price before
@@ -158,19 +161,21 @@ function wallos_intro_converted_due(array $subscription, $today)
 }
 
 /**
- * Ends every intro period that has run its course: the intro columns are
- * cleared so the regular price applies, and intro_converted_on records the
- * day for the one-off "converted" notice. Disabled subscriptions keep theirs
- * (a cancelled trial).
+ * Records the end of every intro period that has run its course, for the
+ * one-off "converted" notice. The intro columns stay: wallos_price_on()
+ * prices each payment by its date, so the regular price applies from the end
+ * date on, while a cycle the cron could not record yet, or a payment undone
+ * later, still gets the intro price it was due at. Disabled subscriptions
+ * are left alone (a cancelled trial).
  *
  * @param string $today Y-m-d
  * @return int how many were converted
  */
 function wallos_convert_ended_intros(SQLite3 $db, $today)
 {
-    $stmt = $db->prepare("UPDATE subscriptions SET intro_type = NULL, intro_price = NULL, intro_end_date = NULL,
-            intro_converted_on = :today
-        WHERE intro_type IS NOT NULL AND intro_end_date IS NOT NULL AND intro_end_date <= :today AND inactive = 0");
+    $stmt = $db->prepare("UPDATE subscriptions SET intro_converted_on = :today
+        WHERE intro_type IS NOT NULL AND intro_end_date IS NOT NULL AND intro_end_date <= :today
+          AND inactive = 0 AND intro_converted_on IS NULL");
     $stmt->bindValue(':today', $today, SQLITE3_TEXT);
     $stmt->execute();
 
@@ -227,7 +232,8 @@ function wallos_intro_fields_from_input(array $input, array $schedule)
     }
 
     $notifyDays = $input['intro_notify_days'] ?? 3;
-    if (!is_numeric($notifyDays) || (int) $notifyDays < 0 || (int) $notifyDays > 90) {
+    // At least a day: on the end date the regular price already applies.
+    if (!is_numeric($notifyDays) || (int) $notifyDays < 1 || (int) $notifyDays > 90) {
         return ['error' => 'Invalid intro reminder.', 'fields' => [], 'next_payment' => null];
     }
 
@@ -245,14 +251,24 @@ function wallos_intro_fields_from_input(array $input, array $schedule)
 }
 
 /**
+ * Whether a disabled subscription is a cancelled trial: disabled with an
+ * intro period that never converted to the regular price.
+ */
+function wallos_is_cancelled_trial(array $subscription)
+{
+    return (int) ($subscription['inactive'] ?? 0) === 1 && wallos_has_intro($subscription)
+        && empty($subscription['intro_converted_on']);
+}
+
+/**
  * Stores intro fields on a subscription. A changed end date can be reminded
- * again; the converted marker is cleared when a new intro period is set.
+ * again; the converted marker is cleared when the intro period changes.
  */
 function wallos_store_intro_fields(SQLite3 $db, $subscriptionId, $userId, array $fields)
 {
     $stmt = $db->prepare('UPDATE subscriptions SET intro_type = :type, intro_price = :price, intro_end_date = :endDate,
             intro_notify_days = :notifyDays,
-            intro_converted_on = CASE WHEN :type IS NULL THEN intro_converted_on ELSE NULL END
+            intro_converted_on = CASE WHEN :type IS NOT NULL AND intro_end_date IS NOT :endDate THEN NULL ELSE intro_converted_on END
         WHERE id = :id AND user_id = :userId');
     $stmt->bindValue(':type', $fields['intro_type'], $fields['intro_type'] === null ? SQLITE3_NULL : SQLITE3_TEXT);
     $stmt->bindValue(':price', $fields['intro_price'], $fields['intro_price'] === null ? SQLITE3_NULL : SQLITE3_FLOAT);

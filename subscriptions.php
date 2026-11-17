@@ -499,7 +499,6 @@ if ($db->querySingle("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND 
       <div class="intro-row hide" id="intro-notify-field">
         <label for="intro_notify_days"><?= translate('remind_me_before_it_ends', $i18n) ?></label>
         <select id="intro_notify_days" name="intro_notify_days">
-          <option value="0"><?= translate('on_due_date', $i18n) ?></option>
           <option value="1">1 <?= translate('day_before', $i18n) ?></option>
           <?php for ($i = 2; $i <= 30; $i++) { ?>
             <option value="<?= $i ?>" <?= $i === 3 ? 'selected' : '' ?>><?= $i ?> <?= translate('days_before', $i18n) ?></option>

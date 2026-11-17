@@ -307,7 +307,12 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" || $_SERVER["REQUEST_METHOD"] === "GET
         $subscriptionToReturn['payment_method_name'] = isset($paymentMethods[$subscription['payment_method_id']]) ? $paymentMethods[$subscription['payment_method_id']] : 'Unknown payment method';
         $deadline = wallos_cancel_deadline($subscription);
         $subscriptionToReturn['cancel_by'] = $deadline['cancel_by'] ?? null;
+        // The price charged today (an intro price during a trial or promo),
+        // converted like price when the request asks for it.
         $subscriptionToReturn['current_price'] = wallos_current_price($subscription);
+        if (isset($_REQUEST['convert_currency']) && $_REQUEST['convert_currency'] === 'true' && $canConvertCurrency && $subscription['currency_id'] != $userCurrencyId) {
+            $subscriptionToReturn['current_price'] = getPriceConverted($subscriptionToReturn['current_price'], $subscription['currency_id'], $db);
+        }
         $subscriptionsToReturn[] = $subscriptionToReturn;
     }
 

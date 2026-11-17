@@ -106,9 +106,9 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
       } elseif ($type === 'cancellation') {
         // One-time purchases are never treated as cancellable, matching the
         // dashboard, statistics page and cancellation notification cron.
-        $notifConditions[] = "(cancellation_date IS NOT NULL AND cancellation_date != '' AND cycle != 5)";
+        $notifConditions[] = "(cycle != 5 AND (COALESCE(cancel_notice_mode, '') = 'before_renewal' OR (cancellation_date IS NOT NULL AND cancellation_date != '' AND COALESCE(cancel_notice_mode, 'fixed') = 'fixed')))";
       } elseif ($type === 'none') {
-        $notifConditions[] = "(notify = 0 AND (cancellation_date IS NULL OR cancellation_date = '' OR cycle = 5))";
+        $notifConditions[] = "(notify = 0 AND (cycle = 5 OR NOT (COALESCE(cancel_notice_mode, '') = 'before_renewal' OR (cancellation_date IS NOT NULL AND cancellation_date != '' AND COALESCE(cancel_notice_mode, 'fixed') = 'fixed'))))";
       }
     }
     if (!empty($notifConditions)) {
@@ -178,7 +178,29 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
   // it is filtered by the account's own categories, members or payment methods.
   $listFiltered = !empty($_GET['categories']) || !empty($_GET['payments']) || !empty($_GET['members']);
   if (!$listFiltered) {
-    $subscriptions = mergeSharedSubscriptions($subscriptions ?? [], $db, $userId, $sort, $order, $settings['disabledToBottom'] === 'true', $_GET['state'] ?? null);
+    // The renewal-type and notification filters apply to shared rows as
+    // they do to the account's own (see the SQL above).
+    $renewalFilter = $_GET['renewalType'] ?? '';
+    $notificationFilter = array_filter(explode(',', $_GET['notifications'] ?? ''), fn($t) => in_array($t, ['reminder', 'cancellation', 'none'], true));
+    $sharedFilter = function ($row) use ($renewalFilter, $notificationFilter) {
+      if ($renewalFilter !== '') {
+        $isOneTime = (int) $row['cycle'] === 5;
+        if ($renewalFilter === 'onetime' ? !$isOneTime : ($isOneTime || (string) $row['auto_renew'] !== (string) $renewalFilter)) {
+          return false;
+        }
+      }
+      if ($notificationFilter !== []) {
+        $hasCancellation = (int) $row['cycle'] !== 5 && wallos_cancel_mode($row) !== 'none';
+        $matches = (in_array('reminder', $notificationFilter, true) && (int) $row['notify'] === 1)
+          || (in_array('cancellation', $notificationFilter, true) && $hasCancellation)
+          || (in_array('none', $notificationFilter, true) && (int) $row['notify'] === 0 && !$hasCancellation);
+        if (!$matches) {
+          return false;
+        }
+      }
+      return true;
+    };
+    $subscriptions = mergeSharedSubscriptions($subscriptions ?? [], $db, $userId, $sort, $order, $settings['disabledToBottom'] === 'true', $_GET['state'] ?? null, $sharedFilter);
   }
 
   foreach ($subscriptions as $subscription) {

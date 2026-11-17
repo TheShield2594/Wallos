@@ -25,6 +25,12 @@ if ($subscription === false) {
     die(json_encode(["success" => false, "message" => translate("error", $i18n)]));
 }
 
+// An amount a household member entered was in the currency they were shown;
+// the ledger keeps the owner's currency.
+if ($amount !== null && is_numeric($amount) && $subscription['access'] !== 'owner') {
+    $amount = (float) $amount / wallos_household_display_factor($db, $userId, $subscription['currency_id']);
+}
+
 $outcome = wallos_mark_paid($db, $subscription, new DateTime('today'), $amount);
 if (!$outcome['success']) {
     $message = ($outcome['error'] ?? '') === 'already_paid' ? translate('payment_already_recorded', $i18n) : translate('error', $i18n);

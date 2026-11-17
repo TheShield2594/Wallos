@@ -112,23 +112,52 @@ function api_extra_fields($existing, $cycle)
         }
     }
 
+    // Returns false when a write failed; the caller rolls the save back.
     return ['error' => null, 'apply' => function ($db, $subscriptionId, $userId) use ($cancel, $intro, $shared) {
-        wallos_store_cancel_fields($db, $subscriptionId, $userId, $cancel['fields']);
-        if ($shared !== null) {
-            wallos_set_subscription_sharing($db, $userId, $subscriptionId, $shared);
+        if (!wallos_store_cancel_fields($db, $subscriptionId, $userId, $cancel['fields'])) {
+            return false;
+        }
+        if ($shared !== null && !wallos_set_subscription_sharing($db, $userId, $subscriptionId, $shared)['success']) {
+            return false;
         }
         if ($intro !== null) {
-            wallos_store_intro_fields($db, $subscriptionId, $userId, $intro['fields']);
+            if (!wallos_store_intro_fields($db, $subscriptionId, $userId, $intro['fields'])) {
+                return false;
+            }
             if ($intro['next_payment'] !== null) {
                 // A trial's next payment is its first paid one.
                 $stmt = $db->prepare('UPDATE subscriptions SET next_payment = :next WHERE id = :id AND user_id = :userId');
                 $stmt->bindValue(':next', $intro['next_payment'], SQLITE3_TEXT);
                 $stmt->bindValue(':id', (int) $subscriptionId, SQLITE3_INTEGER);
                 $stmt->bindValue(':userId', (int) $userId, SQLITE3_INTEGER);
-                $stmt->execute();
+                if ($stmt->execute() === false) {
+                    return false;
+                }
             }
         }
+
+        return true;
     }];
+}
+
+/**
+ * Runs the row write and the extra-field writes as one transaction.
+ *
+ * @param callable $writeRow fn(): int|false the saved subscription id
+ * @return int|false the id, or false when anything failed (nothing is saved)
+ */
+function api_save_atomically(SQLite3 $db, callable $writeRow, callable $apply, $userId)
+{
+    if (@$db->exec('BEGIN IMMEDIATE') === false) {
+        return false;
+    }
+    $id = $writeRow();
+    if ($id === false || !$apply($db, $id, $userId) || $db->exec('COMMIT') === false) {
+        $db->exec('ROLLBACK');
+        return false;
+    }
+
+    return $id;
 }
 
 header('Content-Type: application/json; charset=UTF-8');
@@ -683,9 +712,10 @@ switch ($action) {
         $stmtInsert->bindParam(':autoRenew', $autoRenew, SQLITE3_INTEGER);
         $stmtInsert->bindParam(':startDate', $startDate, SQLITE3_TEXT);
 
-        if ($stmtInsert->execute()) {
-            $newSubscriptionId = $db->lastInsertRowID();
-            ($extraFields['apply'])($db, $newSubscriptionId, $userId);
+        $newSubscriptionId = api_save_atomically($db, function () use ($db, $stmtInsert) {
+            return $stmtInsert->execute() !== false ? $db->lastInsertRowID() : false;
+        }, $extraFields['apply'], $userId);
+        if ($newSubscriptionId !== false) {
             $addResponse = [
                 'success' => true,
                 'title' => 'Subscription added',
@@ -1025,8 +1055,10 @@ switch ($action) {
         $stmtUpdate->bindParam(':id', $subscriptionId, SQLITE3_INTEGER);
         $stmtUpdate->bindParam(':userId', $userId, SQLITE3_INTEGER);
 
-        if ($stmtUpdate->execute()) {
-            ($extraFields['apply'])($db, $subscriptionId, $userId);
+        $updated = api_save_atomically($db, function () use ($stmtUpdate, $subscriptionId) {
+            return $stmtUpdate->execute() !== false ? (int) $subscriptionId : false;
+        }, $extraFields['apply'], $userId);
+        if ($updated !== false) {
             $updateResponse = [
                 'success' => true,
                 'title' => 'Subscription updated',

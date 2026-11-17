@@ -298,6 +298,33 @@ function wallos_household_localize_currency(SQLite3 $db, array $row, array $view
 }
 
 /**
+ * How an amount in the owner's currency is shown to a viewer: 1.0 when the
+ * viewer has a currency of the same code (shown as it is), otherwise the
+ * factor that converts it into the owner's main currency (see
+ * wallos_household_localize_currency()). Dividing by it turns an amount the
+ * viewer entered back into the owner's currency.
+ *
+ * @return float
+ */
+function wallos_household_display_factor(SQLite3 $db, $viewerId, $ownerCurrencyId)
+{
+    $stmt = $db->prepare('SELECT code, rate FROM currencies WHERE id = :id');
+    $stmt->bindValue(':id', (int) $ownerCurrencyId, SQLITE3_INTEGER);
+    $result = $stmt->execute();
+    $currency = $result ? $result->fetchArray(SQLITE3_ASSOC) : false;
+    if ($currency === false) {
+        return 1.0;
+    }
+    $viewerCurrencies = wallos_household_viewer_currencies($db, $viewerId);
+    if (isset($viewerCurrencies['by_code'][$currency['code']])) {
+        return 1.0;
+    }
+    $rate = (float) $currency['rate'];
+
+    return $rate > 0 ? 1 / $rate : 1.0;
+}
+
+/**
  * @return array{success: bool, error?: string, household_id?: int}
  */
 function wallos_household_create(SQLite3 $db, $userId, $name)
@@ -381,15 +408,20 @@ function wallos_household_respond(SQLite3 $db, $userId, $householdId, $accept)
     if (!$accept) {
         $stmt = $db->prepare('DELETE FROM household_members WHERE household_id = :householdId AND user_id = :userId');
     } else {
-        if (wallos_household_membership($db, $userId) !== null) {
-            return ['success' => false, 'error' => 'already_in_household'];
-        }
-        $stmt = $db->prepare("UPDATE household_members SET status = 'active' WHERE household_id = :householdId AND user_id = :userId");
+        // One statement checks and activates, so two accepts racing from
+        // different sessions cannot both succeed.
+        $stmt = $db->prepare("UPDATE household_members SET status = 'active'
+            WHERE household_id = :householdId AND user_id = :userId AND status = 'pending'
+              AND NOT EXISTS (SELECT 1 FROM household_members WHERE user_id = :userId AND status = 'active')
+              AND NOT EXISTS (SELECT 1 FROM households WHERE owner_user_id = :userId)");
     }
     $stmt->bindValue(':householdId', (int) $householdId, SQLITE3_INTEGER);
     $stmt->bindValue(':userId', (int) $userId, SQLITE3_INTEGER);
     if ($stmt->execute() === false) {
         return ['success' => false, 'error' => 'write_failed'];
+    }
+    if ($accept && $db->changes() === 0) {
+        return ['success' => false, 'error' => 'already_in_household'];
     }
     if ($accept) {
         // One household at a time: the other invites lapse.
@@ -430,18 +462,46 @@ function wallos_household_set_role(SQLite3 $db, $ownerId, $memberUserId, $role)
  */
 function wallos_household_drop_member(SQLite3 $db, $householdId, $memberUserId)
 {
-    $stmt = $db->prepare('DELETE FROM household_members WHERE household_id = :householdId AND user_id = :userId');
-    $stmt->bindValue(':householdId', (int) $householdId, SQLITE3_INTEGER);
-    $stmt->bindValue(':userId', (int) $memberUserId, SQLITE3_INTEGER);
-    $stmt->execute();
-    $removed = $db->changes() > 0;
+    // One transaction: a member is never removed while their subscriptions
+    // still name the household (a later rejoin would share them again).
+    return wallos_household_transaction($db, function () use ($db, $householdId, $memberUserId) {
+        $stmt = $db->prepare('DELETE FROM household_members WHERE household_id = :householdId AND user_id = :userId');
+        $stmt->bindValue(':householdId', (int) $householdId, SQLITE3_INTEGER);
+        $stmt->bindValue(':userId', (int) $memberUserId, SQLITE3_INTEGER);
+        if ($stmt->execute() === false || $db->changes() === 0) {
+            return false;
+        }
 
-    $stmt = $db->prepare('UPDATE subscriptions SET shared_household_id = NULL WHERE user_id = :userId AND shared_household_id = :householdId');
-    $stmt->bindValue(':userId', (int) $memberUserId, SQLITE3_INTEGER);
-    $stmt->bindValue(':householdId', (int) $householdId, SQLITE3_INTEGER);
-    $stmt->execute();
+        $stmt = $db->prepare('UPDATE subscriptions SET shared_household_id = NULL WHERE user_id = :userId AND shared_household_id = :householdId');
+        $stmt->bindValue(':userId', (int) $memberUserId, SQLITE3_INTEGER);
+        $stmt->bindValue(':householdId', (int) $householdId, SQLITE3_INTEGER);
 
-    return $removed;
+        return $stmt->execute() !== false;
+    });
+}
+
+/**
+ * Runs $work in one write transaction; anything but true rolls it back.
+ *
+ * @return bool
+ */
+function wallos_household_transaction(SQLite3 $db, callable $work)
+{
+    if (@$db->exec('BEGIN IMMEDIATE') === false) {
+        return false;
+    }
+    try {
+        $ok = $work() === true;
+    } catch (Throwable $error) {
+        $db->exec('ROLLBACK');
+        throw $error;
+    }
+    if (!$ok || $db->exec('COMMIT') === false) {
+        $db->exec('ROLLBACK');
+        return false;
+    }
+
+    return true;
 }
 
 /**
@@ -474,9 +534,8 @@ function wallos_household_leave(SQLite3 $db, $userId)
     if ($membership['role'] === 'owner') {
         return ['success' => false, 'error' => 'owner_cannot_leave'];
     }
-    wallos_household_drop_member($db, $membership['id'], $userId);
-
-    return ['success' => true];
+    return wallos_household_drop_member($db, $membership['id'], $userId)
+        ? ['success' => true] : ['success' => false, 'error' => 'write_failed'];
 }
 
 /**
@@ -491,22 +550,30 @@ function wallos_household_delete(SQLite3 $db, $ownerId)
     if ($membership === null || $membership['role'] !== 'owner') {
         return ['success' => false, 'error' => 'not_owner'];
     }
-    wallos_household_delete_by_id($db, (int) $membership['id']);
-
-    return ['success' => true];
+    return wallos_household_delete_by_id($db, (int) $membership['id'])
+        ? ['success' => true] : ['success' => false, 'error' => 'write_failed'];
 }
 
+/**
+ * @return bool false when a write failed (nothing was changed)
+ */
 function wallos_household_delete_by_id(SQLite3 $db, $householdId)
 {
-    foreach ([
-        'UPDATE subscriptions SET shared_household_id = NULL WHERE shared_household_id = :householdId',
-        'DELETE FROM household_members WHERE household_id = :householdId',
-        'DELETE FROM households WHERE id = :householdId',
-    ] as $sql) {
-        $stmt = $db->prepare($sql);
-        $stmt->bindValue(':householdId', (int) $householdId, SQLITE3_INTEGER);
-        $stmt->execute();
-    }
+    return wallos_household_transaction($db, function () use ($db, $householdId) {
+        foreach ([
+            'UPDATE subscriptions SET shared_household_id = NULL WHERE shared_household_id = :householdId',
+            'DELETE FROM household_members WHERE household_id = :householdId',
+            'DELETE FROM households WHERE id = :householdId',
+        ] as $sql) {
+            $stmt = $db->prepare($sql);
+            $stmt->bindValue(':householdId', (int) $householdId, SQLITE3_INTEGER);
+            if ($stmt->execute() === false) {
+                return false;
+            }
+        }
+
+        return true;
+    });
 }
 
 /**

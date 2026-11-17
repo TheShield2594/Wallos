@@ -131,14 +131,18 @@ function formatDate($date, $lang = 'en')
  * @param array       $own   the account's rows, already sorted by SQL
  * @param string      $sort  the column sorted on
  * @param string      $order 'ASC' or 'DESC'
- * @param string|null $state the inactive filter ('0', '1' or null)
+ * @param string|null   $state  the inactive filter ('0', '1' or null)
+ * @param callable|null $filter fn(array $row): bool, the list's other filters
  * @return array
  */
-function mergeSharedSubscriptions(array $own, SQLite3 $db, $userId, $sort, $order, $disabledToBottom, $state = null)
+function mergeSharedSubscriptions(array $own, SQLite3 $db, $userId, $sort, $order, $disabledToBottom, $state = null, ?callable $filter = null)
 {
     $shared = wallos_shared_subscriptions($db, $userId);
     if ($state !== null && $state !== '') {
         $shared = array_values(array_filter($shared, fn($row) => (string) $row['inactive'] === (string) $state));
+    }
+    if ($filter !== null) {
+        $shared = array_values(array_filter($shared, $filter));
     }
     if ($shared === []) {
         return $own;

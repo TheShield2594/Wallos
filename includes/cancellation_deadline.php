@@ -170,7 +170,8 @@ function wallos_cancellation_due(array $subscription, $today)
         return null;
     }
     if ($deadline['renewal'] !== null) {
-        if ($deadline['renewal'] <= $today) {
+        // Until the renewal; a notice of zero days is due on the renewal day itself.
+        if ($deadline['renewal'] < $today || ($deadline['renewal'] === $today && $deadline['cancel_by'] !== $today)) {
             return null;
         }
     } else {

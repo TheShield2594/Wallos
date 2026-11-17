@@ -111,7 +111,7 @@ $totalSavingsPerMonth = 0;
 $totalCostsInReplacementsPerMonth = 0;
 
 $statsSubtitleParts = [];
-$query = "SELECT name, price, logo, logo_text_color, logo_variant, frequency, cycle, currency_id, next_payment, payer_user_id, category_id, payment_method_id, inactive, replacement_subscription_id, start_date, auto_renew, billing_anchor_day, end_date, total_payments, payments_made, ended_reason, intro_type, intro_price, intro_end_date FROM subscriptions";
+$query = "SELECT name, price, logo, logo_text_color, logo_variant, frequency, cycle, currency_id, next_payment, payer_user_id, category_id, payment_method_id, inactive, replacement_subscription_id, start_date, auto_renew, billing_anchor_day, end_date, total_payments, payments_made, ended_reason, intro_type, intro_price, intro_end_date, intro_converted_on FROM subscriptions";
 $conditions = [];
 $params = [];
 
@@ -268,7 +268,7 @@ if ($result) {
             } else {
                 $inactiveSubscriptions++;
                 $totalSavingsPerMonth += $price;
-                if (wallos_has_intro($subscription)) {
+                if (wallos_is_cancelled_trial(array_merge($subscription, ['inactive' => 1]))) {
                     $cancelledTrials++;
                 }
 

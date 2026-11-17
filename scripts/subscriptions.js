@@ -50,6 +50,7 @@ function resetForm() {
   toggleVariableAmount();
   toggleRenewFromAction();
   toggleCancelNoticeFields(false);
+  delete document.querySelector("#next_payment").dataset.trialBase;
   toggleIntroFields();
   setSharedEditMode(null);
   closeLogoSearch();
@@ -143,14 +144,13 @@ function fillEditFormFields(subscription) {
   document.querySelector("#intro_length_mode").value = subscription.intro_type ? 'date' : 'cycles';
   document.querySelector("#intro_cycles").value = '';
   document.querySelector("#intro_end_date").value = subscription.intro_end_date || '';
-  document.querySelector("#intro_notify_days").value = subscription.intro_notify_days ?? 3;
+  document.querySelector("#intro_notify_days").value = subscription.intro_notify_days || 3;
+  delete document.querySelector("#next_payment").dataset.trialBase;
   toggleIntroFields();
   const visibility = document.querySelector("#visibility");
   if (visibility) {
     visibility.value = subscription.shared ? 'household' : 'private';
   }
-  setSharedEditMode(subscription);
-
   const notifyDaysBefore = document.querySelector("#notify_days_before");
   notifyDaysBefore.value = subscription.notify_days_before ?? 0;
   if (subscription.notify === 1) {
@@ -170,6 +170,9 @@ function fillEditFormFields(subscription) {
   const deleteButton = document.querySelector("#deletesub");
   deleteButton.style = 'display: block';
   deleteButton.setAttribute("onClick", `deleteSubscription(event, ${subscription.id})`);
+
+  // Last, so nothing above re-enables a locked field or shows Delete again.
+  setSharedEditMode(subscription);
 
   setFormOpen(true);
 }
@@ -1238,6 +1241,14 @@ document.addEventListener('DOMContentLoaded', function () {
   if (document.querySelector("#intro_type")) {
     toggleIntroFields();
   }
+  // A next payment or start date the user types is the new base for the
+  // trial's cycles (events from code do not fire these listeners).
+  ['#next_payment', '#start_date'].forEach((selector) => {
+    const field = document.querySelector(selector);
+    if (field) {
+      field.addEventListener('input', () => { delete document.querySelector("#next_payment").dataset.trialBase; });
+    }
+  });
   if (document.querySelector("#ends_mode")) {
     toggleEndsFields();
     toggleRenewFromAction();
@@ -1345,7 +1356,13 @@ function introEndDate() {
     return null;
   }
   const schedule = formSchedule();
-  const from = parseFormDate(document.querySelector("#start_date").value) || schedule.next;
+  // Without a start date the cycles count from the next payment the user
+  // entered, kept aside because a trial then overwrites #next_payment.
+  const nextField = document.querySelector("#next_payment");
+  if (!nextField.dataset.trialBase) {
+    nextField.dataset.trialBase = nextField.value;
+  }
+  const from = parseFormDate(document.querySelector("#start_date").value) || parseFormDate(nextField.dataset.trialBase);
   if (!from) {
     return null;
   }
@@ -1374,6 +1391,9 @@ function updateIntroHint() {
     const next = document.querySelector("#next_payment");
     const value = formatFormDate(end);
     if (next.value !== value) {
+      if (!next.dataset.trialBase) {
+        next.dataset.trialBase = next.value;
+      }
       next.value = value;
       updateEndsHint();
       updateCancelNoticeHint();
@@ -1396,8 +1416,11 @@ function setSharedEditMode(subscription) {
       field.disabled = shared || (selector === '#notify_days_before' && !document.querySelector('#notifications').checked);
     }
   });
-  const price = document.querySelector("#price");
-  price.readOnly = shared && subscription.price_editable === false;
+  // Without the owner's currency the prices were converted for display:
+  // they are shown but kept as stored (readOnly, so they are still sent).
+  const lockPrices = shared && subscription.price_editable === false;
+  document.querySelector("#price").readOnly = lockPrices;
+  document.querySelector("#intro_price").readOnly = lockPrices;
   ['#visibility-group', '#cancel-notice-group'].forEach((selector) => {
     const group = document.querySelector(selector);
     if (group) {

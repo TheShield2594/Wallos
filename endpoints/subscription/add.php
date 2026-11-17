@@ -286,6 +286,7 @@ if ($isEdit) {
         // the editor has none it was converted for display and stays as stored.
         if (!isset($viewerCurrencies['by_code'][$ownerCurrencyCode])) {
             $price = $editable['price'];
+            $_POST['intro_price'] = $editable['intro_price'];
         }
         foreach (['cancel_notice_mode', 'cancellation_date', 'cancel_notice_value', 'cancel_notice_unit', 'min_term_end'] as $column) {
             $_POST[$column] = $editable[$column];
@@ -615,15 +616,30 @@ $stmt->bindValue(':paymentsMade', $paymentsMade, SQLITE3_INTEGER);
 $stmt->bindValue(':endedReason', $endedReason, $endedReason === null ? SQLITE3_NULL : SQLITE3_TEXT);
 $stmt->bindValue(':planMode', $planMode, $planMode === null ? SQLITE3_NULL : SQLITE3_TEXT);
 
-if ($stmt->execute()) {
-    $savedId = $isEdit ? $id : $db->lastInsertRowID();
-    wallos_store_cancel_fields($db, $savedId, $userId, $cancelNotice['fields']);
-    wallos_store_intro_fields($db, $savedId, $userId, $intro['fields']);
-    if (!$sharedEdit) {
-        // Private, or shared with the owner's household.
-        wallos_set_subscription_sharing($db, $userId, $savedId, ($_POST['visibility'] ?? 'private') === 'household'
-            && wallos_household_membership($db, $userId) !== null);
+// The row, its cancellation notice, intro period and sharing are saved as
+// one unit: if any part fails, nothing is saved and the form stays open.
+$saved = @$db->exec('BEGIN IMMEDIATE') !== false;
+if ($saved) {
+    $saved = $stmt->execute() !== false;
+    if ($saved) {
+        $savedId = $isEdit ? $id : $db->lastInsertRowID();
+        $saved = wallos_store_cancel_fields($db, $savedId, $userId, $cancelNotice['fields'])
+            && wallos_store_intro_fields($db, $savedId, $userId, $intro['fields']);
+        if ($saved && !$sharedEdit) {
+            // Private, or shared with the owner's household.
+            $saved = wallos_set_subscription_sharing($db, $userId, $savedId, ($_POST['visibility'] ?? 'private') === 'household'
+                && wallos_household_membership($db, $userId) !== null)['success'];
+        }
     }
+    if ($saved && $db->exec('COMMIT') === false) {
+        $saved = false;
+    }
+    if (!$saved) {
+        $db->exec('ROLLBACK');
+    }
+}
+
+if ($saved) {
 
     $success['status'] = "Success";
     $text = $isEdit ? "updated" : "added";
@@ -646,7 +662,8 @@ if ($stmt->execute()) {
     echo json_encode($success);
     exit();
 } else {
-    echo translate('error', $i18n) . ": " . $db->lastErrorMsg();
+    header('Content-Type: application/json');
+    echo json_encode(['status' => 'Error', 'message' => translate('error', $i18n) . ": " . $db->lastErrorMsg()]);
 }
 $db->close();
 ?>

@@ -96,6 +96,13 @@ wallos_test('the reminder is due from the cancel-by date until the renewal, once
     assert_same(null, wallos_cancellation_due($subscription, '2027-03-01'), 'not again once sent');
 });
 
+wallos_test('a notice of zero days is due on the renewal day', function () {
+    $zero = cancel_sub(['cancel_notice_value' => 0]); // renews 2027-03-31
+    assert_same(null, wallos_cancellation_due($zero, '2027-03-30'), 'not the day before');
+    assert_true(wallos_cancellation_due($zero, '2027-03-31') !== null, 'on the renewal day');
+    assert_same(null, wallos_cancellation_due($zero, '2027-04-01'), 'not after it');
+});
+
 wallos_test('a fixed reminder is due for a week after its date', function () {
     $fixed = cancel_sub(['cancel_notice_mode' => 'fixed', 'cancellation_date' => '2026-12-01']);
     assert_true(wallos_cancellation_due($fixed, '2026-12-01') !== null, 'on the day');

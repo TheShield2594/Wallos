@@ -50,7 +50,13 @@ foreach (['end_date', 'ended_reason', 'plan_mode'] as $scheduleColumn) {
     $cloneStmt->bindValue(':' . $scheduleColumn, $value, $value === null ? SQLITE3_NULL : SQLITE3_TEXT);
 }
 
-if ($cloneStmt->execute()) {
+// The new row and the settings copied onto it are one unit: a failed copy
+// leaves no half-made clone behind.
+$cloned = @$db->exec('BEGIN IMMEDIATE') !== false;
+if ($cloned) {
+    $cloned = $cloneStmt->execute() !== false;
+}
+if ($cloned) {
     $newId = $db->lastInsertRowID();
 
     // Settings carried over as they are: the cancellation notice and an
@@ -63,8 +69,13 @@ if ($cloneStmt->execute()) {
     $carryStmt->bindValue(':sourceId', $subscriptionId, SQLITE3_INTEGER);
     $carryStmt->bindValue(':newId', $newId, SQLITE3_INTEGER);
     $carryStmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
-    $carryStmt->execute();
+    $cloned = $carryStmt->execute() !== false && $db->exec('COMMIT') !== false;
+}
+if (!$cloned) {
+    @$db->exec('ROLLBACK');
+}
 
+if ($cloned) {
     $response = [
         "success" => true,
         "message" => translate('success', $i18n),

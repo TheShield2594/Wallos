@@ -125,6 +125,38 @@ wallos_test('households: one household per account, and only the owner manages i
     $db->close();
 });
 
+wallos_test('households: an account already in a household cannot accept a second invite', function () {
+    $db = households_fixture();
+    wallos_test_create_user($db, 6, 'frank');
+    assert_true(wallos_household_create($db, 5, 'Erin home')['success'], 'erin starts a household');
+    assert_true(wallos_household_invite($db, 5, 'dave', 'viewer')['success'], 'erin invites dave too');
+    $erinHousehold = wallos_household_membership($db, 5)['id'];
+    $aliceHousehold = wallos_household_membership($db, 1)['id'];
+
+    // A pending invite to erin's household survives while dave accepts alice's
+    // (as a second session would see it), then the late accept is refused.
+    $db->exec("INSERT OR IGNORE INTO household_members (household_id, user_id, role, status) VALUES ($erinHousehold, 4, 'viewer', 'pending')");
+    assert_true(wallos_household_respond($db, 4, $aliceHousehold, true)['success'], 'dave accepts alice');
+    $db->exec("INSERT OR IGNORE INTO household_members (household_id, user_id, role, status) VALUES ($erinHousehold, 4, 'viewer', 'pending')");
+    assert_same('already_in_household', wallos_household_respond($db, 4, $erinHousehold, true)['error'] ?? null,
+        'the second accept is refused in the same statement that would activate it');
+    assert_same(1, $db->querySingle("SELECT COUNT(*) FROM household_members WHERE user_id = 4 AND status = 'active'"), 'dave is active once');
+    $db->close();
+});
+
+wallos_test('households: amounts a member enters are kept in the owner currency', function () {
+    $db = households_fixture();
+    // alice pays in USD (rate 1.1 per EUR); bob has no USD, so he sees EUR.
+    $db->exec('DELETE FROM currencies WHERE id = ' . wallos_test_currency_id(2, 1));
+    $factor = wallos_household_display_factor($db, 2, wallos_test_currency_id(1, 1));
+    assert_equals(round(1 / 1.1, 6), round($factor, 6), 'shown converted to the owner main currency');
+    assert_same(1.0, wallos_household_display_factor($db, 3, wallos_test_currency_id(1, 1)), 'carol has USD: shown as it is');
+    foreach (['endpoints/subscription/markpaid.php', 'endpoints/ledger/list.php'] as $path) {
+        assert_contains('wallos_household_display_factor(', file_get_contents(WALLOS_ROOT . '/' . $path), "$path converts for members");
+    }
+    $db->close();
+});
+
 wallos_test('households: deleting an account removes its household and memberships', function () {
     $db = households_fixture();
     $bobShared = households_add_subscription($db, 2, 'Spotify Family', true);
