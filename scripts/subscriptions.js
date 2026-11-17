@@ -49,6 +49,7 @@ function resetForm() {
   toggleEndsFields();
   toggleVariableAmount();
   toggleRenewFromAction();
+  toggleCancelNoticeFields(false);
   closeLogoSearch();
   const deleteButton = document.querySelector("#deletesub");
   deleteButton.style = 'display: none';
@@ -102,8 +103,11 @@ function fillEditFormFields(subscription) {
   startDate.value = subscription.start_date;
   const nextPament = document.querySelector("#next_payment");
   nextPament.value = subscription.next_payment;
-  const cancellationDate = document.querySelector("#cancellation_date");
-  cancellationDate.value = subscription.cancellation_date;
+  document.querySelector("#cancellation_date").value = subscription.cancellation_date || '';
+  document.querySelector("#cancel_notice_mode").value = subscription.cancel_notice_mode || 'none';
+  document.querySelector("#cancel_notice_value").value = subscription.cancel_notice_value ?? '';
+  document.querySelector("#cancel_notice_unit").value = subscription.cancel_notice_unit || 'months';
+  document.querySelector("#min_term_end").value = subscription.min_term_end || '';
 
   const notes = document.querySelector("#notes");
   notes.value = subscription.notes;
@@ -131,6 +135,7 @@ function fillEditFormFields(subscription) {
   toggleEndsFields();
   toggleVariableAmount();
   toggleRenewFromAction();
+  toggleCancelNoticeFields(false);
 
   const notifyDaysBefore = document.querySelector("#notify_days_before");
   notifyDaysBefore.value = subscription.notify_days_before ?? 0;
@@ -596,6 +601,8 @@ document.addEventListener('DOMContentLoaded', function () {
       if (freq) freq.value = 1;
       const cancellationDate = document.querySelector("#cancellation_date");
       if (cancellationDate) cancellationDate.value = "";
+      const cancelNoticeMode = document.querySelector("#cancel_notice_mode");
+      if (cancelNoticeMode) cancelNoticeMode.value = "none";
       const notifyDays = document.querySelector("#notify_days_before");
       if (notifyDays) notifyDays.value = -1;
     }
@@ -889,6 +896,12 @@ function toggleOneTimeCycleUI(isOneTime) {
   const labelOnetime = document.querySelector("#next-payment-label-onetime");
   const notificationsGroup = document.querySelector("#notifications-group");
   const notifyDaysCancellationGroup = document.querySelector("#notify-days-cancellation-group");
+  const cancelNoticeGroup = document.querySelector("#cancel-notice-group");
+  if (cancelNoticeGroup) cancelNoticeGroup.classList.toggle('hide', isOneTime);
+  ['#cancel_notice_mode', '#cancellation_date', '#cancel_notice_value', '#cancel_notice_unit', '#min_term_end'].forEach((selector) => {
+    const field = document.querySelector(selector);
+    if (field) field.disabled = isOneTime;
+  });
   const notificationsCheckbox = document.querySelector("#notifications");
   const endsGroup = document.querySelector("#ends-group");
   const renewFromActionGroup = document.querySelector("#renew-from-action-group");
@@ -1193,10 +1206,82 @@ document.addEventListener('DOMContentLoaded', function () {
     const field = document.querySelector(selector);
     if (field) {
       field.addEventListener('change', updateEndsHint);
+      field.addEventListener('change', updateCancelNoticeHint);
     }
   });
+  if (document.querySelector("#cancel_notice_mode")) {
+    toggleCancelNoticeFields(false);
+  }
   if (document.querySelector("#ends_mode")) {
     toggleEndsFields();
     toggleRenewFromAction();
   }
 });
+
+/*
+  Cancellation reminder: none, a fixed date, or a notice period before each
+  renewal (mirrors includes/cancellation_deadline.php).
+*/
+function toggleCancelNoticeFields(fromUser) {
+  const mode = document.querySelector("#cancel_notice_mode").value;
+  document.querySelector("#cancellation-date-field").classList.toggle('hide', mode !== 'fixed');
+  document.querySelector("#cancel-notice-field").classList.toggle('hide', mode !== 'before_renewal');
+  document.querySelector("#min-term-field").classList.toggle('hide', mode !== 'before_renewal');
+  document.querySelector("#cancellation_date").required = mode === 'fixed';
+  const value = document.querySelector("#cancel_notice_value");
+  value.required = mode === 'before_renewal';
+  if (fromUser && mode === 'before_renewal' && value.value === '') {
+    // Prefill the default notice from Settings.
+    const group = document.querySelector("#cancel-notice-group");
+    if (group.dataset.defaultValue !== '') {
+      value.value = group.dataset.defaultValue;
+      document.querySelector("#cancel_notice_unit").value = group.dataset.defaultUnit || 'months';
+    }
+  }
+  updateCancelNoticeHint();
+}
+
+function subtractNotice(date, value, unit) {
+  if (unit === 'months') {
+    return addMonthsClamped(date, -value);
+  }
+  const result = new Date(date);
+  result.setDate(result.getDate() - (unit === 'weeks' ? 7 * value : value));
+  return result;
+}
+
+// "Cancel by Nov 12, 2026 to avoid the renewal on Dec 12, 2026"
+function updateCancelNoticeHint() {
+  const hint = document.querySelector("#cancel-notice-hint");
+  if (!hint) {
+    return;
+  }
+  hint.textContent = '';
+  if (document.querySelector("#cancel_notice_mode").value !== 'before_renewal') {
+    return;
+  }
+  const valueField = document.querySelector("#cancel_notice_value").value;
+  const value = Number(valueField);
+  const schedule = formSchedule();
+  if (!schedule.next || valueField === '' || !Number.isInteger(value) || value < 0) {
+    return;
+  }
+  const minTermEnd = parseFormDate(document.querySelector("#min_term_end").value);
+  let renewal = schedule.next;
+  let steps = 0;
+  while (minTermEnd && renewal && renewal < minTermEnd && steps < 10000) {
+    steps++;
+    renewal = stepOccurrence(schedule.next, schedule.cycle, schedule.frequency, steps, schedule.anchorDay);
+  }
+  if (!renewal) {
+    return;
+  }
+  const cancelBy = subtractNotice(renewal, value, document.querySelector("#cancel_notice_unit").value);
+  const format = (date) => date.toLocaleDateString(window.lang || 'en', { day: 'numeric', month: 'short', year: 'numeric' });
+  if (minTermEnd && schedule.next < minTermEnd) {
+    hint.textContent = hint.dataset.locked
+      .replace('%1$s', format(minTermEnd)).replace('%2$s', format(cancelBy)).replace('%3$s', format(renewal));
+  } else {
+    hint.textContent = hint.dataset.cancelBy.replace('%1$s', format(cancelBy)).replace('%2$s', format(renewal));
+  }
+}

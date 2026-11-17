@@ -530,29 +530,62 @@ if ($db->querySingle("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND 
     </div>
 
     <div class="form-group" id="notify-days-cancellation-group">
+      <label for="notify_days_before"><?= translate('notify_me', $i18n) ?></label>
+      <select id="notify_days_before" name="notify_days_before" disabled>
+        <option value="-1"><?= translate('default_value_from_settings', $i18n) ?></option>
+        <option value="0"><?= translate('on_due_date', $i18n) ?></option>
+        <option value="1">1 <?= translate('day_before', $i18n) ?></option>
+        <?php
+        for ($i = 2; $i <= 180; $i++) {
+          ?>
+          <option value="<?= $i ?>"><?= $i ?>   <?= translate('days_before', $i18n) ?></option>
+          <?php
+        }
+        ?>
+      </select>
+    </div>
+
+    <div class="form-group" id="cancel-notice-group"
+      data-default-value="<?= isset($settings['default_cancel_notice_value']) && $settings['default_cancel_notice_value'] !== null ? (int) $settings['default_cancel_notice_value'] : '' ?>"
+      data-default-unit="<?= htmlspecialchars($settings['default_cancel_notice_unit'] ?? 'months') ?>">
       <div class="inline">
-        <div class="split66 mobile-split-50">
-          <label for="notify_days_before"><?= translate('notify_me', $i18n) ?></label>
-          <select id="notify_days_before" name="notify_days_before" disabled>
-            <option value="-1"><?= translate('default_value_from_settings', $i18n) ?></option>
-            <option value="0"><?= translate('on_due_date', $i18n) ?></option>
-            <option value="1">1 <?= translate('day_before', $i18n) ?></option>
-            <?php
-            for ($i = 2; $i <= 180; $i++) {
-              ?>
-              <option value="<?= $i ?>"><?= $i ?>   <?= translate('days_before', $i18n) ?></option>
-              <?php
-            }
-            ?>
+        <div class="split50">
+          <label for="cancel_notice_mode"><?= translate('cancellation_notification', $i18n) ?></label>
+          <select id="cancel_notice_mode" name="cancel_notice_mode" onchange="toggleCancelNoticeFields(true)">
+            <option value="none"><?= translate('cancel_notice_none', $i18n) ?></option>
+            <option value="fixed"><?= translate('cancel_notice_fixed', $i18n) ?></option>
+            <option value="before_renewal"><?= translate('cancel_notice_before_renewal', $i18n) ?></option>
           </select>
         </div>
-        <div class="split33 mobile-split-50">
-          <label for="cancellation_date"><?= translate('cancellation_notification', $i18n) ?></label>
+        <div class="split50 hide" id="cancellation-date-field">
+          <label for="cancellation_date"><?= translate('remind_me_on', $i18n) ?></label>
           <div class="date-wrapper">
             <input type="date" id="cancellation_date" name="cancellation_date" autocomplete="off">
           </div>
         </div>
+        <div class="split50 hide" id="cancel-notice-field">
+          <label for="cancel_notice_value"><?= translate('notice_period', $i18n) ?></label>
+          <div class="inline">
+            <input type="number" id="cancel_notice_value" name="cancel_notice_value" min="0" max="3650" step="1"
+              autocomplete="off" oninput="updateCancelNoticeHint()">
+            <select id="cancel_notice_unit" name="cancel_notice_unit" onchange="updateCancelNoticeHint()"
+              aria-label="<?= translate('notice_period', $i18n) ?>">
+              <option value="days"><?= translate('days', $i18n) ?></option>
+              <option value="weeks"><?= translate('weeks', $i18n) ?></option>
+              <option value="months"><?= translate('months', $i18n) ?></option>
+            </select>
+          </div>
+        </div>
       </div>
+      <div class="hide" id="min-term-field">
+        <label for="min_term_end"><?= translate('minimum_term_until', $i18n) ?></label>
+        <div class="date-wrapper">
+          <input type="date" id="min_term_end" name="min_term_end" autocomplete="off" onchange="updateCancelNoticeHint()">
+        </div>
+      </div>
+      <p class="form-hint" id="cancel-notice-hint" aria-live="polite"
+        data-cancel-by="<?= htmlspecialchars(translate('cancel_by_to_avoid_renewal', $i18n), ENT_QUOTES) ?>"
+        data-locked="<?= htmlspecialchars(translate('locked_in_until_cancel_by', $i18n), ENT_QUOTES) ?>"></p>
     </div>
 
     <div class="form-group">

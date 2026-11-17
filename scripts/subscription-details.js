@@ -280,9 +280,17 @@ function renderSubscriptionDetails(subscription, focusPanel) {
     document.querySelector('#details-payment-name').textContent = strings.none;
   }
 
+  // Cancellation notice: a fixed reminder date, or the date to cancel by
+  // before the next renewal, and the minimum term while it still binds.
   const cancellationItem = document.querySelector('#details-cancellation-item');
-  cancellationItem.classList.toggle('hide', !subscription.cancellation_date);
-  document.querySelector('#details-cancellation').textContent = detailsFormatDate(subscription.cancellation_date);
+  cancellationItem.classList.toggle('hide', !subscription.cancel_by);
+  document.querySelector('#details-cancellation-label').textContent = subscription.cancel_renewal
+    ? strings.cancel_by_label : strings.cancellation_notification;
+  document.querySelector('#details-cancellation').textContent = detailsFormatDate(subscription.cancel_by);
+  const minTermItem = document.querySelector('#details-min-term-item');
+  minTermItem.classList.toggle('hide', !subscription.locked_until);
+  document.querySelector('#details-min-term').textContent = subscription.locked_until
+    ? detailsFill(strings.locked_in_until, detailsFormatDate(subscription.locked_until)) : '';
 
   const replacementName = subscription.replacement_subscription_id ? lookups.subscriptionNames[subscription.replacement_subscription_id] : null;
   document.querySelector('#details-replacement-item').classList.toggle('hide', !replacementName);

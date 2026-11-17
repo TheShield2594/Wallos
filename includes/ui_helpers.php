@@ -87,6 +87,13 @@ function due_text($date, $lang, $i18n)
     return formatDate($date, $lang);
 }
 
+function days_until_date($date)
+{
+    $today = new DateTime('today');
+    $due = new DateTime($date);
+    return (int) $today->diff($due)->format('%r%a');
+}
+
 function days_overdue($date)
 {
     $today = new DateTime('today');

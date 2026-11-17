@@ -95,6 +95,7 @@ Example response:
 */
 
 require_once '../../includes/connect_endpoint.php';
+require_once __DIR__ . '/../../includes/cancellation_deadline.php';
 require_once '../../includes/currency_rates.php';
 
 header('Content-Type: application/json; charset=UTF-8');
@@ -303,6 +304,8 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" || $_SERVER["REQUEST_METHOD"] === "GET
         $subscriptionToReturn['category_name'] = isset($categories[$subscription['category_id']]) ? $categories[$subscription['category_id']] : 'No category';
         $subscriptionToReturn['payer_user_name'] = isset($members[$subscription['payer_user_id']]) ? $members[$subscription['payer_user_id']] : 'Unknown member';
         $subscriptionToReturn['payment_method_name'] = isset($paymentMethods[$subscription['payment_method_id']]) ? $paymentMethods[$subscription['payment_method_id']] : 'Unknown payment method';
+        $deadline = wallos_cancel_deadline($subscription);
+        $subscriptionToReturn['cancel_by'] = $deadline['cancel_by'] ?? null;
         $subscriptionsToReturn[] = $subscriptionToReturn;
     }
 

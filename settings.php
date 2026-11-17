@@ -988,7 +988,8 @@ $upcomingPaymentsLimit = normalize_upcoming_payments_limit($settings['upcoming_p
                             <i class="fa-solid fa-circle-info"></i> <?= translate('variables_available', $i18n) ?>:
                             {{days_until}}, {{subscription_name}}, {{subscription_price}}, {{subscription_currency}},
                             {{subscription_category}}, {{subscription_date}}, {{subscription_payer}},
-                            {{subscription_days_until_payment}}, {{subscription_notes}}, {{subscription_url}}
+                            {{subscription_days_until_payment}}, {{subscription_notes}}, {{subscription_url}},
+                            {{subscription_cancel_by}} (<?= translate('cancellation_payload_only', $i18n) ?>)
                         </p>
                         <p>
                     </div>
@@ -1718,6 +1719,22 @@ $upcomingPaymentsLimit = normalize_upcoming_payments_limit($settings['upcoming_p
                     <input type="checkbox" id="showcategorycard" name="showcategorycard"
                         onChange="setShowCategoryCard()" <?= !isset($settings['show_category_card']) || $settings['show_category_card'] ? 'checked' : '' ?>>
                     <label for="showcategorycard"><?= translate('show_category_card', $i18n) ?></label>
+                </div>
+            </div>
+            <div>
+                <div class="form-group">
+                    <label for="defaultcancelnoticevalue"><?= translate('default_cancel_notice', $i18n) ?></label>
+                    <div class="inline">
+                        <input type="number" id="defaultcancelnoticevalue" min="0" max="3650" step="1"
+                            value="<?= isset($settings['default_cancel_notice_value']) && $settings['default_cancel_notice_value'] !== null ? (int) $settings['default_cancel_notice_value'] : '' ?>"
+                            placeholder="<?= translate('none', $i18n) ?>" onChange="setDefaultCancelNotice()">
+                        <select id="defaultcancelnoticeunit" onChange="setDefaultCancelNotice()" aria-label="<?= translate('default_cancel_notice', $i18n) ?>">
+                            <?php foreach (['days', 'weeks', 'months'] as $unit) { ?>
+                                <option value="<?= $unit ?>" <?= ($settings['default_cancel_notice_unit'] ?? 'months') === $unit ? 'selected' : '' ?>><?= translate($unit, $i18n) ?></option>
+                            <?php } ?>
+                        </select>
+                    </div>
+                    <p class="form-hint"><?= translate('default_cancel_notice_info', $i18n) ?></p>
                 </div>
             </div>
             <h3><?= translate('experience', $i18n) ?></h3>

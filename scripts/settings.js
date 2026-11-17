@@ -1094,6 +1094,13 @@ function setShowCategoryCard() {
   storeSettingsOnDB('category_card', checkbox.checked);
 }
 
+function setDefaultCancelNotice() {
+  const valueField = document.querySelector("#defaultcancelnoticevalue");
+  const unit = document.querySelector("#defaultcancelnoticeunit").value;
+  const value = valueField.value === '' ? null : Number(valueField.value);
+  storeSettingsOnDB('cancel_notice_default', { value: value, unit: unit });
+}
+
 function setRequirePaymentConfirmation() {
   const checkbox = document.querySelector("#requirepaymentconfirmation");
   storeSettingsOnDB('payment_confirmation', checkbox.checked);

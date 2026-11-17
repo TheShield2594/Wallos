@@ -7,6 +7,7 @@ require_once 'validate.php';
 require_once __DIR__ . '/../../includes/connect_endpoint_crontabs.php';
 require_once __DIR__ . '/../../includes/ssrf_helper.php';
 require_once __DIR__ . '/../../includes/webhook_helper.php';
+require_once __DIR__ . '/../../includes/cancellation_deadline.php';
 
 require __DIR__ . '/../../libs/PHPMailer/PHPMailer.php';
 require __DIR__ . '/../../libs/PHPMailer/SMTP.php';
@@ -179,26 +180,38 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
         $currentDate = new DateTime('now');
         $currentDate = $currentDate->format('Y-m-d');
 
-        // One-time purchases have no recurring commitment to cancel, and the
-        // subscription form clears their cancellation date, so never notify for them.
-        $query = "SELECT * FROM subscriptions WHERE user_id = :user_id AND inactive = :inactive AND cancellation_date = :cancellationDate AND cycle != :oneTimeCycle ORDER BY payer_user_id ASC";
+        // Candidates: active, recurring subscriptions with a cancellation
+        // notice. Whether the reminder is due today is decided by
+        // wallos_cancellation_due(): from the cancel-by date (a fixed date, or
+        // N days/months before the next renewal) until that renewal, once.
+        // One-time purchases have no recurring commitment to cancel.
+        $query = "SELECT * FROM subscriptions WHERE user_id = :user_id AND inactive = :inactive AND cycle != :oneTimeCycle AND (cancel_notice_mode = 'before_renewal' OR (cancellation_date IS NOT NULL AND cancellation_date != '' AND COALESCE(cancel_notice_mode, 'fixed') = 'fixed')) ORDER BY payer_user_id ASC";
         $stmt = $db->prepare($query);
         $stmt->bindValue(':user_id', $userId, SQLITE3_INTEGER);
         $stmt->bindValue(':inactive', 0, SQLITE3_INTEGER);
-        $stmt->bindValue(':cancellationDate', $currentDate, SQLITE3_TEXT);
         $stmt->bindValue(':oneTimeCycle', 5, SQLITE3_INTEGER);
         $resultSubscriptions = $stmt->execute();
 
         $notify = [];
+        $remindedDeadlines = [];
         $i = 0;
-        $currentDate = new DateTime('now');
         while ($rowSubscription = $resultSubscriptions->fetchArray(SQLITE3_ASSOC)) {
+            $deadline = wallos_cancellation_due($rowSubscription, $currentDate);
+            if ($deadline === null) {
+                continue;
+            }
+            $remindedDeadlines[$rowSubscription['id']] = $deadline['cancel_by'];
+            $deadlineNote = $deadline['renewal'] !== null
+                ? " (cancel by " . $deadline['cancel_by'] . " to avoid the renewal on " . $deadline['renewal'] . ")"
+                : "";
             $notify[$rowSubscription['payer_user_id']][$i]['name'] = $rowSubscription['name'];
             $notify[$rowSubscription['payer_user_id']][$i]['price'] = $rowSubscription['price'] . $currencies[$rowSubscription['currency_id']]['symbol'];
             $notify[$rowSubscription['payer_user_id']][$i]['currency'] = $currencies[$rowSubscription['currency_id']]['name'];
             $notify[$rowSubscription['payer_user_id']][$i]['category'] = $categories[$rowSubscription['category_id']]['name'];
             $notify[$rowSubscription['payer_user_id']][$i]['payer'] = $household[$rowSubscription['payer_user_id']]['name'];
             $notify[$rowSubscription['payer_user_id']][$i]['date'] = $rowSubscription['next_payment'];
+            $notify[$rowSubscription['payer_user_id']][$i]['cancel_by'] = $deadline['cancel_by'];
+            $notify[$rowSubscription['payer_user_id']][$i]['deadline_note'] = $deadlineNote;
             $notify[$rowSubscription['payer_user_id']][$i]['url'] = $rowSubscription['url'];
             $notify[$rowSubscription['payer_user_id']][$i]['notes'] = $rowSubscription['notes'];
             $i++;
@@ -225,7 +238,7 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
                             $message = "The following subscriptions are up for cancellation:\n";
 
                             foreach ($perUser as $subscription) {
-                                $message .= $subscription['name'] . " for " . $subscription['price'] ."\n";
+                                $message .= $subscription['name'] . " for " . $subscription['price'] . $subscription['deadline_note'] ."\n";
                             }
 
                             $smtpAuth = (isset($email["smtpUsername"]) && $email["smtpUsername"] != "") || (isset($email["smtpPassword"]) && $email["smtpPassword"] != "");
@@ -318,7 +331,7 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
                             }
 
                             foreach ($perUser as $subscription) {
-                                $message .= $subscription['name'] . " for " . $subscription['price'] . "\n";
+                                $message .= $subscription['name'] . " for " . $subscription['price'] . $subscription['deadline_note'] . "\n";
                             }
 
                             $postfields = [
@@ -386,7 +399,7 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
                             }
 
                             foreach ($perUser as $subscription) {
-                                $message .= $subscription['name'] . " for " . $subscription['price'] . "\n";
+                                $message .= $subscription['name'] . " for " . $subscription['price'] . $subscription['deadline_note'] . "\n";
                             }
 
                             $data = array(
@@ -450,7 +463,7 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
                         }
 
                         foreach ($perUser as $subscription) {
-                            $message .= $subscription['name'] . " for " . $subscription['price'] . "\n";
+                            $message .= $subscription['name'] . " for " . $subscription['price'] . $subscription['deadline_note'] . "\n";
                         }
 
                         $data = array(
@@ -507,7 +520,7 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
                         }
 
                         foreach ($perUser as $subscription) {
-                            $message .= $subscription['name'] . " for " . $subscription['price'] . "\n";
+                            $message .= $subscription['name'] . " for " . $subscription['price'] . $subscription['deadline_note'] . "\n";
                         }
 
                         $ch = curl_init();
@@ -561,7 +574,7 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
                             }
 
                             foreach ($perUser as $subscription) {
-                                $message .= $subscription['name'] . " for " . $subscription['price'] . "\n";
+                                $message .= $subscription['name'] . " for " . $subscription['price'] . $subscription['deadline_note'] . "\n";
                             }
 
                             // Empty or non-JSON headers made array_keys(null) throw, so
@@ -630,6 +643,7 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
                                     'subscription_category' => $subscription['category'],
                                     'subscription_payer' => $payer,
                                     'subscription_date' => $subscription['date'],
+                                    'subscription_cancel_by' => $subscription['cancel_by'],
                                     'subscription_url' => $subscription['url'],
                                     'subscription_notes' => $subscription['notes'],
                                 ]);
@@ -676,6 +690,18 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
                 }
             }
             
+            // Every channel has had its attempt (a failing one is logged above),
+            // so these deadlines are reminded; without this the reminder would
+            // repeat on every run until the renewal.
+            $markStmt = $db->prepare('UPDATE subscriptions SET last_cancel_notified_for = :cancelBy WHERE id = :id AND user_id = :userId');
+            foreach ($remindedDeadlines as $subscriptionId => $cancelBy) {
+                $markStmt->bindValue(':cancelBy', $cancelBy, SQLITE3_TEXT);
+                $markStmt->bindValue(':id', $subscriptionId, SQLITE3_INTEGER);
+                $markStmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
+                $markStmt->execute();
+                $markStmt->reset();
+            }
+
 
         } else {
             if (php_sapi_name() !== 'cli') {

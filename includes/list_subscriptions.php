@@ -4,6 +4,7 @@ require_once 'i18n/getlang.php';
 require_once __DIR__ . '/currency_rates.php';
 require_once __DIR__ . '/ui_helpers.php';
 require_once __DIR__ . '/payment_ledger.php';
+require_once __DIR__ . '/cancellation_deadline.php';
 
 function getBillingCycle($cycle, $frequency, $i18n)
 {
@@ -149,6 +150,9 @@ function addListRowFields(&$printRow, $subscription, $mainCurrencyId, $db)
     $printRow['end_date'] = $subscription['end_date'] ?? null;
     $printRow['plan_total'] = isset($subscription['total_payments']) ? (int) $subscription['total_payments'] : null;
     $printRow['plan_made'] = (int) ($subscription['payments_made'] ?? 0);
+    $deadline = wallos_cancel_deadline($subscription);
+    $printRow['cancel_by'] = ($deadline !== null && $deadline['cancel_by'] >= date('Y-m-d')) ? $deadline['cancel_by'] : null;
+    $printRow['locked_until'] = wallos_cancel_locked_until($subscription);
     if ($printRow['plan_total']) {
         $printRow['progress'] = (int) floor(min($printRow['plan_made'], $printRow['plan_total']) / $printRow['plan_total'] * 100);
     } else {
@@ -194,6 +198,16 @@ function listRowSubtitle($subscription, $i18n, $lang)
     $planText = listRowPlanText($subscription, $i18n, $lang);
     $schedule = $planText !== '' ? formatDate($subscription['next_payment_raw'], $lang) . ' · ' . $planText
         : $cycle . ' · ' . formatDate($subscription['next_payment_raw'], $lang);
+    // Cancellation notice: locked in by a minimum term, or the date to cancel by.
+    if (!empty($subscription['locked_until'])) {
+        $schedule .= ' · ' . sprintf(translate('locked_in_until', $i18n), formatDate($subscription['locked_until'], $lang));
+    } elseif (!empty($subscription['cancel_by'])) {
+        $schedule .= ' · ' . sprintf(translate('cancel_by', $i18n), formatDate($subscription['cancel_by'], $lang));
+        $daysLeft = (int) (new DateTime('today'))->diff(new DateTime($subscription['cancel_by']))->format('%r%a');
+        if ($daysLeft <= 14 && empty($subscription['paid_badge'])) {
+            return [$schedule, 'warning'];
+        }
+    }
     if (!empty($subscription['paid_badge'])) {
         return [sprintf(translate('paid_badge', $i18n), formatDate($subscription['paid_badge'], $lang)) . ' · ' . $schedule, 'success'];
     }
@@ -324,4 +338,4 @@ if ($row !== false) {
     $mainCurrencyId = $currencies[1]['id'];
 }
 
-?>
+?>

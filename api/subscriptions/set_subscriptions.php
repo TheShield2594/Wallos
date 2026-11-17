@@ -26,6 +26,9 @@ For 'add' and 'edit' actions (all optional for 'edit'):
 - notify_days_before: how many days before to send notification (integer).
 - inactive: whether the subscription is inactive (1 or 0).
 - cancellation_date: the cancellation date (YYYY-MM-DD).
+- cancel_notice_mode: 'none', 'fixed' (remind on cancellation_date) or 'before_renewal'.
+- cancel_notice_value / cancel_notice_unit: the notice before each renewal ('days', 'weeks' or 'months'), for 'before_renewal'.
+- min_term_end: end of a minimum term (YYYY-MM-DD), for 'before_renewal'.
 - replacement_subscription_id: the ID of the replacement subscription (integer).
 
 It returns a JSON object with the following properties:
@@ -49,6 +52,38 @@ require_once '../../includes/connect_endpoint.php';
 require_once '../../includes/inputvalidation.php';
 require_once '../../includes/ssrf_helper.php';
 require_once '../../includes/logo_theme_variant.php';
+require_once '../../includes/cancellation_deadline.php';
+
+/**
+ * Settings saved after the subscription row itself: the cancellation notice.
+ * Validated before anything is written; the caller exits on an error.
+ *
+ * @param array|null $existing the stored row on edit, null on add
+ * @return array{error: string|null, apply: callable}
+ */
+function api_extra_fields($existing, $cycle)
+{
+    $cancelKeys = ['cancel_notice_mode', 'cancellation_date', 'cancel_notice_value', 'cancel_notice_unit', 'min_term_end'];
+    $cancelInput = [];
+    foreach ($cancelKeys as $key) {
+        $cancelInput[$key] = array_key_exists($key, $_POST) ? $_POST[$key] : ($existing[$key] ?? null);
+    }
+    if ($existing !== null && !isset($_POST['cancel_notice_mode']) && isset($_POST['cancellation_date'])) {
+        // An older client editing only the date: a date means a fixed reminder.
+        $cancelInput['cancel_notice_mode'] = $_POST['cancellation_date'] === '' ? 'none' : 'fixed';
+    }
+    if ($existing !== null && !isset($_POST['cancel_notice_mode']) && !isset($_POST['cancellation_date'])) {
+        $cancelInput['cancel_notice_mode'] = wallos_cancel_mode($existing);
+    }
+    $cancel = wallos_cancel_fields_from_input($cancelInput, $cycle);
+    if ($cancel['error'] !== null) {
+        return ['error' => $cancel['error'], 'apply' => null];
+    }
+
+    return ['error' => null, 'apply' => function ($db, $subscriptionId, $userId) use ($cancel) {
+        wallos_store_cancel_fields($db, $subscriptionId, $userId, $cancel['fields']);
+    }];
+}
 
 header('Content-Type: application/json; charset=UTF-8');
 
@@ -455,6 +490,16 @@ switch ($action) {
             exit;
         }
 
+        $extraFields = api_extra_fields(null, $cycle);
+        if ($extraFields['error'] !== null) {
+            echo json_encode([
+                'success' => false,
+                'title' => 'Invalid parameter',
+                'message' => $extraFields['error']
+            ]);
+            exit;
+        }
+
         // Validate Foreign Keys
         // Currency
         $currStmt = $db->prepare("SELECT id FROM currencies WHERE id = :id AND user_id = :userId");
@@ -593,10 +638,12 @@ switch ($action) {
         $stmtInsert->bindParam(':startDate', $startDate, SQLITE3_TEXT);
 
         if ($stmtInsert->execute()) {
+            $newSubscriptionId = $db->lastInsertRowID();
+            ($extraFields['apply'])($db, $newSubscriptionId, $userId);
             $addResponse = [
                 'success' => true,
                 'title' => 'Subscription added',
-                'subscriptionId' => $db->lastInsertRowID(),
+                'subscriptionId' => $newSubscriptionId,
                 'message' => 'Subscription added successfully.'
             ];
             if ($logoWarning !== '') {
@@ -754,6 +801,16 @@ switch ($action) {
                 'success' => false,
                 'title' => 'Invalid date',
                 'message' => 'Parameter "cancellation_date" must be a valid date in YYYY-MM-DD format.'
+            ]);
+            exit;
+        }
+
+        $extraFields = api_extra_fields($subscription, $cycle);
+        if ($extraFields['error'] !== null) {
+            echo json_encode([
+                'success' => false,
+                'title' => 'Invalid parameter',
+                'message' => $extraFields['error']
             ]);
             exit;
         }
@@ -923,6 +980,7 @@ switch ($action) {
         $stmtUpdate->bindParam(':userId', $userId, SQLITE3_INTEGER);
 
         if ($stmtUpdate->execute()) {
+            ($extraFields['apply'])($db, $subscriptionId, $userId);
             $updateResponse = [
                 'success' => true,
                 'title' => 'Subscription updated',

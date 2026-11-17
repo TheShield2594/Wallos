@@ -51,10 +51,23 @@ foreach (['end_date', 'ended_reason', 'plan_mode'] as $scheduleColumn) {
 }
 
 if ($cloneStmt->execute()) {
+    $newId = $db->lastInsertRowID();
+
+    // Settings carried over as they are: the cancellation notice (the
+    // reminder state starts fresh).
+    $carriedColumns = ['cancel_notice_mode', 'cancel_notice_value', 'cancel_notice_unit', 'min_term_end'];
+    $columnList = implode(', ', $carriedColumns);
+    $carryStmt = $db->prepare("UPDATE subscriptions SET ($columnList) = (SELECT $columnList FROM subscriptions WHERE id = :sourceId AND user_id = :userId)
+        WHERE id = :newId AND user_id = :userId");
+    $carryStmt->bindValue(':sourceId', $subscriptionId, SQLITE3_INTEGER);
+    $carryStmt->bindValue(':newId', $newId, SQLITE3_INTEGER);
+    $carryStmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
+    $carryStmt->execute();
+
     $response = [
         "success" => true,
         "message" => translate('success', $i18n),
-        "id" => $db->lastInsertRowID()
+        "id" => $newId
     ];
     echo json_encode($response);
 } else {
@@ -65,4 +78,4 @@ if ($cloneStmt->execute()) {
 }
 
 $db->close();
-?>
+?>

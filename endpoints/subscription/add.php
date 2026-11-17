@@ -8,6 +8,7 @@ require_once '../../includes/ssrf_helper.php';
 require_once '../../includes/logo_theme_variant.php';
 require_once '../../includes/logo_cleanup.php';
 require_once '../../includes/payment_ledger.php';
+require_once '../../includes/cancellation_deadline.php';
 
 if (!file_exists('../../images/uploads/logos')) {
     mkdir('../../images/uploads/logos', 0777, true);
@@ -253,7 +254,6 @@ $logoError = "";
 $notify = isset($_POST['notifications']) ? true : false;
 $notifyDaysBefore = $_POST['notify_days_before'];
 $inactive = isset($_POST['inactive']) ? true : false;
-$cancellationDate = $_POST['cancellation_date'] ?? null;
 $replacementSubscriptionId = $_POST['replacement_subscription_id'];
 
 if ($replacementSubscriptionId == 0 || $inactive == 0) {
@@ -319,6 +319,14 @@ if ($endsMode === 'date' && wallos_parse_date($_POST['end_date'] ?? null) === nu
 if ($endsMode === 'count' && (!ctype_digit((string) ($_POST['total_payments'] ?? '')) || (int) $_POST['total_payments'] < 1 || (int) $_POST['total_payments'] > 10000)) {
     rejectForeignId('Invalid number of payments.');
 }
+
+// Cancellation reminder: none, a fixed date, or N days/weeks/months before
+// each renewal (see includes/cancellation_deadline.php).
+$cancelNotice = wallos_cancel_fields_from_input($_POST, $cycle);
+if ($cancelNotice['error'] !== null) {
+    rejectForeignId($cancelNotice['error']);
+}
+$cancellationDate = $cancelNotice['fields']['cancellation_date'];
 
 $existingSchedule = [];
 if ($isEdit) {
@@ -556,6 +564,8 @@ $stmt->bindValue(':endedReason', $endedReason, $endedReason === null ? SQLITE3_N
 $stmt->bindValue(':planMode', $planMode, $planMode === null ? SQLITE3_NULL : SQLITE3_TEXT);
 
 if ($stmt->execute()) {
+    wallos_store_cancel_fields($db, $isEdit ? $id : $db->lastInsertRowID(), $userId, $cancelNotice['fields']);
+
     $success['status'] = "Success";
     $text = $isEdit ? "updated" : "added";
     $success['message'] = translate('subscription_' . $text . '_successfuly', $i18n);
@@ -580,4 +590,4 @@ if ($stmt->execute()) {
     echo translate('error', $i18n) . ": " . $db->lastErrorMsg();
 }
 $db->close();
-?>
+?>

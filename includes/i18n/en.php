@@ -637,6 +637,23 @@ $i18n = [
     "no_payments_this_period" => "No payments fall in this pay period.",
     "n_more" => "+%d more",
     "show_category_card" => "Show spending by category on the dashboard",
+    // Cancellation notice
+    "cancel_notice_none" => "None",
+    "cancel_notice_fixed" => "On a date",
+    "cancel_notice_before_renewal" => "Before each renewal",
+    "remind_me_on" => "Remind me on",
+    "notice_period" => "Notice period",
+    "minimum_term_until" => "Minimum term until (optional)",
+    "cancel_by" => "Cancel by %s",
+    "cancel_by_to_avoid_renewal" => "Cancel by %1\$s to avoid the renewal on %2\$s",
+    "cancel_by_to_avoid_renewal_short" => "Cancel by %s to avoid renewal",
+    "locked_in_until" => "Locked in until %s",
+    "locked_in_until_cancel_by" => "Locked in until %1\$s. Cancel by %2\$s to avoid the renewal on %3\$s",
+    "cancel_by_label" => "Cancel by",
+    "minimum_term" => "Minimum term",
+    "default_cancel_notice" => "Default cancellation notice",
+    "default_cancel_notice_info" => "Filled in when a subscription is set to remind you before each renewal.",
+    "cancellation_payload_only" => "cancellation payload only",
 ];
 
 

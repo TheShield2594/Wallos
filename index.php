@@ -328,7 +328,16 @@ $dashboardRow = function ($subscription, $subtitle, $tone = '') use ($dashboardP
                     </header>
                     <div class="card-list">
                         <?php foreach ($upcomingCancellations as $subscription) {
-                            echo $dashboardRow($subscription, translate('cancellation', $i18n) . ' · ' . formatDate($subscription['cancellation_date'], $lang));
+                            if (!empty($subscription['locked_until'])) {
+                                $cancelText = sprintf(translate('locked_in_until', $i18n), formatDate($subscription['locked_until'], $lang))
+                                    . ' · ' . sprintf(translate('cancel_by', $i18n), formatDate($subscription['cancellation_date'], $lang));
+                            } elseif (!empty($subscription['renewal'])) {
+                                $cancelText = sprintf(translate('cancel_by_to_avoid_renewal_short', $i18n), formatDate($subscription['cancellation_date'], $lang));
+                            } else {
+                                $cancelText = translate('cancellation', $i18n) . ' · ' . formatDate($subscription['cancellation_date'], $lang);
+                            }
+                            $cancelSoon = days_until_date($subscription['cancellation_date']) <= 7;
+                            echo $dashboardRow($subscription, $cancelText, $cancelSoon ? 'warning' : '');
                         } ?>
                     </div>
                 </section>

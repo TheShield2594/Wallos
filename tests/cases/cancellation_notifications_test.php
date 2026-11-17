@@ -26,24 +26,28 @@ function cancellation_cron_query()
 }
 
 /**
- * Runs the cron's query for one user and returns the subscription names it picks.
+ * Runs the cron's query for one user, then its due check, and returns the
+ * subscription names it would notify.
  *
  * @param SQLite3 $db
  * @param int     $userId
  * @return array
  */
-function cancellation_cron_names($db, $userId)
+function cancellation_cron_names($db, $userId, $today = null)
 {
+    require_once WALLOS_ROOT . '/includes/cancellation_deadline.php';
+
     $stmt = $db->prepare(cancellation_cron_query());
     $stmt->bindValue(':user_id', $userId, SQLITE3_INTEGER);
     $stmt->bindValue(':inactive', 0, SQLITE3_INTEGER);
-    $stmt->bindValue(':cancellationDate', date('Y-m-d'), SQLITE3_TEXT);
     $stmt->bindValue(':oneTimeCycle', 5, SQLITE3_INTEGER);
 
     $names = [];
     $result = $stmt->execute();
     while ($result && $row = $result->fetchArray(SQLITE3_ASSOC)) {
-        $names[] = $row['name'];
+        if (wallos_cancellation_due($row, $today ?? date('Y-m-d')) !== null) {
+            $names[] = $row['name'];
+        }
     }
     sort($names);
 

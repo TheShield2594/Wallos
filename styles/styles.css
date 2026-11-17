@@ -4532,3 +4532,7 @@ input[type="color"]::-moz-color-swatch {
   padding: 0 16px 14px;
   font-size: 13px;
 }
+
+#min-term-field {
+  margin-top: 12px;
+}

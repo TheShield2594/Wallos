@@ -2,6 +2,7 @@
 require_once '../../includes/connect_endpoint.php';
 require_once '../../includes/markdown.php';
 require_once '../../includes/payment_ledger.php';
+require_once '../../includes/cancellation_deadline.php';
 
 if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
     if (isset($_GET['id']) && $_GET['id'] != "") {
@@ -37,6 +38,14 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
             $subscriptionData['url'] = htmlspecialchars_decode($row['url'] ?? "");
             $subscriptionData['notify_days_before'] = $row['notify_days_before'];
             $subscriptionData['cancellation_date'] = $row['cancellation_date'];
+            $subscriptionData['cancel_notice_mode'] = wallos_cancel_mode($row);
+            $subscriptionData['cancel_notice_value'] = $row['cancel_notice_value'] === null ? null : (int) $row['cancel_notice_value'];
+            $subscriptionData['cancel_notice_unit'] = $row['cancel_notice_unit'] ?? null;
+            $subscriptionData['min_term_end'] = $row['min_term_end'] ?? null;
+            $deadline = wallos_cancel_deadline($row);
+            $subscriptionData['cancel_by'] = $deadline['cancel_by'] ?? null;
+            $subscriptionData['cancel_renewal'] = $deadline['renewal'] ?? null;
+            $subscriptionData['locked_until'] = wallos_cancel_locked_until($row);
             $subscriptionData['replacement_subscription_id'] = $row['replacement_subscription_id'];
             $subscriptionData['renew_from_action'] = (int) ($row['renew_from_action'] ?? 0);
             $subscriptionData['variable_amount'] = (int) ($row['variable_amount'] ?? 0);
@@ -65,4 +74,4 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
     echo json_encode(['error' => translate('session_expired', $i18n)]);
 }
 $db->close();
-?>
+?>
