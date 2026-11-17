@@ -144,6 +144,25 @@ wallos_test('households: an account already in a household cannot accept a secon
     $db->close();
 });
 
+wallos_test('households: creating a household and accepting an invite cannot both succeed', function () {
+    $db = households_fixture();
+    $aliceHousehold = wallos_household_membership($db, 1)['id'];
+
+    // dave's invite is accepted between his "not in a household" check and
+    // his create: the create's own statement sees the membership and refuses.
+    assert_true(wallos_household_respond($db, 4, $aliceHousehold, true)['success'], 'dave accepts');
+    assert_same('already_in_household', wallos_household_create($db, 4, 'Dave home')['error'] ?? null, 'the create is refused');
+    assert_same(0, $db->querySingle('SELECT COUNT(*) FROM households WHERE owner_user_id = 4'), 'no household was created');
+
+    // The other order: erin creates first, then an invite she had can no longer be accepted.
+    $db->exec("INSERT INTO household_members (household_id, user_id, role, status) VALUES ($aliceHousehold, 5, 'viewer', 'pending')");
+    assert_true(wallos_household_create($db, 5, 'Erin home')['success'], 'erin creates');
+    $db->exec("INSERT OR IGNORE INTO household_members (household_id, user_id, role, status) VALUES ($aliceHousehold, 5, 'viewer', 'pending')");
+    assert_same('already_in_household', wallos_household_respond($db, 5, $aliceHousehold, true)['error'] ?? null,
+        'an owner cannot then accept an invite');
+    $db->close();
+});
+
 wallos_test('households: amounts a member enters are kept in the owner currency', function () {
     $db = households_fixture();
     // alice pays in USD (rate 1.1 per EUR); bob has no USD, so he sees EUR.

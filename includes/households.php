@@ -378,24 +378,38 @@ function wallos_household_create(SQLite3 $db, $userId, $name)
     if ($name === '' || mb_strlen($name) > 80) {
         return ['success' => false, 'error' => 'invalid_name'];
     }
-    if (wallos_household_membership($db, $userId) !== null) {
-        return ['success' => false, 'error' => 'already_in_household'];
-    }
-    $stmt = $db->prepare('INSERT INTO households (name, owner_user_id) VALUES (:name, :ownerId)');
-    $stmt->bindValue(':name', $name, SQLITE3_TEXT);
-    $stmt->bindValue(':ownerId', (int) $userId, SQLITE3_INTEGER);
-    if ($stmt->execute() === false) {
-        return ['success' => false, 'error' => 'write_failed'];
-    }
-    $householdId = $db->lastInsertRowID();
-    // Invites the owner had pending are void now.
-    $stmt = $db->prepare("DELETE FROM household_members WHERE user_id = :userId AND status = 'pending'");
-    $stmt->bindValue(':userId', (int) $userId, SQLITE3_INTEGER);
-    if ($stmt->execute() === false) {
-        return ['success' => false, 'error' => 'write_failed'];
-    }
+    // One statement checks and creates, inside one transaction with voiding
+    // the owner's pending invites: an invite accepted at the same moment
+    // cannot make the account a member and an owner at once (the accept
+    // refuses an account that owns a household; see wallos_household_respond()).
+    $outcome = ['success' => false, 'error' => 'write_failed'];
+    wallos_household_transaction($db, function () use ($db, $userId, $name, &$outcome) {
+        $stmt = $db->prepare("INSERT INTO households (name, owner_user_id)
+            SELECT :name, :ownerId
+            WHERE NOT EXISTS (SELECT 1 FROM households WHERE owner_user_id = :ownerId)
+              AND NOT EXISTS (SELECT 1 FROM household_members WHERE user_id = :ownerId AND status = 'active')");
+        $stmt->bindValue(':name', $name, SQLITE3_TEXT);
+        $stmt->bindValue(':ownerId', (int) $userId, SQLITE3_INTEGER);
+        if ($stmt->execute() === false) {
+            return false;
+        }
+        if ($db->changes() === 0) {
+            $outcome = ['success' => false, 'error' => 'already_in_household'];
+            return false;
+        }
+        $householdId = $db->lastInsertRowID();
+        // Invites the owner had pending are void now.
+        $stmt = $db->prepare("DELETE FROM household_members WHERE user_id = :userId AND status = 'pending'");
+        $stmt->bindValue(':userId', (int) $userId, SQLITE3_INTEGER);
+        if ($stmt->execute() === false) {
+            return false;
+        }
+        $outcome = ['success' => true, 'household_id' => $householdId];
 
-    return ['success' => true, 'household_id' => $householdId];
+        return true;
+    });
+
+    return $outcome;
 }
 
 /**
