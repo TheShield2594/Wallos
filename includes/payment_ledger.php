@@ -42,11 +42,12 @@ function wallos_ledger_load_subscription(SQLite3 $db, $userId, $subscriptionId)
  * Records cycles the cron moved past, without touching rows that already exist.
  *
  * @param string[] $dueDates
+ * @return bool false when an insert failed
  */
 function wallos_ledger_record_cycles(SQLite3 $db, array $subscription, array $dueDates)
 {
     if ($dueDates === []) {
-        return;
+        return true;
     }
     $variable = (int) ($subscription['variable_amount'] ?? 0) === 1;
     $stmt = $db->prepare("INSERT OR IGNORE INTO subscription_payments
@@ -60,9 +61,13 @@ function wallos_ledger_record_cycles(SQLite3 $db, array $subscription, array $du
         $stmt->bindValue(':amount', $variable ? null : (float) $subscription['price'], $variable ? SQLITE3_NULL : SQLITE3_FLOAT);
         $stmt->bindValue(':currencyId', (int) $subscription['currency_id'], SQLITE3_INTEGER);
         $stmt->bindValue(':status', $variable ? 'pending_amount' : 'assumed', SQLITE3_TEXT);
-        $stmt->execute();
+        if ($stmt->execute() === false) {
+            return false;
+        }
         $stmt->reset();
     }
+
+    return true;
 }
 
 /**
@@ -120,28 +125,43 @@ function wallos_update_schedule(SQLite3 $db, array $subscription, array $fields)
  * one ledger row per cycle, payments_made counted, and a fixed-term plan
  * closed once its final payment has passed. Used by the renewal cron.
  *
- * @return array the result of wallos_advance_schedule()
+ * The ledger rows and the schedule update are one transaction, on the
+ * subscription as it stands inside it: a mark-paid or undo running at the
+ * same moment either happens wholly before (and is seen here) or wholly
+ * after, never between the ledger insert and the schedule update.
+ *
+ * @return array the result of wallos_advance_schedule(), plus 'success'
+ *               (false when the database was busy or a write failed; the
+ *               next cron run tries again)
  */
 function wallos_apply_schedule_advance(SQLite3 $db, array $subscription, DateTimeInterface $today)
 {
-    $advance = wallos_advance_schedule($subscription, $today);
-    if ($advance['due_dates'] === [] && !$advance['ended']) {
-        return $advance;
-    }
+    return wallos_ledger_transaction($db, function () use ($db, $subscription, $today) {
+        $current = wallos_ledger_load_subscription($db, $subscription['user_id'], $subscription['id']);
+        if ($current === false || (int) $current['auto_renew'] !== 1 || (int) $current['inactive'] === 1) {
+            return ['success' => true, 'due_dates' => [], 'next_payment' => $current['next_payment'] ?? null, 'ended' => false];
+        }
 
-    wallos_ledger_record_cycles($db, $subscription, $advance['due_dates']);
+        $advance = wallos_advance_schedule($current, $today);
+        if ($advance['due_dates'] === [] && !$advance['ended']) {
+            return $advance + ['success' => true];
+        }
 
-    $fields = [
-        'next_payment' => $advance['next_payment'],
-        'payments_made' => (int) ($subscription['payments_made'] ?? 0) + count($advance['due_dates']),
-    ];
-    if ($advance['ended']) {
-        $fields['inactive'] = 1;
-        $fields['ended_reason'] = 'completed';
-    }
-    wallos_update_schedule($db, $subscription, $fields);
+        $fields = [
+            'next_payment' => $advance['next_payment'],
+            'payments_made' => (int) ($current['payments_made'] ?? 0) + count($advance['due_dates']),
+        ];
+        if ($advance['ended']) {
+            $fields['inactive'] = 1;
+            $fields['ended_reason'] = 'completed';
+        }
+        if (!wallos_ledger_record_cycles($db, $current, $advance['due_dates'])
+            || !wallos_update_schedule($db, $current, $fields)) {
+            return ['success' => false, 'error' => 'write_failed'];
+        }
 
-    return $advance;
+        return $advance + ['success' => true];
+    });
 }
 
 /**
@@ -153,7 +173,8 @@ function wallos_apply_schedule_advance(SQLite3 $db, array $subscription, DateTim
  */
 function wallos_ledger_transaction(SQLite3 $db, callable $work)
 {
-    if ($db->exec('BEGIN IMMEDIATE') === false) {
+    // A busy database is reported to the caller, not as a PHP warning.
+    if (@$db->exec('BEGIN IMMEDIATE') === false) {
         return ['success' => false, 'error' => 'busy'];
     }
     try {

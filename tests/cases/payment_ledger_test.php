@@ -316,3 +316,40 @@ wallos_test('review fixes: a count-based plan keeps its count when payments rest
     assert_true($outcome['ended'], 'the next payment (Mar 20) would fall after the end date, so the plan ends');
     $db->close();
 });
+
+wallos_test('review fixes: the cron advance is atomic and works on the current row', function () {
+    $path = wallos_test_database();
+    $db = new SQLite3($path);
+    $db->busyTimeout(5000);
+    wallos_test_create_user($db, 1, 'alice');
+    $subscription = ledger_subscription($db, ['next_payment' => '2026-03-15']);
+    wallos_mark_paid($db, $subscription, new DateTime('2026-03-10')); // paid early
+
+    // Another request holds the write lock (an undo in progress): the cron
+    // writes nothing at all rather than a ledger row without its schedule.
+    $other = new SQLite3($path);
+    $other->exec('BEGIN IMMEDIATE');
+    $db->busyTimeout(50);
+    $blocked = wallos_apply_schedule_advance($db, $subscription, new DateTime('2026-03-20'));
+    assert_true(!$blocked['success'], 'the advance reports that it did not run');
+    $other->exec('ROLLBACK');
+    $other->close();
+    $db->busyTimeout(5000);
+    assert_same('2026-03-15', ledger_reload($db, $subscription)['next_payment'], 'the schedule is untouched');
+    assert_same(['paid'], array_column(ledger_rows($db, $subscription), 'status'), 'and so is the ledger');
+
+    // The undo then runs first; the cron sees its result, not its own stale copy.
+    assert_true(wallos_undo_paid($db, $subscription, '2026-03-15')['success'], 'the early payment is undone');
+    $stale = $subscription; // still read before the undo
+    $advance = wallos_apply_schedule_advance($db, $stale, new DateTime('2026-03-20'));
+    assert_true($advance['success'], 'the next run advances');
+    assert_same(['2026-03-15'], array_column(ledger_rows($db, $subscription), 'due_date'), 'the elapsed cycle has its row');
+    assert_same('assumed', ledger_rows($db, $subscription)[0]['status'], 'recorded as unconfirmed');
+    assert_same('2026-04-15', ledger_reload($db, $subscription)['next_payment'], 'and the schedule moved on');
+
+    // A stale copy of a row that was already advanced does nothing more.
+    $again = wallos_apply_schedule_advance($db, $stale, new DateTime('2026-03-20'));
+    assert_same([], $again['due_dates'], 'no cycle is counted twice');
+    assert_same(1, (int) ledger_reload($db, $subscription)['payments_made'], 'payments_made counted once');
+    $db->close();
+});
