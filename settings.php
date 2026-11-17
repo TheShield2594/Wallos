@@ -3,6 +3,7 @@ require_once 'includes/header.php';
 require_once 'includes/upcoming_payments.php';
 require_once 'includes/webpush_helper.php';
 require_once 'includes/households.php';
+require_once 'includes/monthly_cost.php';
 
 $currencies = array();
 $query = "SELECT * FROM currencies WHERE user_id = :userId";
@@ -1799,6 +1800,18 @@ $upcomingPaymentsLimit = normalize_upcoming_payments_limit($settings['upcoming_p
                     <input type="checkbox" id="showoriginalprice" name="showoriginalprice"
                         onChange="setShowOriginalPrice()" <?= $settings['show_original_price'] ? 'checked' : '' ?>>
                     <label for="showoriginalprice"><?= translate('show_original_price', $i18n) ?></label>
+                </div>
+            </div>
+            <div>
+                <div class="form-group">
+                    <label for="monthlycostmode"><?= translate('monthly_cost_counts', $i18n) ?></label>
+                    <?php $monthlyCostModeSetting = wallos_sanitize_monthly_cost_mode($settings['monthly_cost_mode'] ?? null); ?>
+                    <select id="monthlycostmode" name="monthlycostmode" onChange="setMonthlyCostMode()">
+                        <?php foreach (['amortized' => 'monthly_cost_mode_amortized', 'short_cycles' => 'monthly_cost_mode_short_cycles', 'cashflow' => 'monthly_cost_mode_cashflow'] as $modeValue => $modeLabel) { ?>
+                            <option value="<?= $modeValue ?>" <?= $monthlyCostModeSetting === $modeValue ? 'selected' : '' ?>><?= translate($modeLabel, $i18n) ?></option>
+                        <?php } ?>
+                    </select>
+                    <p class="form-hint"><?= translate('monthly_cost_counts_info', $i18n) ?></p>
                 </div>
             </div>
             <div>

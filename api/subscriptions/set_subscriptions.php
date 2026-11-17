@@ -35,6 +35,8 @@ For 'add' and 'edit' actions (all optional for 'edit'):
 - intro_notify_days: days before the end to send the "trial ending" reminder (default 3).
 - shared: 1 to share the subscription with your household, 0 to make it private.
 - replacement_subscription_id: the ID of the replacement subscription (integer).
+- tier_name: (edit) the plan or tier name (string, empty to clear).
+- price_change_reason: (edit) 'tier' (default, you changed plan) or 'provider' (the provider changed the price); recorded in the price history when the price, currency, cycle or frequency changes.
 
 It returns a JSON object with the following properties:
 - success: whether the request was successful (boolean).
@@ -60,6 +62,7 @@ require_once '../../includes/logo_theme_variant.php';
 require_once '../../includes/cancellation_deadline.php';
 require_once '../../includes/intro_pricing.php';
 require_once '../../includes/households.php';
+require_once '../../includes/price_changes.php';
 
 /**
  * Settings saved after the subscription row itself: the cancellation notice
@@ -1027,7 +1030,8 @@ switch ($action) {
                             url = :url,
                             notify_days_before = :notifyDaysBefore,
                             cancellation_date = :cancellationDate,
-                            replacement_subscription_id = :replacement_subscription_id
+                            replacement_subscription_id = :replacement_subscription_id,
+                            tier_name = :tierName
                        WHERE id = :id AND user_id = :userId";
 
         $stmtUpdate = $db->prepare($sqlUpdate);
@@ -1054,9 +1058,24 @@ switch ($action) {
         $stmtUpdate->bindParam(':replacement_subscription_id', $replacementSubscriptionId, SQLITE3_INTEGER);
         $stmtUpdate->bindParam(':id', $subscriptionId, SQLITE3_INTEGER);
         $stmtUpdate->bindParam(':userId', $userId, SQLITE3_INTEGER);
+        $tierName = array_key_exists('tier_name', $_POST) ? wallos_normalize_tier_name($_POST['tier_name']) : ($subscription['tier_name'] ?? null);
+        $stmtUpdate->bindValue(':tierName', $tierName, $tierName === null ? SQLITE3_NULL : SQLITE3_TEXT);
+        $priceChangeReason = ($_POST['price_change_reason'] ?? 'tier') === 'provider' ? 'provider' : 'tier';
 
-        $updated = api_save_atomically($db, function () use ($stmtUpdate, $subscriptionId) {
-            return $stmtUpdate->execute() !== false ? (int) $subscriptionId : false;
+        $updated = api_save_atomically($db, function () use ($db, $stmtUpdate, $subscriptionId, $subscription, $userId, $price, $currencyId, $cycle, $frequency, $tierName, $priceChangeReason) {
+            if ($stmtUpdate->execute() === false) {
+                return false;
+            }
+            // The old price goes into the price history (includes/price_changes.php).
+            $recorded = wallos_record_price_change($db, $userId, $subscriptionId, $subscription, [
+                'price' => $price,
+                'currency_id' => $currencyId,
+                'cycle' => $cycle,
+                'frequency' => $frequency,
+                'tier_name' => $tierName,
+            ], $priceChangeReason);
+
+            return $recorded ? (int) $subscriptionId : false;
         }, $extraFields['apply'], $userId);
         if ($updated !== false) {
             $updateResponse = [
@@ -1117,6 +1136,11 @@ switch ($action) {
             $stmtPayments->bindParam(':subId', $subscriptionId, SQLITE3_INTEGER);
             $stmtPayments->bindParam(':userId', $userId, SQLITE3_INTEGER);
             $stmtPayments->execute();
+
+            $stmtPriceChanges = $db->prepare("DELETE FROM subscription_price_changes WHERE subscription_id = :subId AND user_id = :userId");
+            $stmtPriceChanges->bindParam(':subId', $subscriptionId, SQLITE3_INTEGER);
+            $stmtPriceChanges->bindParam(':userId', $userId, SQLITE3_INTEGER);
+            $stmtPriceChanges->execute();
 
             // Nullify replacement_subscription_id references pointing to this subscription
             $queryCascade = "UPDATE subscriptions SET replacement_subscription_id = NULL WHERE replacement_subscription_id = :subId AND user_id = :userId";

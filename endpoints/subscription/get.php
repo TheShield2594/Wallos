@@ -32,6 +32,7 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
             $subscriptionData['logo_text_color'] = $row['logo_text_color'];
             $subscriptionData['logo_variant'] = $row['logo_variant'];
             $subscriptionData['price'] = $row['price'];
+            $subscriptionData['tier_name'] = $row['tier_name'] ?? null;
             $subscriptionData['currency_id'] = $row['currency_id'];
             $subscriptionData['auto_renew'] = $row['auto_renew'];
             $subscriptionData['start_date'] = $row['start_date'];

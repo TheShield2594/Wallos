@@ -5,6 +5,8 @@ require_once __DIR__ . '/default_names.php';
 require_once __DIR__ . '/recurrence.php';
 require_once __DIR__ . '/intro_pricing.php';
 require_once __DIR__ . '/households.php';
+require_once __DIR__ . '/monthly_cost.php';
+require_once __DIR__ . '/price_changes.php';
 
 function getPricePerMonth($cycle, $frequency, $price)
 {
@@ -105,13 +107,19 @@ $cancelledTrials = 0;
 $mostExpensiveSubscription = array();
 $mostExpensiveSubscription['price'] = 0;
 $amountDueThisMonth = 0;
+// Everything charged in the calendar month, past days included (the
+// "This month" view of the monthly cost).
+$chargesThisMonth = 0;
+// The amortized monthly cost split by cycle length (see includes/monthly_cost.php).
+$shortCycleCostPerMonth = 0;
+$longCycleCostPerMonth = 0;
 $totalCostPerMonth = 0;
 $totalCostPerYearSum = 0;
 $totalSavingsPerMonth = 0;
 $totalCostsInReplacementsPerMonth = 0;
 
 $statsSubtitleParts = [];
-$query = "SELECT name, price, logo, logo_text_color, logo_variant, frequency, cycle, currency_id, next_payment, payer_user_id, category_id, payment_method_id, inactive, replacement_subscription_id, start_date, auto_renew, billing_anchor_day, end_date, total_payments, payments_made, ended_reason, intro_type, intro_price, intro_end_date, intro_converted_on FROM subscriptions";
+$query = "SELECT id, name, price, logo, logo_text_color, logo_variant, frequency, cycle, currency_id, next_payment, payer_user_id, category_id, payment_method_id, inactive, replacement_subscription_id, start_date, auto_renew, billing_anchor_day, end_date, total_payments, payments_made, ended_reason, intro_type, intro_price, intro_end_date, intro_converted_on FROM subscriptions";
 $conditions = [];
 $params = [];
 
@@ -235,6 +243,11 @@ if ($result) {
                     }
                 }
                 $totalCostPerMonth += $price;
+                if (wallos_is_short_cycle($cycle, $frequency)) {
+                    $shortCycleCostPerMonth += $price;
+                } elseif ($cycle != 5) {
+                    $longCycleCostPerMonth += $price;
+                }
                 if (isset($memberCost[$payerId])) {
                     $memberCost[$payerId]['cost'] += $price;
                 }
@@ -260,6 +273,13 @@ if ($result) {
                         false
                     );
                     $amountDueThisMonth += getPriceConverted(wallos_price_of_occurrences($subscription, $dueThisMonth), $currency, $db, $userId);
+
+                    $chargedThisMonth = wallos_occurrences_in_range(
+                        $subscription,
+                        new DateTime('first day of this month'),
+                        new DateTime('last day of this month')
+                    );
+                    $chargesThisMonth += getPriceConverted(wallos_price_of_occurrences($subscription, $chargedThisMonth), $currency, $db, $userId);
                 }
             } elseif (($subscription['ended_reason'] ?? null) === 'completed') {
                 // A plan that ran its course was paid off, not cancelled:
@@ -295,6 +315,23 @@ if ($result) {
         // Subtract the total cost of replacement subscriptions from the total savings
         $totalSavingsPerMonth -= $totalCostsInReplacementsPerMonth;
 
+        // Plan changes of the active subscriptions on this page (filters
+        // apply): downgrades are savings, provider increases inflation.
+        $statsSubscriptionIds = [];
+        foreach ($subscriptions as $statsRow) {
+            if (empty($statsRow['shared_owner_name']) && (int) $statsRow['inactive'] === 0 && isset($statsRow['id'])) {
+                $statsSubscriptionIds[(int) $statsRow['id']] = true;
+            }
+        }
+        $priceChangeTotals = wallos_price_change_totals(
+            array_filter(wallos_active_price_changes($db, $userId), fn($change) => isset($statsSubscriptionIds[(int) $change['subscription_id']])),
+            date('Y-m-d'),
+            fn($amount, $currencyId) => getPriceConverted($amount, $currencyId, $db, $userId)
+        );
+        // Shown as its own line under "Your savings": the existing figures
+        // are labelled as savings on inactive subscriptions.
+        $planDowngradeSavingsPerMonth = $priceChangeTotals['downgrade_monthly'];
+
         // Yearly price (fixed-term plans only count their remaining payments)
         $totalCostPerYear = $totalCostPerYearSum;
 
@@ -328,14 +365,22 @@ $periodDiffersFromCalendarMonth = $budgetPeriodStart->format('Y-m-d') !== $calen
 
 $amountNeededThisPeriod = computeAmountNeededInPeriod($subscriptions ?? [], $today, $budgetPeriodEnd, $db, $userId);
 
+// The headline "Monthly cost" and the monthly budget follow the user's
+// choice: everything spread evenly, only monthly-or-shorter cycles, or this
+// month's charges. Averages, splits and yearly figures stay amortized.
+$monthlyCostMode = wallos_sanitize_monthly_cost_mode($settings['monthly_cost_mode'] ?? null);
+$headlineMonthlyCost = wallos_headline_monthly_cost($monthlyCostMode, $totalCostPerMonth, $shortCycleCostPerMonth, $chargesThisMonth);
+// Shown beside the short-cycles figure so longer plans don't disappear.
+$excludedYearlyCost = $monthlyCostMode === 'short_cycles' ? $longCycleCostPerMonth * 12 : 0;
+
 $showVsMonthlyBudgetGraph = false;
 $vsMonthlyBudgetDataPoints = [];
 if (isset($userData['budget']) && $userData['budget'] > 0) {
     $monthlyBudget = $userData['budget'];
-    $monthlyBudgetLeft = max(0, $monthlyBudget - $totalCostPerMonth);
-    $monthlyBudgetUsed = min(100, ($totalCostPerMonth / $monthlyBudget) * 100);
-    if ($totalCostPerMonth > $monthlyBudget) {
-        $monthlyOverBudgetAmount = $totalCostPerMonth - $monthlyBudget;
+    $monthlyBudgetLeft = max(0, $monthlyBudget - $headlineMonthlyCost);
+    $monthlyBudgetUsed = min(100, ($headlineMonthlyCost / $monthlyBudget) * 100);
+    if ($headlineMonthlyCost > $monthlyBudget) {
+        $monthlyOverBudgetAmount = $headlineMonthlyCost - $monthlyBudget;
     }
     $showVsMonthlyBudgetGraph = true;
     $vsMonthlyBudgetDataPoints = [
@@ -345,7 +390,7 @@ if (isset($userData['budget']) && $userData['budget'] > 0) {
         ],
         [
             "label" => translate('monthly_cost', $i18n),
-            "y" => $totalCostPerMonth,
+            "y" => $headlineMonthlyCost,
         ],
     ];
     // Backwards compatibility for pages still referencing legacy monthly budget variables.

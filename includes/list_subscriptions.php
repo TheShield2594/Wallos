@@ -304,6 +304,14 @@ function printSubscriptions($subscriptions, $sort, $categories, $members, $i18n,
         });
     }
 
+    // Sorted by cancel-by date: soonest first, grouped This month / Next
+    // month / Later, with the active rows that have no date after them.
+    $groupByCancelBy = $sort === 'cancellation_date';
+    if ($groupByCancelBy) {
+        $subscriptions = wallos_sort_by_cancel_by(array_values($subscriptions));
+        $today = date('Y-m-d');
+    }
+
     $groupByField = in_array($sort, ['category_id', 'payer_user_id', 'payment_method_id'], true);
     $groups = [];
     foreach ($subscriptions as $subscription) {
@@ -328,6 +336,10 @@ function printSubscriptions($subscriptions, $sort, $categories, $members, $i18n,
         } elseif ($subscription['inactive']) {
             $key = 'disabled';
             $title = translate('disabled', $i18n);
+        } elseif ($groupByCancelBy) {
+            $bucket = wallos_cancel_by_bucket($subscription['cancel_by'] ?? null, $today);
+            $key = $bucket === 'none' ? 'active' : 'cancel-' . $bucket;
+            $title = $bucket === 'none' ? translate('no_cancel_by_date', $i18n) : translate('cancel_by_' . $bucket, $i18n);
         } else {
             $key = 'active';
             $title = translate('active', $i18n);
@@ -339,7 +351,7 @@ function printSubscriptions($subscriptions, $sort, $categories, $members, $i18n,
     }
 
     // Fixed order for the state groups; field groups keep the sorted order.
-    $order = ['active' => 0, 'completed' => 2, 'shared' => 3, 'disabled' => 4, 'lifetime' => 5];
+    $order = ['cancel-this_month' => -3, 'cancel-next_month' => -2, 'cancel-later' => -1, 'active' => 0, 'completed' => 2, 'shared' => 3, 'disabled' => 4, 'lifetime' => 5];
     uksort($groups, function ($a, $b) use ($order, $groups) {
         $orderA = $order[$a] ?? 1;
         $orderB = $order[$b] ?? 1;
@@ -387,7 +399,16 @@ function printSubscriptions($subscriptions, $sort, $categories, $members, $i18n,
             </div>
             <?php
             $footer = '';
-            if ($key === 'active') {
+            if (strpos($key, 'cancel-') === 0) {
+                $monthlyTotal = array_sum(array_column($group['rows'], 'monthly_main'));
+                $footer = sprintf(
+                    translate('cancel_group_footer', $i18n),
+                    count($group['rows']),
+                    CurrencyFormatter::format($monthlyTotal, $mainCurrencyCode)
+                );
+            } elseif ($key === 'active' && $groupByCancelBy) {
+                $footer = '';
+            } elseif ($key === 'active') {
                 $monthlyTotal = array_sum(array_column($group['rows'], 'monthly_main'));
                 $footer = sprintf(
                     translate('active_footer', $i18n),

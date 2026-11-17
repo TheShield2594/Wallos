@@ -11,6 +11,7 @@ require_once '../../includes/payment_ledger.php';
 require_once '../../includes/cancellation_deadline.php';
 require_once '../../includes/intro_pricing.php';
 require_once '../../includes/households.php';
+require_once '../../includes/price_changes.php';
 
 if (!file_exists('../../images/uploads/logos')) {
     mkdir('../../images/uploads/logos', 0777, true);
@@ -257,6 +258,9 @@ $notify = isset($_POST['notifications']) ? true : false;
 $notifyDaysBefore = $_POST['notify_days_before'];
 $inactive = isset($_POST['inactive']) ? true : false;
 $replacementSubscriptionId = $_POST['replacement_subscription_id'];
+// Optional plan/tier label, and why the price changed (see includes/price_changes.php).
+$tierName = wallos_normalize_tier_name($_POST['tier_name'] ?? null);
+$priceChangeReason = ($_POST['price_change_reason'] ?? 'tier') === 'provider' ? 'provider' : 'tier';
 
 // Editing: the account's own subscription, or one shared with its household
 // where it is an editor. A shared edit acts on the owner's row and keeps the
@@ -383,7 +387,8 @@ if ($intro['next_payment'] !== null) {
 
 $existingSchedule = [];
 if ($isEdit) {
-    $scheduleStmt = $db->prepare("SELECT id, billing_anchor_day, payments_made, ended_reason, next_payment, start_date, cycle, frequency, renew_from_action
+    $scheduleStmt = $db->prepare("SELECT id, billing_anchor_day, payments_made, ended_reason, next_payment, start_date, cycle, frequency, renew_from_action,
+            price, currency_id, tier_name
         FROM subscriptions WHERE id = :id AND user_id = :userId");
     $scheduleStmt->bindValue(':id', $_POST['id'], SQLITE3_INTEGER);
     $scheduleStmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
@@ -517,14 +522,14 @@ if (!$isEdit) {
                         notify_days_before, user_id, cancellation_date, replacement_subscription_id,
                         auto_renew, start_date, logo_text_color, logo_variant,
                         billing_anchor_day, renew_from_action, variable_amount, end_date,
-                        total_payments, payments_made, ended_reason, plan_mode
+                        total_payments, payments_made, ended_reason, plan_mode, tier_name
                     ) VALUES (
                         :name, :logo, :price, :currencyId, :nextPayment, :cycle, :frequency, :notes,
                         :paymentMethodId, :payerUserId, :categoryId, :notify, :inactive, :url,
                         :notifyDaysBefore, :userId, :cancellationDate, :replacement_subscription_id,
                         :autoRenew, :startDate, :logoTextColor, :logoVariant,
                         :billingAnchorDay, :renewFromAction, :variableAmount, :endDate,
-                        :totalPayments, :paymentsMade, :endedReason, :planMode
+                        :totalPayments, :paymentsMade, :endedReason, :planMode, :tierName
                     )";
 } else {
     $id = $_POST['id'];
@@ -570,7 +575,8 @@ if (!$isEdit) {
                         total_payments = :totalPayments,
                         payments_made = :paymentsMade,
                         ended_reason = :endedReason,
-                        plan_mode = :planMode";
+                        plan_mode = :planMode,
+                        tier_name = :tierName";
 
     if ($logo != "") {
         $sql .= ", logo = :logo, logo_text_color = :logoTextColor, logo_variant = :logoVariant";
@@ -615,6 +621,7 @@ $stmt->bindValue(':totalPayments', $totalPayments, $totalPayments === null ? SQL
 $stmt->bindValue(':paymentsMade', $paymentsMade, SQLITE3_INTEGER);
 $stmt->bindValue(':endedReason', $endedReason, $endedReason === null ? SQLITE3_NULL : SQLITE3_TEXT);
 $stmt->bindValue(':planMode', $planMode, $planMode === null ? SQLITE3_NULL : SQLITE3_TEXT);
+$stmt->bindValue(':tierName', $tierName, $tierName === null ? SQLITE3_NULL : SQLITE3_TEXT);
 
 // The row, its cancellation notice, intro period and sharing are saved as
 // one unit: if any part fails, nothing is saved and the form stays open.
@@ -625,6 +632,17 @@ if ($saved) {
         $savedId = $isEdit ? $id : $db->lastInsertRowID();
         $saved = wallos_store_cancel_fields($db, $savedId, $userId, $cancelNotice['fields'])
             && wallos_store_intro_fields($db, $savedId, $userId, $intro['fields']);
+        // An edit that changed the price, currency, cycle or frequency keeps
+        // the old value in the price history.
+        if ($saved && $isEdit && !empty($existingSchedule)) {
+            $saved = wallos_record_price_change($db, $userId, $savedId, $existingSchedule, [
+                'price' => $price,
+                'currency_id' => $currencyId,
+                'cycle' => $cycle,
+                'frequency' => $frequency,
+                'tier_name' => $tierName,
+            ], $priceChangeReason);
+        }
         if ($saved && !$sharedEdit) {
             // Private, or shared with the owner's household.
             $saved = wallos_set_subscription_sharing($db, $userId, $savedId, ($_POST['visibility'] ?? 'private') === 'household'

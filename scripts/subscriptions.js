@@ -53,6 +53,7 @@ function resetForm() {
   delete document.querySelector("#next_payment").dataset.trialBase;
   toggleIntroFields();
   setSharedEditMode(null);
+  rememberPriceForChange(null);
   closeLogoSearch();
   const deleteButton = document.querySelector("#deletesub");
   deleteButton.style = 'display: none';
@@ -87,6 +88,7 @@ function fillEditFormFields(subscription) {
   name.value = subscription.name;
   const price = document.querySelector("#price");
   price.value = subscription.price;
+  document.querySelector("#tier_name").value = subscription.tier_name || '';
 
   const currencySelect = document.querySelector("#currency");
   currencySelect.value = subscription.currency_id.toString();
@@ -173,6 +175,7 @@ function fillEditFormFields(subscription) {
 
   // Last, so nothing above re-enables a locked field or shows Delete again.
   setSharedEditMode(subscription);
+  rememberPriceForChange(subscription);
 
   setFormOpen(true);
 }
@@ -519,12 +522,16 @@ function fetchSubscriptions(id, event, initiator) {
     });
 }
 
-function setSortOption(sortOption) {
+function storeSortOption(sortOption) {
   const daysToExpire = 30;
   const expirationDate = new Date();
   expirationDate.setDate(expirationDate.getDate() + daysToExpire);
   const cookieValue = encodeURIComponent(sortOption) + '; expires=' + expirationDate.toUTCString();
   document.cookie = 'sortOrder=' + cookieValue + '; SameSite=Lax';
+}
+
+function setSortOption(sortOption) {
+  storeSortOption(sortOption);
   fetchSubscriptions(null, null, "sort");
 }
 
@@ -779,8 +786,19 @@ function initFiltersFromUrl() {
   if (params.get('state') !== null && params.get('state') !== '') {
     activeFilters['state'] = params.get('state');
   }
+  if (params.get('notifications')) {
+    activeFilters['notifications'] = params.get('notifications').split(',')
+      .filter((type) => ['reminder', 'cancellation', 'none'].includes(type));
+  }
+  // A sort picked by the link (the server already applied it) is kept for
+  // later visits and list refreshes, as if chosen from the menu.
+  const sortSelect = document.querySelector('#sort-select');
+  if (params.get('sort') && sortSelect && sortSelect.value === params.get('sort')) {
+    storeSortOption(params.get('sort'));
+  }
   const clear = document.querySelector('#clear-filters');
-  if (clear && (activeFilters['categories'].length || activeFilters['members'].length || activeFilters['payments'].length || activeFilters['state'] !== '')) {
+  if (clear && (activeFilters['categories'].length || activeFilters['members'].length || activeFilters['payments'].length
+    || activeFilters['state'] !== '' || activeFilters['notifications'].length)) {
     clear.classList.remove('hide');
   }
 }
@@ -1432,3 +1450,100 @@ function setSharedEditMode(subscription) {
     deleteButton.style = 'display: none';
   }
 }
+
+// Price change notice: while editing, a change of price, currency, cycle or
+// frequency shows what it does per month ("−€10.00/mo (−€120.00/yr)") and
+// asks whether the provider changed the price or the user changed plan.
+function priceChangeMonthly(cycle, frequency, price) {
+  const every = Math.max(1, Number(frequency) || 1);
+  switch (Number(cycle)) {
+    case 1: return price * (30 / every);
+    case 2: return price * (4.35 / every);
+    case 3: return price / every;
+    case 4: return price / (12 * every);
+  }
+  return null;
+}
+
+function priceChangeFormat(amount, currencyCode) {
+  try {
+    return new Intl.NumberFormat(window.lang || 'en', { style: 'currency', currency: currencyCode }).format(amount);
+  } catch (e) {
+    return amount.toFixed(2);
+  }
+}
+
+function rememberPriceForChange(subscription) {
+  const notice = document.querySelector("#price-change-notice");
+  if (!notice) {
+    return;
+  }
+  const form = document.querySelector("#subs-form");
+  if (subscription && (subscription.access || 'owner') !== 'viewer') {
+    form.dataset.originalPrice = subscription.price;
+    form.dataset.originalCurrency = subscription.currency_id;
+    form.dataset.originalCycle = subscription.cycle;
+    form.dataset.originalFrequency = subscription.frequency;
+  } else {
+    delete form.dataset.originalPrice;
+    delete form.dataset.originalCurrency;
+    delete form.dataset.originalCycle;
+    delete form.dataset.originalFrequency;
+  }
+  document.querySelector("#price_change_provider").checked = false;
+  updatePriceChangeNotice();
+}
+
+function updatePriceChangeNotice() {
+  const notice = document.querySelector("#price-change-notice");
+  const form = document.querySelector("#subs-form");
+  if (!notice || form.dataset.originalPrice === undefined) {
+    if (notice) {
+      notice.classList.add("hide");
+    }
+    return;
+  }
+  const price = Number(document.querySelector("#price").value);
+  const currencySelect = document.querySelector("#currency");
+  const currency = currencySelect.value;
+  const cycle = document.querySelector("#cycle").value;
+  const frequency = document.querySelector("#frequency").value;
+  const oldPrice = Number(form.dataset.originalPrice);
+  const changed = Math.abs(price - oldPrice) >= 0.005
+    || String(currency) !== String(form.dataset.originalCurrency)
+    || String(cycle) !== String(form.dataset.originalCycle)
+    || String(frequency) !== String(form.dataset.originalFrequency);
+  notice.classList.toggle("hide", !changed || document.querySelector("#price").value === '');
+  if (!changed) {
+    return;
+  }
+
+  const delta = document.querySelector("#price-change-delta");
+  if (String(currency) !== String(form.dataset.originalCurrency)) {
+    delta.textContent = notice.dataset.currencyChanged;
+    return;
+  }
+  const oldMonthly = priceChangeMonthly(form.dataset.originalCycle, form.dataset.originalFrequency, oldPrice);
+  const newMonthly = priceChangeMonthly(cycle, frequency, price);
+  if (oldMonthly === null || newMonthly === null) {
+    delta.textContent = notice.dataset.oneTime;
+    return;
+  }
+  const code = currencySelect.selectedOptions[0] ? currencySelect.selectedOptions[0].dataset.code : '';
+  const difference = newMonthly - oldMonthly;
+  const sign = difference > 0 ? '+' : (difference < 0 ? '−' : '±');
+  delta.textContent = `${sign}${priceChangeFormat(Math.abs(difference), code)}${notice.dataset.perMonth}`
+    + ` (${sign}${priceChangeFormat(Math.abs(difference) * 12, code)}${notice.dataset.perYear})`;
+  delta.classList.toggle("is-success", difference < 0);
+  delta.classList.toggle("is-danger", difference > 0);
+}
+
+document.addEventListener("DOMContentLoaded", function () {
+  ["#price", "#currency", "#cycle", "#frequency"].forEach((selector) => {
+    const field = document.querySelector(selector);
+    if (field) {
+      field.addEventListener("input", updatePriceChangeNotice);
+      field.addEventListener("change", updatePriceChangeNotice);
+    }
+  });
+});

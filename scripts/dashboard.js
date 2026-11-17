@@ -90,3 +90,25 @@ document.addEventListener("DOMContentLoaded", function () {
     // Storage unavailable: keep the monthly view.
   }
 });
+
+// Monthly cost tile: Spread / This month. The default comes from the
+// "Monthly cost counts" setting; switching here only changes the view.
+document.addEventListener("DOMContentLoaded", function () {
+  const tile = document.getElementById("monthly-cost-tile");
+  if (!tile) {
+    return;
+  }
+  tile.querySelectorAll("[data-cost-view]").forEach(function (button) {
+    button.addEventListener("click", function () {
+      const view = button.dataset.costView;
+      tile.querySelectorAll("[data-cost-view]").forEach(function (other) {
+        const selected = other === button;
+        other.classList.toggle("is-selected", selected);
+        other.setAttribute("aria-pressed", selected ? "true" : "false");
+      });
+      tile.querySelectorAll("[data-cost-panel]").forEach(function (panel) {
+        panel.classList.toggle("hide", panel.dataset.costPanel !== view);
+      });
+    });
+  });
+});

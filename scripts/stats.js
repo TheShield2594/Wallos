@@ -323,3 +323,17 @@ document.querySelectorAll('.filter-item').forEach(function(item) {
 function clearFilters() {
     window.location.href = 'stats.php';
 }
+// "Custom" period: shows the date range form under the toolbar.
+function toggleCustomRange() {
+  const form = document.getElementById("stats-custom-range");
+  if (!form) {
+    return;
+  }
+  form.classList.toggle("hide");
+  if (!form.classList.contains("hide")) {
+    const from = form.querySelector('input[name="from"]');
+    if (from) {
+      from.focus();
+    }
+  }
+}

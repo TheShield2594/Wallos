@@ -5,11 +5,17 @@ It receives the following parameters:
 - month: the month for which the cost is to be calculated (integer).
 - year: the year for which the cost is to be calculated (integer).
 - api_key: the API key of the user (string).
+- mode (optional): what the cost counts (string).
+    cashflow      (default) every payment that falls in the month.
+    amortized     every active subscription spread evenly per month (a
+                  yearly 120 counts as 10).
+    short_cycles  as amortized, but only cycles of a month or shorter.
 
 It returns a JSON object with the following properties:
 - success: whether the request was successful (boolean).
 - title: a string with "${month} ${year}" (e.g., "March 2025").
 - monthly_cost: a float with the total cost for the given month.
+- mode: the mode the cost was calculated with.
 - localized_monthly_cost: a string with the total cost formatted according to the user's locale and currency.
 - currency_code: a string with the currency code of the user's main currency.
 - currency_symbol: a string with the currency symbol of the user's main currency.
@@ -30,6 +36,7 @@ Example response:
 require_once '../../includes/connect_endpoint.php';
 require_once '../../includes/recurrence.php';
 require_once '../../includes/intro_pricing.php';
+require_once '../../includes/monthly_cost.php';
 
 header('Content-Type: application/json; charset=UTF-8');
 
@@ -49,6 +56,15 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" || $_SERVER["REQUEST_METHOD"] === "GET
 
     $month = $_REQUEST['month'];
     $year = $_REQUEST['year'];
+    $mode = $_REQUEST['mode'] ?? 'cashflow';
+    if (!in_array($mode, WALLOS_MONTHLY_COST_MODES, true)) {
+        echo json_encode([
+            "success" => false,
+            "title" => "Invalid mode",
+            "notes" => ["mode must be one of: " . implode(', ', WALLOS_MONTHLY_COST_MODES) . "."]
+        ]);
+        exit;
+    }
 
     $sql = "SELECT * FROM user WHERE api_key = :apiKey";
     $stmt = $db->prepare($sql);
@@ -120,12 +136,23 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" || $_SERVER["REQUEST_METHOD"] === "GET
     $monthStart = new DateTime(sprintf('%04d-%02d-01', $year, $month));
     $monthEnd = (clone $monthStart)->modify('last day of this month');
     foreach ($subscriptions as $subscription) {
-        $dates = wallos_occurrences_in_range($subscription, $monthStart, $monthEnd);
-        if ($dates === []) {
-            continue;
+        if ($mode === 'cashflow') {
+            $dates = wallos_occurrences_in_range($subscription, $monthStart, $monthEnd);
+            if ($dates === []) {
+                continue;
+            }
+            // Each payment at its own price (an intro price during a trial or promo).
+            $price = wallos_price_of_occurrences($subscription, $dates);
+        } else {
+            // Spread evenly, at the price that applies at the start of the month.
+            if ((int) $subscription['cycle'] === 5) {
+                continue;
+            }
+            if ($mode === 'short_cycles' && !wallos_is_short_cycle($subscription['cycle'], $subscription['frequency'])) {
+                continue;
+            }
+            $price = wallos_price_per_month($subscription['cycle'], $subscription['frequency'], wallos_price_on($subscription, $monthStart->format('Y-m-d')));
         }
-        // Each payment at its own price (an intro price during a trial or promo).
-        $price = wallos_price_of_occurrences($subscription, $dates);
         if (
             $userCurrencyId !== $subscription['currency_id']
             && $canConvertCurrency
@@ -144,6 +171,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" || $_SERVER["REQUEST_METHOD"] === "GET
         'success' => true,
         'title' => $title,
         'monthly_cost' => number_format($monthlyCost, 2),
+        'mode' => $mode,
         'localized_monthly_cost' => $localizedMonthlyCost,
         'currency_code' => $currency_code,
         'currency_symbol' => $currency_symbol,
