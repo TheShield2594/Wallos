@@ -1804,6 +1804,22 @@ $upcomingPaymentsLimit = normalize_upcoming_payments_limit($settings['upcoming_p
             </div>
             <div>
                 <div class="form-group">
+                    <label for="dateformat"><?= translate('date_format', $i18n) ?></label>
+                    <?php
+                    $dateFormatSetting = wallos_sanitize_date_format($settings['date_format'] ?? null);
+                    $dateFormatSample = new DateTime(date('Y') . '-12-31');
+                    ?>
+                    <select id="dateformat" name="dateformat" onChange="setDateFormat()">
+                        <option value="auto" <?= $dateFormatSetting === 'auto' ? 'selected' : '' ?>><?= translate('date_format_auto', $i18n) ?></option>
+                        <?php foreach (['dmy', 'mdy', 'iso', 'd_mon_y', 'mon_d_y'] as $formatValue) { ?>
+                            <option value="<?= $formatValue ?>" <?= $dateFormatSetting === $formatValue ? 'selected' : '' ?>><?= htmlspecialchars(tally_format_date($dateFormatSample, 'long', $lang, $formatValue)) ?></option>
+                        <?php } ?>
+                    </select>
+                    <p class="form-hint"><?= translate('date_format_info', $i18n) ?></p>
+                </div>
+            </div>
+            <div>
+                <div class="form-group">
                     <label for="monthlycostmode"><?= translate('monthly_cost_counts', $i18n) ?></label>
                     <?php $monthlyCostModeSetting = wallos_sanitize_monthly_cost_mode($settings['monthly_cost_mode'] ?? null); ?>
                     <select id="monthlycostmode" name="monthlycostmode" onChange="setMonthlyCostMode()">

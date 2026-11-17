@@ -65,7 +65,7 @@ $ledgerMonths = wallos_ledger_monthly_totals($db, $userId,
 $actualPaymentsDataPoints = [];
 foreach (array_slice($ledgerMonths, -12, null, true) as $month => $total) {
     $actualPaymentsDataPoints[] = [
-        'label' => (new IntlDateFormatter($lang, IntlDateFormatter::NONE, IntlDateFormatter::NONE, null, null, 'MMM yy'))->format(new DateTime($month . '-01')),
+        'label' => tally_format_date($month . '-01', 'month', $lang),
         'y' => round($total, 2),
     ];
 }
@@ -360,9 +360,8 @@ $actualYearOverYear = $actualLastYear > 0 ? ($actualThisYear - $actualLastYear) 
         <div class="card period-charges">
           <div class="card-list">
             <?php
-            $chargeDateFormatter = new IntlDateFormatter($lang, IntlDateFormatter::MEDIUM, IntlDateFormatter::NONE);
             foreach ($periodCharges['charges'] as $charge) {
-              $chargeSubtitle = $chargeDateFormatter->format(new DateTime($charge['date']));
+              $chargeSubtitle = tally_format_date($charge['date'], 'long', $lang);
               if (!empty($charge['shared_owner_name'])) {
                 $chargeSubtitle = sprintf(translate('shared_by', $i18n), $charge['shared_owner_name']) . ' · ' . $chargeSubtitle;
               }

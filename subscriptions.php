@@ -194,14 +194,6 @@ if (isset($_GET['category']) && ctype_digit((string) $_GET['category']) && isset
   $pageTitle = (int) $_GET['category'] === 1 ? translate('no_category', $i18n) : htmlspecialchars_decode($categories[(int) $_GET['category']]['name']);
 }
 
-$formatter = new IntlDateFormatter(
-  'en', // Force English locale
-  IntlDateFormatter::SHORT,
-  IntlDateFormatter::NONE,
-  null,
-  null,
-  'MMM d, yyyy'
-);
 
 $print = [];
 foreach ($subscriptions as $subscription) {
@@ -222,7 +214,7 @@ foreach ($subscriptions as $subscription) {
   $print[$id]['currency_code'] = $currencies[$subscription['currency_id']]['code'];
   $currencyId = $subscription['currency_id'];
   $print[$id]['auto_renew'] = $subscription['auto_renew'];
-  $print[$id]['next_payment'] = $formatter->format(strtotime($subscription['next_payment']));
+  $print[$id]['next_payment'] = tally_format_date($subscription['next_payment'], 'long', $lang);
   $print[$id]['payment_method_name'] = $payment_methods[$paymentMethodId]['name'] ?? '';
   $print[$id]['payment_method_id'] = $paymentMethodId;
   $print[$id]['category_id'] = $subscription['category_id'];

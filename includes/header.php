@@ -53,12 +53,6 @@ if (isset($themeValue)) {
 
 $isAdmin = $_SESSION['userId'] == 1;
 
-$locale = isset($_COOKIE['user_locale']) ? $_COOKIE['user_locale'] : 'en_US';
-$formatter = new IntlDateFormatter(
-  $locale, 
-  IntlDateFormatter::MEDIUM,
-  IntlDateFormatter::NONE
-);
 
 function hex2rgb($hex)
 {
@@ -171,6 +165,7 @@ function page_toolbar_end()
     window.theme = <?= json_encode($theme, JSON_HEX_TAG | JSON_HEX_QUOT | JSON_HEX_AMP | JSON_HEX_APOS) ?>;
     window.update_theme_settings = "<?= $updateThemeSettings ?>";
     window.lang = "<?= $lang ?>";
+    window.tallyDateFormat = <?= json_encode($settings['date_format'] ?? 'auto') ?>;
     window.colorTheme = <?= json_encode($colorTheme, JSON_HEX_TAG | JSON_HEX_QUOT | JSON_HEX_AMP | JSON_HEX_APOS) ?>;
     window.csrfToken = "<?= htmlspecialchars(generate_csrf_token()) ?>";
   </script>

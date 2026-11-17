@@ -1208,7 +1208,7 @@ function updateEndsHint() {
     if (total >= 1) {
       const final = stepOccurrence(schedule.next, schedule.cycle, schedule.frequency, total - schedule.made - 1, schedule.anchorDay);
       if (final) {
-        hint.textContent = hint.dataset.finalPayment.replace('%s', final.toLocaleDateString(window.lang || 'en', { day: 'numeric', month: 'short', year: 'numeric' }));
+        hint.textContent = hint.dataset.finalPayment.replace('%s', tallyFormatDate(final, 'long'));
       }
     }
     return;
@@ -1332,7 +1332,7 @@ function updateCancelNoticeHint() {
     return;
   }
   const cancelBy = subtractNotice(renewal, value, document.querySelector("#cancel_notice_unit").value);
-  const format = (date) => date.toLocaleDateString(window.lang || 'en', { day: 'numeric', month: 'short', year: 'numeric' });
+  const format = (date) => tallyFormatDate(date, 'long');
   if (minTermEnd && schedule.next < minTermEnd) {
     hint.textContent = hint.dataset.locked
       .replace('%1$s', format(minTermEnd)).replace('%2$s', format(cancelBy)).replace('%3$s', format(renewal));
@@ -1400,7 +1400,7 @@ function updateIntroHint() {
   if (!end) {
     return;
   }
-  const formatted = end.toLocaleDateString(window.lang || 'en', { day: 'numeric', month: 'short', year: 'numeric' });
+  const formatted = tallyFormatDate(end, 'long');
   hint.textContent = (type === 'trial' ? hint.dataset.trial : hint.dataset.promo).replace('%s', formatted);
   const today = new Date();
   today.setHours(0, 0, 0, 0);

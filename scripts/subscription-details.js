@@ -69,16 +69,13 @@ function detailsParseDate(dateString) {
 }
 
 function detailsFormatDate(dateString, options) {
-  const date = detailsParseDate(dateString);
-  if (!date) {
+  if (!detailsParseDate(dateString)) {
     return dateString || "";
   }
-  const format = options || { day: 'numeric', month: 'short', year: 'numeric' };
-  try {
-    return date.toLocaleDateString(window.lang || 'en', format);
-  } catch (e) {
-    return date.toLocaleDateString('en', format);
-  }
+  // Callers that leave the year out want the short form (year only when it
+  // is not this year); everything else shows the full date.
+  const style = options && !options.year ? 'short' : 'long';
+  return tallyFormatDate(dateString, style);
 }
 
 function detailsDaysUntil(dateString) {

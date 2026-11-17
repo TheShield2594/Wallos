@@ -1093,6 +1093,10 @@ function setMonthlyCostMode() {
   storeSettingsOnDB('monthly_cost_mode', document.querySelector("#monthlycostmode").value);
 }
 
+function setDateFormat() {
+  storeSettingsOnDB('date_format', document.querySelector("#dateformat").value);
+}
+
 function setShowCategoryCard() {
   const checkbox = document.querySelector("#showcategorycard");
   storeSettingsOnDB('category_card', checkbox.checked);

@@ -4,13 +4,8 @@
 // All monetary values are converted to the main currency. Lifetime figures assume current prices.
 
 require_once __DIR__ . '/price_histogram.php';
+require_once __DIR__ . '/date_format.php';
 
-$monthLabelFormatter = null;
-try {
-    $monthLabelFormatter = new IntlDateFormatter($lang, IntlDateFormatter::SHORT, IntlDateFormatter::NONE, null, null, 'MMM yy');
-} catch (Throwable $e) {
-    $monthLabelFormatter = new IntlDateFormatter('en', IntlDateFormatter::SHORT, IntlDateFormatter::NONE, null, null, 'MMM yy');
-}
 
 // Currency codes for the currency exposure split
 $currencyCodesById = [];
@@ -28,7 +23,7 @@ $projectionEnd = (clone $projectionStart)->modify('+12 months');
 for ($i = 0; $i < 12; $i++) {
     $bucketDate = (clone $projectionStart)->modify("+$i months");
     $projectionBuckets[$bucketDate->format('Y-m')] = [
-        'label' => $monthLabelFormatter->format($bucketDate),
+        'label' => tally_format_date($bucketDate, 'month', $lang),
         'total' => 0,
     ];
 }

@@ -178,4 +178,76 @@ function getCookie(name) {
     }
   }
   return null;
-}
+}
+/*
+  Date formatting that follows Settings > Display > Date format, the same
+  table as includes/date_format.php. style: 'short' (year only when it is not
+  the current year), 'long' (always the year) or 'month'.
+*/
+const TALLY_DATE_FORMATS = {
+  dmy: { order: ['day', 'month', 'year'], sep: '/', numeric: true },
+  mdy: { order: ['month', 'day', 'year'], sep: '/', numeric: true },
+  iso: { order: ['year', 'month', 'day'], sep: '-', numeric: true, alwaysYear: true },
+  d_mon_y: { order: ['day', 'month', 'year'], sep: ' ', numeric: false },
+  mon_d_y: { order: ['month', 'day', 'year'], sep: ' ', numeric: false },
+};
+
+function tallyParseDate(value) {
+  if (value instanceof Date) {
+    return isNaN(value) ? null : value;
+  }
+  if (typeof value !== 'string' || value.length < 10) {
+    return null;
+  }
+  const date = new Date(value.substring(0, 10) + 'T00:00:00');
+  return isNaN(date) ? null : date;
+}
+
+function tallyFormatDate(value, style) {
+  const date = tallyParseDate(value);
+  if (!date) {
+    return value || '';
+  }
+  style = style || 'short';
+  const lang = window.lang || 'en';
+  const withYear = style !== 'short' || date.getFullYear() !== new Date().getFullYear();
+  const format = TALLY_DATE_FORMATS[window.tallyDateFormat];
+
+  if (!format) {
+    const options = style === 'month'
+      ? { month: 'short', year: '2-digit' }
+      : { day: 'numeric', month: 'short', year: withYear ? 'numeric' : undefined };
+    try {
+      return date.toLocaleDateString(lang, options);
+    } catch (e) {
+      return date.toLocaleDateString('en', options);
+    }
+  }
+
+  const pad = (number) => String(number).padStart(2, '0');
+  let monthName;
+  try {
+    monthName = date.toLocaleDateString(lang, { month: 'short' });
+  } catch (e) {
+    monthName = date.toLocaleDateString('en', { month: 'short' });
+  }
+  const parts = {
+    day: format.numeric ? pad(date.getDate()) : String(date.getDate()),
+    month: format.numeric ? pad(date.getMonth() + 1) : monthName,
+    year: String(date.getFullYear()),
+  };
+
+  if (style === 'month') {
+    if (window.tallyDateFormat === 'iso') {
+      return parts.year + '-' + parts.month;
+    }
+    const year = parts.year.substring(2);
+    return format.numeric ? parts.month + '/' + year : monthName + ' ' + year;
+  }
+
+  const fields = format.order.filter((field) => field !== 'year' || withYear || format.alwaysYear);
+  if (window.tallyDateFormat === 'mon_d_y' && fields.includes('year')) {
+    return parts.month + ' ' + parts.day + ', ' + parts.year;
+  }
+  return fields.map((field) => parts[field]).join(format.sep);
+}

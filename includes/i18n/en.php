@@ -763,6 +763,10 @@ $i18n = [
     "provider_price_changes" => "Provider price changes",
     "since_changes_total" => "%s since the changes",
     "plan_changes_info" => "Per month, from the price changes of active subscriptions. Downgrades count towards your savings.",
+    // Date format
+    "date_format" => "Date format",
+    "date_format_auto" => "Automatic (from language)",
+    "date_format_info" => "Used for dates across Tally. Date pickers follow your browser's settings.",
 ];
 
 

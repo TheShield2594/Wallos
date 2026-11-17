@@ -3,6 +3,7 @@
 require_once __DIR__ . '/currency_rates.php';
 require_once __DIR__ . '/recurrence.php';
 require_once __DIR__ . '/intro_pricing.php';
+require_once __DIR__ . '/date_format.php';
 
 if (!function_exists('sanitizeBudgetPeriodType')) {
     function sanitizeBudgetPeriodType($periodType)
@@ -112,15 +113,7 @@ if (!function_exists('getActiveBudgetPeriod')) {
 if (!function_exists('formatBudgetPeriodLabel')) {
     function formatBudgetPeriodLabel(DateTime $start, DateTime $end)
     {
-        $startLabel = $start->format('M j');
-        $endLabel = $end->format('M j');
-
-        if ($start->format('Y') !== $end->format('Y')) {
-            $startLabel .= ', ' . $start->format('Y');
-            $endLabel .= ', ' . $end->format('Y');
-        }
-
-        return $startLabel . ' - ' . $endLabel;
+        return tally_format_date_range($start, $end);
     }
 }
 
