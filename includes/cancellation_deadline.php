@@ -185,6 +185,48 @@ function wallos_cancellation_due(array $subscription, $today)
 }
 
 /**
+ * Key of one reminder in a notification run: what it is about ('cancel' or
+ * 'intro') and which subscription.
+ */
+function wallos_notification_key($type, $subscriptionId)
+{
+    return $type . ':' . (int) $subscriptionId;
+}
+
+/**
+ * Records the reminders a channel delivered (each entry carries its 'key').
+ */
+function wallos_notifications_delivered(array &$delivered, array $entries)
+{
+    foreach ($entries as $entry) {
+        if (isset($entry['key'])) {
+            $delivered[$entry['key']] = true;
+        }
+    }
+}
+
+/**
+ * The "sent" markers to store: only for reminders at least one channel
+ * delivered, so the others are tried again on the next run.
+ *
+ * @param array  $reminded  subscription id => marker
+ * @param array  $delivered key => true
+ * @param string $type      'cancel' or 'intro'
+ * @return array subscription id => marker
+ */
+function wallos_delivered_markers(array $reminded, array $delivered, $type)
+{
+    $markers = [];
+    foreach ($reminded as $subscriptionId => $marker) {
+        if (!empty($delivered[wallos_notification_key($type, $subscriptionId)])) {
+            $markers[$subscriptionId] = $marker;
+        }
+    }
+
+    return $markers;
+}
+
+/**
  * Validates the cancellation fields of a save request.
  *
  * @param array $input  mode, cancellation_date, notice value/unit, min_term_end

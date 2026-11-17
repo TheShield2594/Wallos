@@ -182,3 +182,40 @@ wallos_test('the cancellation cron keeps the account id while looping over house
     assert_same(7, substr_count($source, "household WHERE id = :id AND user_id = :ownerId"),
         'every channel looks up the payer within the owning account');
 });
+
+wallos_test('only delivered reminders are marked as sent, per reminder and per type', function () {
+    require_once WALLOS_ROOT . '/includes/cancellation_deadline.php';
+
+    // A webhook batch for one payer: the request for subscription 1 succeeded,
+    // the one for subscription 2 failed.
+    $delivered = [];
+    wallos_notifications_delivered($delivered, [['key' => wallos_notification_key('cancel', 1)]]);
+
+    assert_same([1 => '2026-12-01'], wallos_delivered_markers([1 => '2026-12-01', 2 => '2026-12-03'], $delivered, 'cancel'),
+        'the failed reminder in a partly delivered batch stays unmarked and is retried');
+    assert_same([], wallos_delivered_markers([1 => '2026-12-04'], $delivered, 'intro'),
+        'a delivered cancellation reminder does not mark the trial reminder of the same subscription');
+
+    // A per-payer message (email, Telegram, ...) delivers every reminder in it.
+    $delivered = [];
+    wallos_notifications_delivered($delivered, [
+        ['key' => wallos_notification_key('cancel', 3)],
+        ['key' => wallos_notification_key('intro', 4)],
+    ]);
+    assert_same([3 => 'a'], wallos_delivered_markers([3 => 'a'], $delivered, 'cancel'), 'the cancellation reminder in it');
+    assert_same([4 => 'converted:2026-12-04'], wallos_delivered_markers([4 => 'converted:2026-12-04'], $delivered, 'intro'), 'and the trial notice');
+
+    assert_same([], wallos_delivered_markers([5 => 'b'], [], 'cancel'), 'nothing delivered, nothing marked');
+});
+
+wallos_test('the cancellation cron counts an HTTP error answer as undelivered', function () {
+    $source = file_get_contents(WALLOS_ROOT . '/endpoints/cronjobs/sendcancellationnotifications.php');
+
+    assert_same(6, substr_count($source, '$httpCode < 200 || $httpCode >= 300'),
+        'Discord, Gotify, Telegram, Pushover, ntfy and the webhook accept only a 2xx answer');
+    assert_same(6, substr_count($source, 'wallos_notifications_delivered($delivered, $perUser)'),
+        'every per-payer channel records the reminders it delivered');
+    assert_contains('wallos_notifications_delivered($delivered, [$subscription])', $source,
+        'the webhook records each reminder on its own');
+    assert_not_contains('deliveredPayers', $source, 'no per-payer shortcut is left');
+});
