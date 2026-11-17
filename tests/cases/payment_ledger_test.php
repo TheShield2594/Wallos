@@ -162,7 +162,7 @@ wallos_test('marking an automatic renewal as paid confirms the last cycle or pay
     assert_same('paid', $rows[0]['status'], 'the assumed cycle is confirmed');
     assert_same('2026-04-15', ledger_reload($db, $subscription)['next_payment'], 'the schedule is not moved');
 
-    $badge = wallos_paid_badge_date($subscription, wallos_ledger_last_paid_map($db, 1)[$subscription['id']] ?? null);
+    $badge = wallos_paid_badge_date($subscription, wallos_ledger_last_paid_map($db, 1)[$subscription['id']] ?? null, new DateTime('2026-03-21'));
     assert_same('2026-03-21', $badge, 'the row shows Paid until the next due date');
 
     // Paying early: the upcoming cycle is recorded, the cron keeps it.
@@ -240,4 +240,79 @@ wallos_test('deleting a subscription removes its payment history', function () {
     assert_contains('DELETE FROM subscription_payments', $source, 'the delete endpoint cascades to the ledger');
     $api = file_get_contents(WALLOS_ROOT . '/api/subscriptions/set_subscriptions.php');
     assert_contains('DELETE FROM subscription_payments', $api, 'so does the API delete');
+});
+
+wallos_test('review fixes: confirming in another currency, badge expiry and paid-date totals', function () {
+    $db = ledger_open_database();
+    $subscription = ledger_subscription($db, ['next_payment' => '2026-03-15']);
+    wallos_apply_schedule_advance($db, $subscription, new DateTime('2026-03-20'));
+
+    // The subscription moves to USD before the assumed EUR cycle is confirmed.
+    $db->exec('UPDATE subscriptions SET currency_id = ' . wallos_test_currency_id(1, 1) . ' WHERE id = ' . (int) $subscription['id']);
+    wallos_mark_paid($db, ledger_reload($db, $subscription), new DateTime('2026-04-02'), 44);
+    $row = ledger_rows($db, $subscription)[0];
+    assert_same(wallos_test_currency_id(1, 1), (int) $row['currency_id'], 'the confirmed amount is stored with its own currency');
+
+    // Paid on Apr 2 for the Mar 15 cycle: counted in April.
+    $totals = wallos_ledger_monthly_totals($db, 1, '2026-03', '2026-04');
+    assert_same(0.0, $totals['2026-03'], 'nothing was paid in March');
+    assert_true($totals['2026-04'] > 0, 'the payment counts in the month it was made');
+
+    // A manual renewal confirmed one cycle but still behind is overdue, not paid.
+    $manual = ledger_subscription($db, ['next_payment' => '2026-01-31', 'auto_renew' => 0, 'billing_anchor_day' => 31]);
+    wallos_mark_paid($db, $manual, new DateTime('2026-04-02'));
+    $manual = ledger_reload($db, $manual);
+    $lastPaid = wallos_ledger_last_paid_map($db, 1)[$manual['id']] ?? null;
+    assert_same(null, wallos_paid_badge_date($manual, $lastPaid, new DateTime('2026-04-02')), 'no badge once the next due date has passed');
+    assert_same('2026-04-02', wallos_paid_badge_date($manual, $lastPaid, new DateTime('2026-02-10')), 'the badge shows before it');
+    $db->close();
+});
+
+wallos_test('review fixes: undo after a restarted cycle, and undo on a completed automatic plan', function () {
+    $db = ledger_open_database();
+    // Paid early on Feb 1 for the Mar 15 cycle; the cycle restarts and next_payment becomes Mar 1.
+    $early = ledger_subscription($db, ['next_payment' => '2026-03-15', 'auto_renew' => 0, 'renew_from_action' => 1, 'billing_anchor_day' => 15]);
+    wallos_mark_paid($db, $early, new DateTime('2026-02-01'));
+    assert_same('2026-03-01', ledger_reload($db, $early)['next_payment'], 'the cycle restarted');
+    assert_true(wallos_undo_paid($db, $early, '2026-03-15')['success'], 'the only payment can still be undone');
+    assert_same('2026-03-15', ledger_reload($db, $early)['next_payment'], 'and the schedule goes back');
+
+    // An automatic plan whose final cycle was paid early, then completed.
+    $plan = ledger_subscription($db, ['next_payment' => '2026-03-10', 'end_date' => '2026-03-10', 'total_payments' => 1]);
+    wallos_mark_paid($db, $plan, new DateTime('2026-03-05'));
+    wallos_apply_schedule_advance($db, ledger_reload($db, $plan), new DateTime('2026-03-20'));
+    assert_same('completed', ledger_reload($db, $plan)['ended_reason'], 'the plan completed');
+    assert_true(wallos_undo_paid($db, $plan, '2026-03-10')['success'], 'undone');
+    $rows = ledger_rows($db, $plan);
+    assert_same(1, count($rows), 'the final cycle is kept, not deleted');
+    assert_same('assumed', $rows[0]['status'], 'it goes back to unconfirmed');
+    $db->close();
+});
+
+wallos_test('review fixes: a count-based plan keeps its count when payments restart the cycle', function () {
+    $db = ledger_open_database();
+    $plan = ledger_subscription($db, [
+        'next_payment' => '2026-01-15', 'auto_renew' => 0, 'renew_from_action' => 1, 'billing_anchor_day' => 15,
+        'end_date' => '2026-03-15', 'total_payments' => 3, 'plan_mode' => 'count',
+    ]);
+    $dates = ['2026-01-15', '2026-02-20', '2026-03-20'];
+    $outcomes = [];
+    foreach ($dates as $date) {
+        $outcomes[] = wallos_mark_paid($db, ledger_reload($db, $plan), new DateTime($date));
+    }
+    assert_same([false, false, true], array_column($outcomes, 'ended'), 'only the third payment ends the plan');
+    $after = ledger_reload($db, $plan);
+    assert_same(3, (int) $after['payments_made'], 'three payments');
+    assert_same('completed', $after['ended_reason'], 'completed after the third');
+    assert_same(3, count(ledger_rows($db, $plan)), 'each payment recorded');
+
+    // A date-based plan keeps its date instead.
+    $byDate = ledger_subscription($db, [
+        'next_payment' => '2026-01-15', 'auto_renew' => 0, 'renew_from_action' => 1, 'billing_anchor_day' => 15,
+        'end_date' => '2026-03-15', 'total_payments' => 3, 'plan_mode' => 'date',
+    ]);
+    wallos_mark_paid($db, $byDate, new DateTime('2026-01-15'));
+    $outcome = wallos_mark_paid($db, ledger_reload($db, $byDate), new DateTime('2026-02-20'));
+    assert_true($outcome['ended'], 'the next payment (Mar 20) would fall after the end date, so the plan ends');
+    $db->close();
 });

@@ -44,6 +44,7 @@ function resetForm() {
   replacementSubscription.classList.add("hide");
   const form = document.querySelector("#subs-form");
   form.reset();
+  delete form.dataset.anchorDay;
   toggleOneTimeCycleUI(false);
   toggleEndsFields();
   toggleVariableAmount();
@@ -126,6 +127,7 @@ function fillEditFormFields(subscription) {
   document.querySelector("#ends_mode").value = subscription.ends_mode || 'never';
   document.querySelector("#end_date").value = subscription.end_date || '';
   document.querySelector("#total_payments").value = subscription.total_payments || '';
+  document.querySelector("#subs-form").dataset.anchorDay = subscription.billing_anchor_day || '';
   toggleEndsFields();
   toggleVariableAmount();
   toggleRenewFromAction();
@@ -891,6 +893,13 @@ function toggleOneTimeCycleUI(isOneTime) {
   const endsGroup = document.querySelector("#ends-group");
   const renewFromActionGroup = document.querySelector("#renew-from-action-group");
   if (endsGroup) endsGroup.classList.toggle('hide', isOneTime);
+  // Hidden fields still take part in validation: disable them for a one-time
+  // payment so a required end date can't block saving, and restore them after.
+  ['#ends_mode', '#end_date', '#total_payments'].forEach((selector) => {
+    const field = document.querySelector(selector);
+    if (field) field.disabled = isOneTime;
+  });
+  if (!isOneTime && document.querySelector("#ends_mode")) toggleEndsFields();
   if (renewFromActionGroup && isOneTime) renewFromActionGroup.classList.add('hide');
 
   if (isOneTime) {
@@ -1075,18 +1084,35 @@ function stepOccurrence(date, cycle, frequency, steps, anchorDay) {
   }
 }
 
+// The billing day the server will store (wallos_anchor_day_for_save()): the
+// saved anchor while next_payment still sits on it, otherwise the day of
+// next_payment, or the start day for a month-end or rolled-over date.
+function formAnchorDay(next, start, cycle) {
+  if (!next || (String(cycle) !== '3' && String(cycle) !== '4')) {
+    return null;
+  }
+  const monthEnd = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
+  const form = document.querySelector("#subs-form");
+  const saved = form ? Number(form.dataset.anchorDay) || 0 : 0;
+  if (saved >= 1 && saved <= 31 && Math.min(saved, monthEnd) === next.getDate()) {
+    return saved;
+  }
+  let anchor = next.getDate();
+  if (start) {
+    const startDay = start.getDate();
+    if (startDay > anchor && (anchor === monthEnd || (startDay >= 29 && anchor <= 3))) {
+      anchor = startDay;
+    }
+  }
+  return anchor;
+}
+
 function formSchedule() {
   const next = parseFormDate(document.querySelector("#next_payment").value);
   const start = parseFormDate(document.querySelector("#start_date").value);
   const cycle = document.querySelector("#cycle").value;
   const frequency = Number(document.querySelector("#frequency").value) || 1;
-  let anchorDay = next ? next.getDate() : null;
-  if (next && start && start.getDate() > anchorDay) {
-    const monthEnd = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
-    if (anchorDay === monthEnd) {
-      anchorDay = start.getDate();
-    }
-  }
+  const anchorDay = formAnchorDay(next, start, cycle);
   // Payments already made: scheduled dates from the start date up to the
   // next payment, as the server counts them (wallos_plan_fields()).
   let made = 0;

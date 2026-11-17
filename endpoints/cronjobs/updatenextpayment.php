@@ -6,6 +6,17 @@ require_once __DIR__ . '/../../includes/payment_ledger.php';
 
 require 'settimezone.php';
 
+// Overlapping runs would each read the due rows and write them back in turn,
+// so an older run could put back a schedule a newer run already advanced.
+// Skip this run when another one holds the lock; the next run recalculates
+// from the stored dates. (db/wallos.lock is shared by every connection, so it
+// can't serve here.) Without a lock file the run goes ahead as before.
+$cronLock = @fopen(__DIR__ . '/../../db/updatenextpayment.lock', 'c');
+if ($cronLock !== false && !flock($cronLock, LOCK_EX | LOCK_NB)) {
+    echo "Another next payment update is running; skipping this run.\n";
+    exit(0);
+}
+
 $date = new DateTime('now');
 echo "\n" . $date->format('Y-m-d') . " " . $date->format('H:i:s') . "<br />\n";
 echo $timezone . "<br />\n";

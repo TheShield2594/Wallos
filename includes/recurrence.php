@@ -249,17 +249,26 @@ function wallos_occurrences_in_range(array $subscription, DateTimeInterface $ran
         return $inRange($next) ? [$next] : [];
     }
 
-    // Walk back to the first occurrence at or before the range start.
-    $current = $next;
+    // next_payment is the seed and is always kept as it is stored: it may not
+    // sit on the anchor (a date the old arithmetic rolled over, such as the
+    // 3rd under an anchor of 31), and walking back and forth through the
+    // anchored schedule would replace it. Earlier and later occurrences are
+    // generated separately from it.
+    $earlier = [];
+    $current = wallos_previous_occurrence($subscription, $next);
     $guard = 0;
-    while ($current > $start && $guard++ < WALLOS_RECURRENCE_MAX_STEPS) {
+    while ($current >= $start && $guard++ < WALLOS_RECURRENCE_MAX_STEPS) {
         if ($firstAllowed !== null && $current < $firstAllowed) {
             break;
+        }
+        if ($current <= $end) {
+            $earlier[] = $current;
         }
         $current = wallos_previous_occurrence($subscription, $current);
     }
 
-    $occurrences = [];
+    $occurrences = array_reverse($earlier);
+    $current = $next;
     $guard = 0;
     while ($current <= $end && $guard++ < WALLOS_RECURRENCE_MAX_STEPS) {
         if ($inRange($current)) {
@@ -342,25 +351,36 @@ function wallos_count_occurrences_before_next(array $subscription, DateTimeInter
  * Fills in the fixed-term plan fields when a subscription is saved.
  *
  * The form edits either the end date or the number of payments; the other is
- * derived so both are always stored. payments_made is counted from the start
- * date when there is one.
+ * derived so both are always stored, and plan_mode records which one the
+ * user chose (a count-based plan keeps its count when a manual payment
+ * restarts the cycle; a date-based plan keeps its date). payments_made is
+ * counted from the start date when there is one.
  *
- * @param array  $subscription row with next_payment, start_date, cycle, frequency, billing_anchor_day, payments_made
+ * A completed plan keeps its stored payments_made: its next_payment stays on
+ * the final payment, which was already made, so counting the dates before it
+ * would lose that payment on every save.
+ *
+ * @param array  $subscription row with next_payment, start_date, cycle, frequency,
+ *                             billing_anchor_day, payments_made, ended_reason
  * @param string $mode         'never', 'date' or 'count'
  * @param mixed  $endDate
  * @param mixed  $totalPayments
- * @return array{end_date: ?string, total_payments: ?int, payments_made: int}
+ * @return array{end_date: ?string, total_payments: ?int, payments_made: int, plan_mode: ?string}
  */
 function wallos_plan_fields(array $subscription, $mode, $endDate, $totalPayments)
 {
     $paymentsMade = max(0, (int) ($subscription['payments_made'] ?? 0));
+    $completed = ($subscription['ended_reason'] ?? null) === 'completed';
     $start = wallos_parse_date($subscription['start_date'] ?? null);
     $next = wallos_parse_date($subscription['next_payment'] ?? null);
-    if ($start !== null && $next !== null && wallos_is_recurring($subscription)) {
+    if (!$completed && $start !== null && $next !== null && wallos_is_recurring($subscription)) {
         $paymentsMade = wallos_count_occurrences_before_next($subscription, $start);
     }
+    // Payments made before next_payment; for a completed plan next_payment
+    // itself was the final one.
+    $madeBeforeNext = $completed ? max(0, $paymentsMade - 1) : $paymentsMade;
 
-    $none = ['end_date' => null, 'total_payments' => null, 'payments_made' => $paymentsMade];
+    $none = ['end_date' => null, 'total_payments' => null, 'payments_made' => $paymentsMade, 'plan_mode' => null];
     if ($next === null || !wallos_is_recurring($subscription)) {
         return $none;
     }
@@ -370,12 +390,12 @@ function wallos_plan_fields(array $subscription, $mode, $endDate, $totalPayments
         if ($total < 1) {
             return $none;
         }
-        $remaining = $total - $paymentsMade;
         // The final payment is $remaining - 1 steps after next_payment; a plan
-        // that is already paid off ended on the payment before next_payment.
+        // that is already paid off ended on a payment before next_payment.
+        $remaining = $total - $madeBeforeNext;
         $final = wallos_step_occurrence($next, $subscription, $remaining - 1);
 
-        return ['end_date' => $final->format('Y-m-d'), 'total_payments' => $total, 'payments_made' => $paymentsMade];
+        return ['end_date' => $final->format('Y-m-d'), 'total_payments' => $total, 'payments_made' => $paymentsMade, 'plan_mode' => 'count'];
     }
 
     if ($mode === 'date') {
@@ -390,7 +410,8 @@ function wallos_plan_fields(array $subscription, $mode, $endDate, $totalPayments
             $current = wallos_next_occurrence($subscription, $current);
         }
 
-        return ['end_date' => $final->format('Y-m-d'), 'total_payments' => $paymentsMade + $upcoming, 'payments_made' => $paymentsMade];
+        return ['end_date' => $final->format('Y-m-d'), 'total_payments' => $madeBeforeNext + $upcoming,
+            'payments_made' => $paymentsMade, 'plan_mode' => 'date'];
     }
 
     return $none;

@@ -74,7 +74,8 @@ function wallos_ledger_upsert_paid(SQLite3 $db, array $subscription, $dueDate, $
         (subscription_id, user_id, due_date, paid_date, amount, currency_id, status, source)
         VALUES (:subscriptionId, :userId, :dueDate, :paidDate, :amount, :currencyId, 'paid', :source)
         ON CONFLICT(subscription_id, due_date) DO UPDATE SET
-            paid_date = excluded.paid_date, amount = excluded.amount, status = 'paid', source = excluded.source");
+            paid_date = excluded.paid_date, amount = excluded.amount, currency_id = excluded.currency_id,
+            status = 'paid', source = excluded.source");
     $stmt->bindValue(':subscriptionId', (int) $subscription['id'], SQLITE3_INTEGER);
     $stmt->bindValue(':userId', (int) $subscription['user_id'], SQLITE3_INTEGER);
     $stmt->bindValue(':dueDate', $dueDate, SQLITE3_TEXT);
@@ -93,7 +94,7 @@ function wallos_ledger_upsert_paid(SQLite3 $db, array $subscription, $dueDate, $
  */
 function wallos_update_schedule(SQLite3 $db, array $subscription, array $fields)
 {
-    $allowed = ['next_payment', 'payments_made', 'inactive', 'ended_reason', 'billing_anchor_day'];
+    $allowed = ['next_payment', 'payments_made', 'inactive', 'ended_reason', 'billing_anchor_day', 'end_date', 'total_payments'];
     $sets = [];
     foreach (array_keys($fields) as $column) {
         if (!in_array($column, $allowed, true)) {
@@ -144,6 +145,38 @@ function wallos_apply_schedule_advance(SQLite3 $db, array $subscription, DateTim
 }
 
 /**
+ * Runs $work inside one write transaction. $work returns an array with a
+ * 'success' key; anything other than success (or an exception) rolls back.
+ * SQLite3 has no beginTransaction(), so the transaction is run as statements.
+ *
+ * @return array
+ */
+function wallos_ledger_transaction(SQLite3 $db, callable $work)
+{
+    if ($db->exec('BEGIN IMMEDIATE') === false) {
+        return ['success' => false, 'error' => 'busy'];
+    }
+    try {
+        $outcome = $work();
+    } catch (Throwable $error) {
+        $db->exec('ROLLBACK');
+        throw $error;
+    }
+    if (empty($outcome['success'])) {
+        $db->exec('ROLLBACK');
+
+        return $outcome;
+    }
+    if ($db->exec('COMMIT') === false) {
+        $db->exec('ROLLBACK');
+
+        return ['success' => false, 'error' => 'write_failed'];
+    }
+
+    return $outcome;
+}
+
+/**
  * Marks the current cycle of a recurring subscription as paid.
  *
  * Manual renewals: records the payment for next_payment and moves
@@ -155,19 +188,38 @@ function wallos_apply_schedule_advance(SQLite3 $db, array $subscription, DateTim
  * without confirmation; when there is none, records the upcoming cycle as
  * paid early and leaves next_payment alone, so the cron does not skip it twice.
  *
+ * The subscription is read again inside the transaction, so a renewal cron
+ * running at the same moment cannot leave it working on a stale schedule.
+ *
  * @param float|null $amount null keeps the list price (or the amount already recorded)
  * @return array{success: bool, error?: string, due_date?: string, next_payment?: string, ended?: bool}
  */
 function wallos_mark_paid(SQLite3 $db, array $subscription, DateTimeInterface $today, $amount = null)
+{
+    if ($amount !== null && (!is_numeric($amount) || (float) $amount < 0)) {
+        return ['success' => false, 'error' => 'invalid_amount'];
+    }
+
+    return wallos_ledger_transaction($db, function () use ($db, $subscription, $today, $amount) {
+        $current = wallos_ledger_load_subscription($db, $subscription['user_id'], $subscription['id']);
+        if ($current === false) {
+            return ['success' => false, 'error' => 'not_found'];
+        }
+
+        return wallos_mark_paid_locked($db, $current, $today, $amount);
+    });
+}
+
+/**
+ * @see wallos_mark_paid() - runs inside its transaction
+ */
+function wallos_mark_paid_locked(SQLite3 $db, array $subscription, DateTimeInterface $today, $amount)
 {
     if (!wallos_is_recurring($subscription)) {
         return ['success' => false, 'error' => 'not_recurring'];
     }
     if ((int) $subscription['inactive'] === 1) {
         return ['success' => false, 'error' => 'inactive'];
-    }
-    if ($amount !== null && (!is_numeric($amount) || (float) $amount < 0)) {
-        return ['success' => false, 'error' => 'invalid_amount'];
     }
     $todayString = $today->format('Y-m-d');
     $next = wallos_parse_date($subscription['next_payment']);
@@ -182,35 +234,44 @@ function wallos_mark_paid(SQLite3 $db, array $subscription, DateTimeInterface $t
         $stmt->bindValue(':next', $next->format('Y-m-d'), SQLITE3_TEXT);
         $open = $stmt->execute()->fetchArray(SQLITE3_ASSOC);
 
-        if ($open !== false) {
-            $value = $amount ?? ($open['amount'] ?? $subscription['price']);
-            wallos_ledger_upsert_paid($db, $subscription, $open['due_date'], $todayString, $value, 'manual');
-
-            return ['success' => true, 'due_date' => $open['due_date'], 'next_payment' => $next->format('Y-m-d'), 'ended' => false];
+        $dueDate = $open !== false ? $open['due_date'] : $next->format('Y-m-d');
+        $value = $amount ?? ($open !== false && $open['amount'] !== null ? $open['amount'] : $subscription['price']);
+        if (!wallos_ledger_upsert_paid($db, $subscription, $dueDate, $todayString, $value, 'manual')) {
+            return ['success' => false, 'error' => 'write_failed'];
         }
 
-        wallos_ledger_upsert_paid($db, $subscription, $next->format('Y-m-d'), $todayString, $amount ?? $subscription['price'], 'manual');
-
-        return ['success' => true, 'due_date' => $next->format('Y-m-d'), 'next_payment' => $next->format('Y-m-d'), 'ended' => false];
+        return ['success' => true, 'due_date' => $dueDate, 'next_payment' => $next->format('Y-m-d'), 'ended' => false];
     }
 
     $dueDate = $next->format('Y-m-d');
-    $fields = ['payments_made' => (int) ($subscription['payments_made'] ?? 0) + 1];
+    $paymentsMade = (int) ($subscription['payments_made'] ?? 0) + 1;
+    $fields = ['payments_made' => $paymentsMade];
+    $schedule = $subscription;
     if ((int) ($subscription['renew_from_action'] ?? 0) === 1) {
         // Restart the cycle on the day of payment, anchored to that day.
         $anchor = in_array((int) $subscription['cycle'], [3, 4], true) ? (int) $today->format('j') : null;
-        $reanchored = array_merge($subscription, ['billing_anchor_day' => $anchor]);
-        $newNext = wallos_next_occurrence($reanchored, $today);
+        $schedule = array_merge($subscription, ['billing_anchor_day' => $anchor]);
+        $newNext = wallos_next_occurrence($schedule, $today);
         $fields['billing_anchor_day'] = $anchor;
     } else {
         $newNext = wallos_next_occurrence($subscription, $next);
     }
 
-    $ended = false;
-    $planEnd = wallos_subscription_end_date($subscription);
-    if ($planEnd !== null && $newNext > $planEnd) {
+    $total = (int) ($subscription['total_payments'] ?? 0);
+    if (($subscription['plan_mode'] ?? null) === 'count' && $total > 0) {
+        // A plan of N payments ends after the Nth, wherever the cycle moved;
+        // the final date follows the (possibly restarted) schedule.
+        $ended = $paymentsMade >= $total;
+        if (!$ended) {
+            $fields['end_date'] = wallos_step_occurrence($newNext, $schedule, $total - $paymentsMade - 1)->format('Y-m-d');
+        }
+    } else {
+        $planEnd = wallos_subscription_end_date($subscription);
+        $ended = $planEnd !== null && $newNext > $planEnd;
+    }
+
+    if ($ended) {
         // That was the final payment of the plan.
-        $ended = true;
         $fields['inactive'] = 1;
         $fields['ended_reason'] = 'completed';
         $fields['next_payment'] = $dueDate;
@@ -218,8 +279,10 @@ function wallos_mark_paid(SQLite3 $db, array $subscription, DateTimeInterface $t
         $fields['next_payment'] = $newNext->format('Y-m-d');
     }
 
-    wallos_ledger_upsert_paid($db, $subscription, $dueDate, $todayString, $amount ?? $subscription['price'], 'manual');
-    wallos_update_schedule($db, $subscription, $fields);
+    if (!wallos_ledger_upsert_paid($db, $subscription, $dueDate, $todayString, $amount ?? $subscription['price'], 'manual')
+        || !wallos_update_schedule($db, $subscription, $fields)) {
+        return ['success' => false, 'error' => 'write_failed'];
+    }
 
     return ['success' => true, 'due_date' => $dueDate, 'next_payment' => $fields['next_payment'], 'ended' => $ended];
 }
@@ -229,16 +292,35 @@ function wallos_mark_paid(SQLite3 $db, array $subscription, DateTimeInterface $t
  *
  * Manual renewals: removes the row and moves next_payment back to its due
  * date (only for the most recent payment, so the schedule stays consistent).
- * Automatic renewals: a cycle the cron already moved past goes back to
- * unconfirmed; an early payment for the upcoming cycle is removed.
+ * Automatic renewals: a cycle the cron already moved past (or the final
+ * cycle of a completed plan) goes back to unconfirmed; an early payment for
+ * the upcoming cycle is removed.
+ *
+ * Like wallos_mark_paid(), it reads the subscription again inside its
+ * transaction instead of trusting the caller's copy.
  *
  * @return array{success: bool, error?: string}
  */
 function wallos_undo_paid(SQLite3 $db, array $subscription, $dueDate)
 {
+    return wallos_ledger_transaction($db, function () use ($db, $subscription, $dueDate) {
+        $current = wallos_ledger_load_subscription($db, $subscription['user_id'], $subscription['id']);
+        if ($current === false) {
+            return ['success' => false, 'error' => 'not_found'];
+        }
+
+        return wallos_undo_paid_locked($db, $current, (string) $dueDate);
+    });
+}
+
+/**
+ * @see wallos_undo_paid() - runs inside its transaction
+ */
+function wallos_undo_paid_locked(SQLite3 $db, array $subscription, $dueDate)
+{
     $stmt = $db->prepare("SELECT * FROM subscription_payments WHERE subscription_id = :id AND due_date = :dueDate AND status = 'paid'");
     $stmt->bindValue(':id', (int) $subscription['id'], SQLITE3_INTEGER);
-    $stmt->bindValue(':dueDate', (string) $dueDate, SQLITE3_TEXT);
+    $stmt->bindValue(':dueDate', $dueDate, SQLITE3_TEXT);
     $row = $stmt->execute()->fetchArray(SQLITE3_ASSOC);
     if ($row === false) {
         return ['success' => false, 'error' => 'not_found'];
@@ -246,35 +328,37 @@ function wallos_undo_paid(SQLite3 $db, array $subscription, $dueDate)
 
     $delete = $db->prepare('DELETE FROM subscription_payments WHERE id = :id');
     $delete->bindValue(':id', (int) $row['id'], SQLITE3_INTEGER);
+    $completed = ($subscription['ended_reason'] ?? null) === 'completed';
 
     if ((int) $subscription['auto_renew'] !== 1) {
+        // Only the most recent payment. Its due date can be after
+        // next_payment when the cycle restarted on an early payment.
         $latest = $db->prepare('SELECT MAX(due_date) FROM subscription_payments WHERE subscription_id = :id');
         $latest->bindValue(':id', (int) $subscription['id'], SQLITE3_INTEGER);
         $latestDue = $latest->execute()->fetchArray(SQLITE3_NUM)[0] ?? null;
-        if ($latestDue !== $row['due_date'] || $row['due_date'] > $subscription['next_payment']) {
+        if ($latestDue !== $row['due_date']) {
             return ['success' => false, 'error' => 'not_latest'];
         }
 
-        $delete->execute();
         $fields = [
             'next_payment' => $row['due_date'],
             'payments_made' => max(0, (int) ($subscription['payments_made'] ?? 0) - 1),
             'billing_anchor_day' => wallos_anchor_day_for_save($row['due_date'], $subscription['start_date'] ?? null,
                 $subscription['cycle'], $subscription['billing_anchor_day'] ?? null),
         ];
-        if (($subscription['ended_reason'] ?? null) === 'completed') {
+        if ($completed) {
             $fields['inactive'] = 0;
             $fields['ended_reason'] = null;
         }
-        wallos_update_schedule($db, $subscription, $fields);
+        if ($delete->execute() === false || !wallos_update_schedule($db, $subscription, $fields)) {
+            return ['success' => false, 'error' => 'write_failed'];
+        }
 
         return ['success' => true];
     }
 
-    if ($row['due_date'] >= $subscription['next_payment']) {
-        $delete->execute();
-
-        return ['success' => true];
+    if ($row['due_date'] >= $subscription['next_payment'] && !$completed) {
+        return ['success' => $delete->execute() !== false];
     }
 
     $variable = (int) ($subscription['variable_amount'] ?? 0) === 1;
@@ -284,9 +368,8 @@ function wallos_undo_paid(SQLite3 $db, array $subscription, $dueDate)
     $revert->bindValue(':paidDate', $variable ? null : $row['due_date'], $variable ? SQLITE3_NULL : SQLITE3_TEXT);
     $revert->bindValue(':amount', $variable ? null : (float) $subscription['price'], $variable ? SQLITE3_NULL : SQLITE3_FLOAT);
     $revert->bindValue(':id', (int) $row['id'], SQLITE3_INTEGER);
-    $revert->execute();
 
-    return ['success' => true];
+    return ['success' => $revert->execute() !== false];
 }
 
 /**
@@ -380,17 +463,20 @@ function wallos_ledger_last_paid_map(SQLite3 $db, $userId)
  * @param array|null $lastPaid an entry of wallos_ledger_last_paid_map()
  * @return string|null the paid date to show, or null for no badge
  */
-function wallos_paid_badge_date(array $subscription, $lastPaid)
+function wallos_paid_badge_date(array $subscription, $lastPaid, ?DateTimeInterface $today = null)
 {
     if ($lastPaid === null || !wallos_is_recurring($subscription) || (int) $subscription['inactive'] === 1) {
         return null;
     }
     $next = wallos_parse_date($subscription['next_payment'] ?? null);
-    if ($next === null) {
+    $today = new DateTime(($today ?? new DateTime('today'))->format('Y-m-d'));
+    // The badge lasts until the next due date: a manual renewal confirmed
+    // one cycle but still behind is overdue, not paid.
+    if ($next === null || $next <= $today) {
         return null;
     }
     $previous = wallos_previous_occurrence($subscription, $next);
-    if ($lastPaid['due_date'] < $previous->format('Y-m-d')) {
+    if ($previous === null || $lastPaid['due_date'] < $previous->format('Y-m-d')) {
         return null;
     }
 
@@ -424,7 +510,7 @@ function wallos_ledger_open_items(SQLite3 $db, $userId, $includeAssumed, $limit 
 }
 
 /**
- * Actual spend per month from the ledger, in the main currency.
+ * Actual spend per month from the ledger (by paid date), in the main currency.
  *
  * @param string $fromMonth 'Y-m', inclusive
  * @param string $toMonth   'Y-m', inclusive
@@ -440,9 +526,13 @@ function wallos_ledger_monthly_totals(SQLite3 $db, $userId, $fromMonth, $toMonth
         $cursor->modify('+1 month');
     }
 
-    $stmt = $db->prepare("SELECT substr(due_date, 1, 7) AS month, currency_id, SUM(amount) AS total
+    // Bucketed by the day the money went out. Unconfirmed ('assumed') rows
+    // carry their due date as paid_date, and rows still waiting for an
+    // amount have none, so neither is counted as something it is not.
+    $stmt = $db->prepare("SELECT substr(COALESCE(paid_date, due_date), 1, 7) AS month, currency_id, SUM(amount) AS total
         FROM subscription_payments
-        WHERE user_id = :userId AND amount IS NOT NULL AND due_date >= :from AND due_date < :to
+        WHERE user_id = :userId AND amount IS NOT NULL
+          AND COALESCE(paid_date, due_date) >= :from AND COALESCE(paid_date, due_date) < :to
         GROUP BY month, currency_id");
     $stmt->bindValue(':userId', (int) $userId, SQLITE3_INTEGER);
     $stmt->bindValue(':from', $fromMonth . '-01', SQLITE3_TEXT);

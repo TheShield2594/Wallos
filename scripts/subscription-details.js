@@ -571,7 +571,11 @@ function detailsLoadHistory(subscription) {
       }
       detailsRenderHistory(subscription, data && data.success ? data.payments : []);
     })
-    .catch(() => detailsRenderHistory(subscription, []));
+    .catch(() => {
+      if (currentDetailsId === requestedId) {
+        detailsRenderHistory(subscription, []);
+      }
+    });
 }
 
 function detailsRenderHistory(subscription, payments) {

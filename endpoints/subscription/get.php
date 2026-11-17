@@ -44,7 +44,8 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
             $subscriptionData['total_payments'] = $row['total_payments'] === null ? null : (int) $row['total_payments'];
             $subscriptionData['payments_made'] = (int) ($row['payments_made'] ?? 0);
             $subscriptionData['ended_reason'] = $row['ended_reason'] ?? null;
-            $subscriptionData['ends_mode'] = !empty($row['end_date']) ? 'date' : 'never';
+            $subscriptionData['ends_mode'] = $row['plan_mode'] ?? (!empty($row['end_date']) ? 'date' : 'never');
+            $subscriptionData['billing_anchor_day'] = $row['billing_anchor_day'] === null ? null : (int) $row['billing_anchor_day'];
             $lastPaid = wallos_ledger_last_paid_map($db, $userId)[(int) $row['id']] ?? null;
             $subscriptionData['paid_badge'] = wallos_paid_badge_date($row, $lastPaid);
             $subscriptionData['paid_due_date'] = $subscriptionData['paid_badge'] !== null ? $lastPaid['due_date'] : null;

@@ -229,3 +229,32 @@ wallos_test('the JavaScript port of the anchor steps matches PHP', function () {
     assert_same(array_column(recurrence_shared_vectors(), 5), json_decode((string) $output, true),
         'stepOccurrence() in scripts/subscriptions.js gives the same dates (' . trim((string) $output) . ')');
 });
+
+wallos_test('review fixes: projections keep a stored next_payment that is off the anchor', function () {
+    // Migrated row: next_payment rolled over to Mar 3 under an anchor of 31.
+    $subscription = recurrence_subscription(['next_payment' => '2026-03-03', 'billing_anchor_day' => 31, 'end_date' => '2026-03-15']);
+    assert_same(['2026-03-03'],
+        recurrence_ymd(wallos_occurrences_in_range($subscription, new DateTime('2026-03-01'), new DateTime('2026-03-31'))),
+        'March bills on the 3rd, as stored');
+    $open = recurrence_subscription(['next_payment' => '2026-03-03', 'billing_anchor_day' => 31]);
+    // Mar 3 + 1 month lands on the anchor in April, as the renewal cron does.
+    assert_same(['2026-01-31', '2026-02-28', '2026-03-03', '2026-04-30', '2026-05-31'],
+        recurrence_ymd(wallos_occurrences_in_range($open, new DateTime('2026-01-01'), new DateTime('2026-05-31'))),
+        'earlier dates follow the anchor, the stored date is kept, later dates return to the anchor');
+    assert_same('2026-04-30', wallos_advance_schedule($open, new DateTime('2026-03-10'))['next_payment'],
+        'the projection and the cron agree on the date after the stored one');
+});
+
+wallos_test('review fixes: saving a completed plan keeps its payment count', function () {
+    $completed = recurrence_subscription([
+        'next_payment' => '2026-03-15', 'start_date' => '2026-01-15', 'payments_made' => 3, 'ended_reason' => 'completed',
+    ]);
+    $byCount = wallos_plan_fields($completed, 'count', null, 3);
+    assert_same(3, $byCount['payments_made'], 'the final payment is not lost');
+    assert_same('2026-03-15', $byCount['end_date'], 'the final date stays on the last payment');
+    assert_same('count', $byCount['plan_mode'], 'the mode is recorded');
+
+    $byDate = wallos_plan_fields($completed, 'date', '2026-03-15', null);
+    assert_same(3, $byDate['total_payments'], 'the date mode agrees on three payments');
+    assert_same('date', $byDate['plan_mode'], 'the mode is recorded');
+});

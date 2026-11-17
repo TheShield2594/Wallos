@@ -14,6 +14,9 @@
                         amount actually paid.
     end_date            Final payment date of a fixed-term plan (inclusive).
     total_payments      Number of payments in a fixed-term plan.
+    plan_mode           'count' or 'date': which of the two the user set. The
+                        other is derived. A count-based plan keeps its count
+                        when a manual payment restarts the cycle.
     payments_made       Payments of the plan that have already happened.
     ended_reason        'completed' when a plan ran its course. The row is then
                         inactive but is not counted as a saving.
@@ -35,6 +38,7 @@ $subscriptionColumns = [
     'variable_amount' => 'INTEGER DEFAULT 0',
     'end_date' => 'DATE DEFAULT NULL',
     'total_payments' => 'INTEGER DEFAULT NULL',
+    'plan_mode' => 'TEXT DEFAULT NULL',
     'payments_made' => 'INTEGER DEFAULT 0',
     'ended_reason' => 'TEXT DEFAULT NULL',
 ];

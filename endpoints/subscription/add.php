@@ -337,10 +337,13 @@ $plan = wallos_plan_fields([
     'frequency' => $frequency,
     'billing_anchor_day' => $billingAnchorDay,
     'payments_made' => $existingSchedule['payments_made'] ?? 0,
+    // A plan that stays completed keeps the payments it counted.
+    'ended_reason' => $inactive ? ($existingSchedule['ended_reason'] ?? null) : null,
 ], $endsMode, $_POST['end_date'] ?? null, $_POST['total_payments'] ?? null);
 $endDate = $plan['end_date'];
 $totalPayments = $plan['total_payments'];
 $paymentsMade = $plan['payments_made'];
+$planMode = $plan['plan_mode'];
 
 // A finished plan stays finished while it is disabled; enabling it again
 // (or extending it) makes it an ordinary subscription.
@@ -444,14 +447,14 @@ if (!$isEdit) {
                         notify_days_before, user_id, cancellation_date, replacement_subscription_id,
                         auto_renew, start_date, logo_text_color, logo_variant,
                         billing_anchor_day, renew_from_action, variable_amount, end_date,
-                        total_payments, payments_made, ended_reason
+                        total_payments, payments_made, ended_reason, plan_mode
                     ) VALUES (
                         :name, :logo, :price, :currencyId, :nextPayment, :cycle, :frequency, :notes,
                         :paymentMethodId, :payerUserId, :categoryId, :notify, :inactive, :url,
                         :notifyDaysBefore, :userId, :cancellationDate, :replacement_subscription_id,
                         :autoRenew, :startDate, :logoTextColor, :logoVariant,
                         :billingAnchorDay, :renewFromAction, :variableAmount, :endDate,
-                        :totalPayments, :paymentsMade, :endedReason
+                        :totalPayments, :paymentsMade, :endedReason, :planMode
                     )";
 } else {
     $id = $_POST['id'];
@@ -496,7 +499,8 @@ if (!$isEdit) {
                         end_date = :endDate,
                         total_payments = :totalPayments,
                         payments_made = :paymentsMade,
-                        ended_reason = :endedReason";
+                        ended_reason = :endedReason,
+                        plan_mode = :planMode";
 
     if ($logo != "") {
         $sql .= ", logo = :logo, logo_text_color = :logoTextColor, logo_variant = :logoVariant";
@@ -540,6 +544,7 @@ $stmt->bindValue(':endDate', $endDate, $endDate === null ? SQLITE3_NULL : SQLITE
 $stmt->bindValue(':totalPayments', $totalPayments, $totalPayments === null ? SQLITE3_NULL : SQLITE3_INTEGER);
 $stmt->bindValue(':paymentsMade', $paymentsMade, SQLITE3_INTEGER);
 $stmt->bindValue(':endedReason', $endedReason, $endedReason === null ? SQLITE3_NULL : SQLITE3_TEXT);
+$stmt->bindValue(':planMode', $planMode, $planMode === null ? SQLITE3_NULL : SQLITE3_TEXT);
 
 if ($stmt->execute()) {
     $success['status'] = "Success";
