@@ -1062,10 +1062,28 @@ switch ($action) {
         $stmtUpdate->bindValue(':tierName', $tierName, $tierName === null ? SQLITE3_NULL : SQLITE3_TEXT);
         $priceChangeReason = ($_POST['price_change_reason'] ?? 'tier') === 'provider' ? 'provider' : 'tier';
 
-        $updated = api_save_atomically($db, function () use ($db, $stmtUpdate, $subscriptionId, $subscription, $userId, $price, $currencyId, $cycle, $frequency, $tierName, $priceChangeReason) {
+        // Price fields the request sent; the others come from the row read
+        // under the write lock below.
+        $priceInput = [];
+        foreach (['price' => $price, 'currency_id' => $currencyId, 'cycle' => $cycle, 'frequency' => $frequency, 'tier_name' => $tierName] as $field => $value) {
+            if (array_key_exists($field, $_POST)) {
+                $priceInput[$field] = $value;
+            }
+        }
+
+        $updated = api_save_atomically($db, function () use ($db, $stmtUpdate, $subscriptionId, $subscription, $userId, &$price, &$currencyId, &$cycle, &$frequency, &$tierName, $priceInput, $priceChangeReason) {
             // The price before this edit, read under the write lock so a
-            // concurrent edit can't make both record the same old price.
+            // concurrent edit can't make both record the same old price, and
+            // a partial edit keeps the price another edit just saved.
             $priceBefore = wallos_price_snapshot($db, $userId, $subscriptionId) ?? $subscription;
+            $priceFields = wallos_price_fields_for_save($priceBefore, $priceInput);
+            // :price, :currencyId, :cycle and :frequency are bound by reference.
+            $price = $priceFields['price'];
+            $currencyId = $priceFields['currency_id'];
+            $cycle = $priceFields['cycle'];
+            $frequency = $priceFields['frequency'];
+            $tierName = $priceFields['tier_name'];
+            $stmtUpdate->bindValue(':tierName', $tierName, $tierName === null ? SQLITE3_NULL : SQLITE3_TEXT);
             if ($stmtUpdate->execute() === false) {
                 return false;
             }

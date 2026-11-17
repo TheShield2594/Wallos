@@ -90,6 +90,22 @@ wallos_test('a change between currencies without a usable rate stores no monthly
     $db->close();
 });
 
+wallos_test('a partial edit keeps the price fields another edit saved', function () {
+    // Read under the lock after another edit raised the price to 20 and renamed the tier.
+    $locked = ['price' => 20.0, 'currency_id' => 3, 'cycle' => 3, 'frequency' => 1, 'tier_name' => 'Plus'];
+
+    $nameOnly = wallos_price_fields_for_save($locked, []);
+    assert_same(['price' => 20.0, 'currency_id' => 3, 'cycle' => 3, 'frequency' => 1, 'tier_name' => 'Plus'], $nameOnly,
+        'an edit without price fields keeps what is stored');
+    assert_true(!wallos_price_changed($locked, $nameOnly), 'and records no price change');
+
+    $priceOnly = wallos_price_fields_for_save($locked, ['price' => '25', 'tier_name' => '  ']);
+    assert_equals(25.0, $priceOnly['price'], 'a sent price is used');
+    assert_same(3, $priceOnly['currency_id'], 'the rest stays as stored');
+    assert_same(null, $priceOnly['tier_name'], 'an empty tier clears it');
+    assert_contains('wallos_price_fields_for_save(', file_get_contents(WALLOS_ROOT . '/api/subscriptions/set_subscriptions.php'), 'the API uses it');
+});
+
 wallos_test('plan change totals split downgrades, upgrades and provider increases', function () {
     $changes = [
         ['changed_at' => '2026-01-01', 'old_monthly' => 18.0, 'new_monthly' => 10.0, 'currency_id' => 1, 'reason' => 'tier'],

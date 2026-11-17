@@ -280,3 +280,23 @@ function wallos_active_price_changes(SQLite3 $db, $userId)
 
     return $rows;
 }
+
+/**
+ * The price fields a partial edit (the API) saves: the ones the request
+ * sent, and for the rest the values read under the write lock, so an edit
+ * that leaves the price out cannot restore a price another edit replaced.
+ *
+ * @param array $locked the wallos_price_snapshot() row
+ * @param array $input  the request's fields (price, currency_id, cycle, frequency, tier_name)
+ * @return array price, currency_id, cycle, frequency, tier_name
+ */
+function wallos_price_fields_for_save(array $locked, array $input)
+{
+    return [
+        'price' => array_key_exists('price', $input) ? (float) $input['price'] : (float) $locked['price'],
+        'currency_id' => array_key_exists('currency_id', $input) ? (int) $input['currency_id'] : (int) $locked['currency_id'],
+        'cycle' => array_key_exists('cycle', $input) ? (int) $input['cycle'] : (int) $locked['cycle'],
+        'frequency' => array_key_exists('frequency', $input) ? (int) $input['frequency'] : (int) $locked['frequency'],
+        'tier_name' => array_key_exists('tier_name', $input) ? wallos_normalize_tier_name($input['tier_name']) : ($locked['tier_name'] ?? null),
+    ];
+}
