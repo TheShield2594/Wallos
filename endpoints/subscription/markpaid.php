@@ -26,9 +26,16 @@ if ($subscription === false) {
 }
 
 // An amount a household member entered was in the currency they were shown;
-// the ledger keeps the owner's currency.
-if ($amount !== null && is_numeric($amount) && $subscription['access'] !== 'owner') {
-    $amount = (float) $amount / wallos_household_display_factor($db, $userId, $subscription['currency_id']);
+// the ledger keeps the owner's currency. Without a conversion path (the
+// currencies changed while the dialog was open) the request is refused.
+if ($subscription['access'] !== 'owner') {
+    $factor = wallos_household_display_factor($db, $userId, $subscription['currency_id']);
+    if ($factor === null) {
+        die(json_encode(["success" => false, "message" => translate("error", $i18n)]));
+    }
+    if ($amount !== null && is_numeric($amount)) {
+        $amount = (float) $amount / $factor;
+    }
 }
 
 $outcome = wallos_mark_paid($db, $subscription, new DateTime('today'), $amount);

@@ -106,9 +106,10 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
       } elseif ($type === 'cancellation') {
         // One-time purchases are never treated as cancellable, matching the
         // dashboard, statistics page and cancellation notification cron.
-        $notifConditions[] = "(cycle != 5 AND (COALESCE(cancel_notice_mode, '') = 'before_renewal' OR (cancellation_date IS NOT NULL AND cancellation_date != '' AND COALESCE(cancel_notice_mode, 'fixed') = 'fixed')))";
+        // The same rule as wallos_cancel_mode(), which filters shared rows.
+        $notifConditions[] = "(cycle != 5 AND " . WALLOS_CANCEL_NOTICE_SQL . ")";
       } elseif ($type === 'none') {
-        $notifConditions[] = "(notify = 0 AND (cycle = 5 OR NOT (COALESCE(cancel_notice_mode, '') = 'before_renewal' OR (cancellation_date IS NOT NULL AND cancellation_date != '' AND COALESCE(cancel_notice_mode, 'fixed') = 'fixed'))))";
+        $notifConditions[] = "(notify = 0 AND (cycle = 5 OR NOT " . WALLOS_CANCEL_NOTICE_SQL . "))";
       }
     }
     if (!empty($notifConditions)) {

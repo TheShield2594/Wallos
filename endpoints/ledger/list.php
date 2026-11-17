@@ -24,6 +24,9 @@ if ($subscription['access'] !== 'owner') {
     // A household member sees the amounts in the currency the subscription
     // is shown in to them.
     $factor = wallos_household_display_factor($db, $userId, $subscription['currency_id']);
+    if ($factor === null) {
+        die(json_encode(['success' => false, 'message' => translate('error', $i18n)]));
+    }
     foreach ($payments as &$payment) {
         if ($payment['amount'] !== null) {
             $payment['amount'] = (float) $payment['amount'] * $factor;

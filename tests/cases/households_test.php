@@ -206,9 +206,14 @@ wallos_test('households: a viewer without the owner currencies gets the amount c
     assert_same(9801, $row['currency_id'], "shown in bob's main currency");
     assert_equals(8.5, round($row['price'], 6), '11 USD = 10 EUR = 8.50 GBP, not 10 relabelled as GBP');
 
-    // No currency in common at all: the row is left out rather than mislabelled.
+    // No currency in common at all: the row is left out rather than mislabelled,
+    // and amounts for it are refused rather than converted with a made-up factor.
     $db->exec('DELETE FROM currencies WHERE id = 9800');
     assert_same([], wallos_shared_subscriptions($db, 2), 'no conversion path, no row');
+    assert_same(null, wallos_household_display_factor($db, 2, wallos_test_currency_id(1, 1)), 'no factor either');
+    foreach (['endpoints/subscription/markpaid.php', 'endpoints/ledger/list.php'] as $path) {
+        assert_contains('$factor === null', file_get_contents(WALLOS_ROOT . '/' . $path), "$path refuses a request without a factor");
+    }
     $db->close();
 });
 

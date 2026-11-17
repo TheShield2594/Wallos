@@ -524,9 +524,13 @@ function detailsPost(url, body) {
 
 // Asks for the amount actually paid. Returns undefined when cancelled, and
 // null to keep the default.
-function detailsAskAmount(defaultAmount) {
+// currencyId names the currency the amount is entered in (shown in the
+// prompt); a household member enters it in the currency they are shown.
+function detailsAskAmount(defaultAmount, currencyId) {
   const strings = detailsStrings();
-  const answer = window.prompt(strings.enter_amount_paid, defaultAmount === null || defaultAmount === undefined ? "" : String(defaultAmount));
+  const currency = currencyId !== undefined ? window.subscriptionLookups.currencies[currencyId] : null;
+  const label = currency && currency.code ? `${strings.enter_amount_paid} (${currency.code})` : strings.enter_amount_paid;
+  const answer = window.prompt(label, defaultAmount === null || defaultAmount === undefined ? "" : String(defaultAmount));
   if (answer === null) {
     return undefined;
   }
@@ -552,7 +556,7 @@ function renewSubscription(event, id, subscription) {
 
   const body = { id: id };
   if (subscription && Number(subscription.variable_amount) === 1) {
-    const amount = detailsAskAmount(subscription.price);
+    const amount = detailsAskAmount(subscription.price, subscription.currency_id);
     if (amount === undefined) {
       return;
     }
@@ -697,7 +701,7 @@ function detailsRenderHistory(subscription, payments) {
 }
 
 function detailsEditPayment(subscription, payment) {
-  const amount = detailsAskAmount(payment.amount === null ? subscription.price : payment.amount);
+  const amount = detailsAskAmount(payment.amount === null ? subscription.price : payment.amount, payment.currency_id || subscription.currency_id);
   if (amount === undefined) {
     return;
   }

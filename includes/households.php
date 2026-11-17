@@ -359,13 +359,14 @@ function wallos_household_localize_currency(SQLite3 $db, array $row, array $view
  * wallos_household_currency_mapping() (1.0 for the same code). Dividing by it
  * turns an amount the viewer entered back into the owner's currency.
  *
- * @return float
+ * @return float|null null when there is no conversion path: callers refuse
+ *                    the request rather than store or show a wrong amount
  */
 function wallos_household_display_factor(SQLite3 $db, $viewerId, $ownerCurrencyId)
 {
     $mapping = wallos_household_currency_mapping($db, $viewerId, $ownerCurrencyId);
 
-    return $mapping === null || $mapping['factor'] <= 0 ? 1.0 : $mapping['factor'];
+    return $mapping === null || $mapping['factor'] <= 0 ? null : $mapping['factor'];
 }
 
 /**
