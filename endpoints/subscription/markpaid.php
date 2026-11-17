@@ -11,7 +11,7 @@
 require_once '../../includes/connect_endpoint.php';
 require_once '../../includes/validate_endpoint.php';
 require_once '../../includes/payment_ledger.php';
-require_once '../../includes/households.php';
+require_once '../../includes/household_payments.php';
 
 header('Content-Type: application/json');
 
@@ -19,26 +19,10 @@ $data = json_decode(file_get_contents("php://input"), true);
 $subscriptionId = is_array($data) ? (int) ($data['id'] ?? 0) : 0;
 $amount = is_array($data) && isset($data['amount']) && $data['amount'] !== '' ? $data['amount'] : null;
 
-// The owner, or a household editor of a shared subscription.
-$subscription = wallos_load_accessible_subscription($db, $userId, $subscriptionId, 'edit');
-if ($subscription === false) {
-    die(json_encode(["success" => false, "message" => translate("error", $i18n)]));
-}
-
-// An amount a household member entered was in the currency they were shown;
-// the ledger keeps the owner's currency. Without a conversion path (the
-// currencies changed while the dialog was open) the request is refused.
-if ($subscription['access'] !== 'owner') {
-    $factor = wallos_household_display_factor($db, $userId, $subscription['currency_id']);
-    if ($factor === null) {
-        die(json_encode(["success" => false, "message" => translate("error", $i18n)]));
-    }
-    if ($amount !== null && is_numeric($amount)) {
-        $amount = (float) $amount / $factor;
-    }
-}
-
-$outcome = wallos_mark_paid($db, $subscription, new DateTime('today'), $amount);
+// The owner, or a household editor of a shared subscription; an amount a
+// member entered is converted to the owner's currency, or refused without a
+// conversion path (see includes/household_payments.php).
+$outcome = wallos_member_mark_paid($db, $userId, $subscriptionId, $amount, new DateTime('today'));
 if (!$outcome['success']) {
     $message = ($outcome['error'] ?? '') === 'already_paid' ? translate('payment_already_recorded', $i18n) : translate('error', $i18n);
     die(json_encode(["success" => false, "message" => $message]));

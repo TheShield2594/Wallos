@@ -170,9 +170,63 @@ wallos_test('households: amounts a member enters are kept in the owner currency'
     $factor = wallos_household_display_factor($db, 2, wallos_test_currency_id(1, 1));
     assert_equals(round(1 / 1.1, 6), round($factor, 6), 'shown converted to the owner main currency');
     assert_same(1.0, wallos_household_display_factor($db, 3, wallos_test_currency_id(1, 1)), 'carol has USD: shown as it is');
-    foreach (['endpoints/subscription/markpaid.php', 'endpoints/ledger/list.php'] as $path) {
-        assert_contains('wallos_household_display_factor(', file_get_contents(WALLOS_ROOT . '/' . $path), "$path converts for members");
-    }
+    $db->close();
+});
+
+/**
+ * alice shares a variable-amount subscription in USD (11 = 10 EUR); bob holds
+ * only GBP (main) and JPY, and reaches it through alice's GBP.
+ *
+ * @return array [$db, $subscriptionId]
+ */
+function households_member_payment_fixture()
+{
+    require_once WALLOS_ROOT . '/includes/household_payments.php';
+    $db = households_fixture();
+    $id = households_add_subscription($db, 1, 'Electricity', true);
+    $db->exec('UPDATE subscriptions SET price = 11, variable_amount = 1, auto_renew = 0, currency_id = ' . wallos_test_currency_id(1, 1) . " WHERE id = $id");
+    $db->exec("INSERT INTO currencies (id, name, symbol, code, rate, user_id) VALUES (9800, 'Pound', 'GBP', 'GBP', 0.85, 1)");
+    $db->exec('DELETE FROM currencies WHERE user_id = 2');
+    $db->exec("INSERT INTO currencies (id, name, symbol, code, rate, user_id) VALUES (9801, 'Pound', 'GBP', 'GBP', 1, 2), (9802, 'Yen', 'JPY', 'JPY', 190, 2)");
+    $db->exec('UPDATE user SET main_currency = 9801 WHERE id = 2');
+
+    return [$db, $id];
+}
+
+wallos_test('households: a member marks a shared payment in their currency and the ledger keeps the owner currency', function () {
+    [$db, $id] = households_member_payment_fixture();
+
+    // bob is shown 11 USD as 8.50 GBP and enters 17 GBP: 22 USD for alice.
+    $outcome = wallos_member_mark_paid($db, 2, $id, '17', new DateTime('2099-01-15'));
+    assert_true($outcome['success'], 'the payment is recorded');
+    assert_equals(22.0, round($db->querySingle("SELECT amount FROM subscription_payments WHERE subscription_id = $id"), 6),
+        'stored in the owner currency');
+
+    $history = wallos_member_ledger_list($db, 2, $id);
+    assert_true($history['success'], 'bob reads the history');
+    assert_equals(17.0, round($history['payments'][0]['amount'], 6), 'shown to bob in his currency again');
+
+    $own = wallos_member_ledger_list($db, 1, $id);
+    assert_equals(22.0, round($own['payments'][0]['amount'], 6), 'alice sees her own amount');
+
+    assert_same('not_found', wallos_member_mark_paid($db, 3, $id, '1', new DateTime('2099-01-15'))['error'] ?? null, 'carol, a viewer, cannot');
+    $db->close();
+});
+
+wallos_test('households: without a conversion path the member requests are refused and nothing is stored', function () {
+    [$db, $id] = households_member_payment_fixture();
+    // The path disappears while bob's dialog is open.
+    $db->exec('DELETE FROM currencies WHERE id = 9800');
+
+    $before = $db->querySingle("SELECT COUNT(*) FROM subscription_payments WHERE subscription_id = $id");
+    $nextBefore = $db->querySingle("SELECT next_payment FROM subscriptions WHERE id = $id");
+    $outcome = wallos_member_mark_paid($db, 2, $id, '17', new DateTime('2099-01-15'));
+    assert_same(['success' => false, 'error' => 'no_conversion'], $outcome, 'mark-as-paid is refused');
+    assert_same($before, $db->querySingle("SELECT COUNT(*) FROM subscription_payments WHERE subscription_id = $id"), 'no ledger row was written');
+    assert_same($nextBefore, $db->querySingle("SELECT next_payment FROM subscriptions WHERE id = $id"), 'the schedule did not move');
+
+    assert_same(['success' => false, 'error' => 'no_conversion'], wallos_member_ledger_list($db, 2, $id), 'the history is refused');
+    assert_true(wallos_member_mark_paid($db, 1, $id, '30', new DateTime('2099-01-15'))['success'], 'the owner is unaffected');
     $db->close();
 });
 
@@ -230,18 +284,16 @@ wallos_test('households: a viewer without the owner currencies gets the amount c
     $db->exec('DELETE FROM currencies WHERE id = 9800');
     assert_same([], wallos_shared_subscriptions($db, 2), 'no conversion path, no row');
     assert_same(null, wallos_household_display_factor($db, 2, wallos_test_currency_id(1, 1)), 'no factor either');
-    foreach (['endpoints/subscription/markpaid.php', 'endpoints/ledger/list.php'] as $path) {
-        assert_contains('$factor === null', file_get_contents(WALLOS_ROOT . '/' . $path), "$path refuses a request without a factor");
-    }
     $db->close();
 });
 
 wallos_test('households: every subscription endpoint checks access through the shared helper', function () {
     foreach ([
         'endpoints/subscription/get.php' => 'wallos_load_accessible_subscription(',
-        'endpoints/subscription/markpaid.php' => 'wallos_load_accessible_subscription(',
+        'endpoints/subscription/markpaid.php' => 'wallos_member_mark_paid(',
         'endpoints/subscription/undopaid.php' => 'wallos_load_accessible_subscription(',
-        'endpoints/ledger/list.php' => 'wallos_load_accessible_subscription(',
+        'endpoints/ledger/list.php' => 'wallos_member_ledger_list(',
+        'includes/household_payments.php' => 'wallos_load_accessible_subscription(',
         'endpoints/subscription/add.php' => 'wallos_load_accessible_subscription(',
     ] as $path => $needle) {
         assert_contains($needle, file_get_contents(WALLOS_ROOT . '/' . $path), "$path asks the household helper");
