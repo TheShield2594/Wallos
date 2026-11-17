@@ -767,6 +767,11 @@ $i18n = [
     "date_format" => "Date format",
     "date_format_auto" => "Automatic (from language)",
     "date_format_info" => "Used for dates across Tally. Date pickers follow your browser's settings.",
+    // Currency decimals
+    "decimals" => "Decimals",
+    "decimals_auto" => "Auto",
+    "decimals_count" => "%d decimals",
+    "decimals_info" => "Decimals sets how many digits each currency shows after the decimal point. Auto uses the currency's usual digits, and up to 8 for codes like BTC.",
 ];
 
 

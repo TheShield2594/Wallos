@@ -52,6 +52,7 @@ function resetForm() {
   toggleCancelNoticeFields(false);
   delete document.querySelector("#next_payment").dataset.trialBase;
   toggleIntroFields();
+  updatePriceStep();
   setSharedEditMode(null);
   rememberPriceForChange(null);
   closeLogoSearch();
@@ -92,6 +93,7 @@ function fillEditFormFields(subscription) {
 
   const currencySelect = document.querySelector("#currency");
   currencySelect.value = subscription.currency_id.toString();
+  updatePriceStep();
   const frequencySelect = document.querySelector("#frequency");
   frequencySelect.value = subscription.frequency;
   const cycleSelect = document.querySelector("#cycle");
@@ -1466,11 +1468,8 @@ function priceChangeMonthly(cycle, frequency, price) {
 }
 
 function priceChangeFormat(amount, currencyCode) {
-  try {
-    return new Intl.NumberFormat(window.lang || 'en', { style: 'currency', currency: currencyCode }).format(amount);
-  } catch (e) {
-    return amount.toFixed(2);
-  }
+  const option = document.querySelector(`#currency option[data-code="${CSS.escape(currencyCode || '')}"]`);
+  return tallyFormatMoney(amount, currencyCode, option ? option.dataset.decimalsSetting : '', option ? option.dataset.symbol : '');
 }
 
 function rememberPriceForChange(subscription) {
@@ -1538,7 +1537,27 @@ function updatePriceChangeNotice() {
   delta.classList.toggle("is-danger", difference > 0);
 }
 
+// The price inputs accept as many decimals as the selected currency shows
+// (Settings > Currencies > Decimals): 0.0001 for BTC, 1 for COP set to 0.
+function updatePriceStep() {
+  const currencySelect = document.querySelector("#currency");
+  const option = currencySelect ? currencySelect.selectedOptions[0] : null;
+  const decimals = option ? Number(option.dataset.decimals) : 2;
+  const step = decimals > 0 ? (1 / Math.pow(10, decimals)).toFixed(decimals) : "1";
+  ["#price", "#intro_price"].forEach((selector) => {
+    const field = document.querySelector(selector);
+    if (field) {
+      field.step = step;
+    }
+  });
+}
+
 document.addEventListener("DOMContentLoaded", function () {
+  const currencySelect = document.querySelector("#currency");
+  if (currencySelect) {
+    currencySelect.addEventListener("change", updatePriceStep);
+    updatePriceStep();
+  }
   ["#price", "#currency", "#cycle", "#frequency"].forEach((selector) => {
     const field = document.querySelector(selector);
     if (field) {

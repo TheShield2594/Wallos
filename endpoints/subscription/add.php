@@ -12,6 +12,7 @@ require_once '../../includes/cancellation_deadline.php';
 require_once '../../includes/intro_pricing.php';
 require_once '../../includes/households.php';
 require_once '../../includes/price_changes.php';
+require_once '../../includes/currency_formatter.php';
 
 if (!file_exists('../../images/uploads/logos')) {
     mkdir('../../images/uploads/logos', 0777, true);
@@ -295,6 +296,18 @@ if ($isEdit) {
         foreach (['cancel_notice_mode', 'cancellation_date', 'cancel_notice_value', 'cancel_notice_unit', 'min_term_end'] as $column) {
             $_POST[$column] = $editable[$column];
         }
+    }
+}
+
+// Store the price at the precision its currency shows (Settings > Currencies > Decimals).
+$priceCurrencyStmt = $db->prepare('SELECT code, decimals FROM currencies WHERE id = :id AND user_id = :userId');
+$priceCurrencyStmt->bindValue(':id', (int) $currencyId, SQLITE3_INTEGER);
+$priceCurrencyStmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
+$priceCurrency = $priceCurrencyStmt->execute()->fetchArray(SQLITE3_ASSOC);
+if ($priceCurrency !== false && is_numeric($price)) {
+    $price = wallos_round_price($price, $priceCurrency['code'], $priceCurrency['decimals']);
+    if (isset($_POST['intro_price']) && is_numeric($_POST['intro_price'])) {
+        $_POST['intro_price'] = wallos_round_price($_POST['intro_price'], $priceCurrency['code'], $priceCurrency['decimals']);
     }
 }
 

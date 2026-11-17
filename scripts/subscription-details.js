@@ -50,14 +50,10 @@ function loadSubscriptionDetails(id, focusPanel) {
 function detailsFormatPrice(price, currencyId) {
   const lookups = window.subscriptionLookups;
   const currency = lookups.currencies[currencyId];
-  const value = Number(price);
-  if (currency && currency.code) {
-    try {
-      return new Intl.NumberFormat(window.lang || 'en', { style: 'currency', currency: currency.code }).format(value);
-    } catch (e) { /* unknown currency code, fall through */ }
+  if (!currency) {
+    return tallyFormatMoney(price, '', null, '');
   }
-  const symbol = currency ? (currency.symbol || currency.code || '') : '';
-  return `${symbol}${value.toFixed(2)}`;
+  return tallyFormatMoney(price, currency.code, currency.decimals, currency.symbol);
 }
 
 function detailsParseDate(dateString) {

@@ -1,6 +1,7 @@
 <?php
 require_once '../../includes/connect_endpoint.php';
 require_once '../../includes/inputvalidation.php';
+require_once '../../includes/currency_formatter.php';
 require_once '../../includes/validate_endpoint.php';
 
 $action = $_POST['action'] ?? '';
@@ -51,11 +52,19 @@ function handleEditCurrency($db, $userId, $i18n)
         $name = validate($_POST['name']);
         $symbol = validate($_POST['symbol']);
         $code = validate($_POST['code']);
-        $sql = "UPDATE currencies SET name = :name, symbol = :symbol, code = :code WHERE id = :currencyId AND user_id = :userId";
+        // Missing (an older page): keep the stored setting.
+        $decimalsGiven = array_key_exists('decimals', $_POST);
+        $decimals = $decimalsGiven ? CurrencyFormatter::sanitizeDecimals($_POST['decimals']) : null;
+        $sql = "UPDATE currencies SET name = :name, symbol = :symbol, code = :code"
+            . ($decimalsGiven ? ", decimals = :decimals" : "")
+            . " WHERE id = :currencyId AND user_id = :userId";
         $stmt = $db->prepare($sql);
         $stmt->bindParam(':name', $name, SQLITE3_TEXT);
         $stmt->bindParam(':symbol', $symbol, SQLITE3_TEXT);
         $stmt->bindParam(':code', $code, SQLITE3_TEXT);
+        if ($decimalsGiven) {
+            $stmt->bindValue(':decimals', $decimals, $decimals === null ? SQLITE3_NULL : SQLITE3_INTEGER);
+        }
         $stmt->bindParam(':currencyId', $currencyId, SQLITE3_INTEGER);
         $stmt->bindParam(':userId', $userId, SQLITE3_INTEGER);
         $result = $stmt->execute();

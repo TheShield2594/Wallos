@@ -10,27 +10,6 @@ require_once 'includes/payment_ledger.php';
 require_once 'includes/category_spend.php';
 require_once 'includes/households.php';
 
-function formatPrice($price, $currencyCode, $currencies)
-{
-    $formattedPrice = CurrencyFormatter::format($price, $currencyCode);
-    if (strstr($formattedPrice, $currencyCode)) {
-        $symbol = $currencyCode;
-
-        foreach ($currencies as $currency) {
-
-            if ($currency['code'] === $currencyCode) {
-                if ($currency['symbol'] != "") {
-                    $symbol = $currency['symbol'];
-                }
-                break;
-            }
-        }
-        $formattedPrice = str_replace($currencyCode, $symbol, $formattedPrice);
-    }
-
-    return $formattedPrice;
-}
-
 // Get the first name of the user
 $stmt = $db->prepare("SELECT username, firstname FROM user WHERE id = :userId");
 $stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);

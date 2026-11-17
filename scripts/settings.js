@@ -487,6 +487,13 @@ function addCurrencyButton(currencyId) {
         div.appendChild(inputSymbol);
         div.appendChild(inputName);
         div.appendChild(inputCode);
+        // The labels come from the page, so copy an existing row's select.
+        const existingDecimals = container.querySelector('select[name="decimals"]');
+        if (existingDecimals) {
+          const inputDecimals = existingDecimals.cloneNode(true);
+          inputDecimals.value = "auto";
+          div.appendChild(inputDecimals);
+        }
         div.appendChild(editLink);
         div.appendChild(deleteLink);
 
@@ -542,6 +549,7 @@ function editCurrency(currencyId) {
   const inputSymbolElement = document.querySelector(`div[data-currencyid="${currencyId}"] input[name="symbol"]`);
   const inputNameElement = document.querySelector(`div[data-currencyid="${currencyId}"] input[name="currency"]`);
   const inputCodeElement = document.querySelector(`div[data-currencyid="${currencyId}"] input[name="code"]`);
+  const inputDecimalsElement = document.querySelector(`div[data-currencyid="${currencyId}"] select[name="decimals"]`);
 
   if (!inputNameElement) return;
 
@@ -564,6 +572,7 @@ function editCurrency(currencyId) {
       name: currencyName,
       symbol: currencySymbol,
       code: currencyCode,
+      decimals: inputDecimalsElement ? inputDecimalsElement.value : 'auto',
     }),
   })
     .then(response => {

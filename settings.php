@@ -1256,6 +1256,14 @@ $upcomingPaymentsLimit = normalize_upcoming_payments_limit($settings['upcoming_p
                             placeholder="Currency Name">
                         <input type="text" name="code" autocomplete="off" value="<?= htmlspecialchars($currency['code']) ?>"
                             placeholder="Currency Code" <?= !$canDelete ? 'disabled' : '' ?>>
+                        <?php $currencyDecimals = CurrencyFormatter::sanitizeDecimals($currency['decimals'] ?? null); ?>
+                        <select name="decimals" class="currency-decimals" title="<?= translate('decimals', $i18n) ?>"
+                            aria-label="<?= translate('decimals', $i18n) ?>">
+                            <option value="auto" <?= $currencyDecimals === null ? 'selected' : '' ?>><?= translate('decimals_auto', $i18n) ?></option>
+                            <?php for ($digits = 0; $digits <= WALLOS_CURRENCY_MAX_DECIMALS; $digits++) { ?>
+                                <option value="<?= $digits ?>" <?= $currencyDecimals === $digits ? 'selected' : '' ?>><?= sprintf(translate('decimals_count', $i18n), $digits) ?></option>
+                            <?php } ?>
+                        </select>
                         <button class="image-button medium" onClick="editCurrency(<?= $currency['id'] ?>)" name="save"
                             title="<?= translate('save_currency', $i18n) ?>">
                             <i class="fa-solid fa-check"></i>
@@ -1298,6 +1306,10 @@ $upcomingPaymentsLimit = normalize_upcoming_payments_limit($settings['upcoming_p
                 <p>
                     <i class="fa-solid fa-circle-info"></i>
                     <?= translate('currency_info', $i18n) ?>
+                </p>
+                <p>
+                    <i class="fa-solid fa-circle-info"></i>
+                    <?= translate('decimals_info', $i18n) ?>
                     <span>
                         fixer.io
                         <a href="https://fixer.io/symbols" target="_blank" title="Currency codes">

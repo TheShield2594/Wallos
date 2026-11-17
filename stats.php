@@ -11,7 +11,7 @@ $statsScope = ($statsHousehold !== null && ($_GET['scope'] ?? '') === 'household
 
 
 // Get code of main currency to display on statistics
-$query = "SELECT c.code
+$query = "SELECT c.code, c.symbol, c.decimals
           FROM currencies c
           INNER JOIN user u ON c.id = u.main_currency
           WHERE u.id = :userId";
@@ -20,6 +20,8 @@ $stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
 $result = $stmt->execute();
 $row = $result->fetchArray(SQLITE3_ASSOC);
 $code = $row['code'];
+$mainCurrencySymbol = $row['symbol'] ?? '';
+$mainCurrencyDecimals = CurrencyFormatter::sanitizeDecimals($row['decimals'] ?? null);
 
 require_once 'includes/stats_calculations.php';
 require_once 'includes/stats_extra_calculations.php';
@@ -946,6 +948,8 @@ if ($showAnyGraph) {
   ?>
   <script src="scripts/libs/apexcharts.min.js"></script>
   <script type="text/javascript">
+    window.mainCurrencyDecimals = <?= json_encode($mainCurrencyDecimals) ?>;
+    window.mainCurrencySymbol = <?= json_encode($mainCurrencySymbol, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;
     window.onload = function () {
       loadLineGraph("totalMonthlyCostChart", <?php echo json_encode($totalMonthlyCostDataPoints, JSON_NUMERIC_CHECK); ?>, "<?= $code ?>", <?= $showTotalMonthlyCostGraph ? 1 : 0 ?>);
       loadBarGraph("projectionChart", <?php echo json_encode($projectionDataPoints, JSON_NUMERIC_CHECK); ?>, "<?= $code ?>", <?= $showProjectionGraph ? 1 : 0 ?>, <?= isset($budget) && $budget > 0 ? $budget : 'null' ?>);

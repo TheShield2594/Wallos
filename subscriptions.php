@@ -391,7 +391,7 @@ if ($db->querySingle("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND 
     </div>
 
     <div class="form-group-inline">
-      <input type="number" step="0.01" id="price" name="price" autocomplete="off"
+      <input type="number" step="0.01" min="0" id="price" name="price" autocomplete="off"
         placeholder="<?= translate('price', $i18n) ?>" data-placeholder-price="<?= translate('price', $i18n) ?>"
         data-placeholder-estimate="<?= translate('estimated_price', $i18n) ?>" required>
       <select id="currency" name="currency_id" placeholder="<?= translate('add_subscription', $i18n) ?>">
@@ -399,7 +399,10 @@ if ($db->querySingle("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND 
         foreach ($currencies as $currency) {
           $selected = ($currency['id'] == $main_currency) ? 'selected' : '';
           ?>
-          <option value="<?= $currency['id'] ?>" data-code="<?= htmlspecialchars($currency['code']) ?>" <?= $selected ?>><?= $currency['name'] ?></option>
+          <option value="<?= $currency['id'] ?>" data-code="<?= htmlspecialchars($currency['code']) ?>"
+            data-symbol="<?= htmlspecialchars($currency['symbol']) ?>"
+            data-decimals="<?= CurrencyFormatter::inputDecimals($currency['code'], $currency['decimals'] ?? null) ?>"
+            data-decimals-setting="<?= htmlspecialchars((string) ($currency['decimals'] ?? '')) ?>" <?= $selected ?>><?= $currency['name'] ?></option>
           <?php
         }
         ?>

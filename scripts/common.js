@@ -251,3 +251,45 @@ function tallyFormatDate(value, style) {
   }
   return fields.map((field) => parts[field]).join(format.sep);
 }
+
+/*
+  Money formatting that follows Settings > Currencies > Decimals, like
+  CurrencyFormatter::format(): a set number of decimals, or automatic (the
+  currency's usual digits; 2 to 8 for codes such as BTC that Intl rejects).
+*/
+function tallyFormatMoney(amount, code, decimals, symbol) {
+  const value = Number(amount) || 0;
+  const lang = window.lang || 'en';
+  const digits = decimals === null || decimals === undefined || decimals === '' || decimals === 'auto'
+    ? null : Math.max(0, Math.min(8, Number(decimals)));
+  const fixed = digits === null ? {} : { minimumFractionDigits: digits, maximumFractionDigits: digits };
+  if (code && tallyIsIsoCurrency(code)) {
+    try {
+      return new Intl.NumberFormat(lang, Object.assign({ style: 'currency', currency: code }, fixed)).format(value);
+    } catch (e) { /* format the number and add the symbol */ }
+  }
+  const options = digits === null ? { minimumFractionDigits: 2, maximumFractionDigits: 8 } : fixed;
+  let number;
+  try {
+    number = new Intl.NumberFormat(lang, options).format(value);
+  } catch (e) {
+    number = value.toFixed(digits === null ? 2 : digits);
+  }
+  return `${symbol || code || ''}${number}`;
+}
+
+// Intl formats any three letters as a currency; only ISO codes have known
+// decimals, so BTC and friends take the symbol path above.
+function tallyIsIsoCurrency(code) {
+  if (typeof Intl.supportedValuesOf !== 'function') {
+    return /^[A-Z]{3}$/.test(code) && !['BTC', 'ETH', 'XBT', 'LTC', 'USDT', 'USDC'].includes(code);
+  }
+  if (!window.tallyIsoCurrencies) {
+    try {
+      window.tallyIsoCurrencies = new Set(Intl.supportedValuesOf('currency'));
+    } catch (e) {
+      window.tallyIsoCurrencies = new Set();
+    }
+  }
+  return window.tallyIsoCurrencies.has(String(code).toUpperCase());
+}

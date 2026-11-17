@@ -62,27 +62,6 @@ function getPriceConverted($price, $currency, $database)
     return wallos_convert_price($price, $currency, $database);
 }
 
-function formatPrice($price, $currencyCode, $currencies)
-{
-    $formattedPrice = CurrencyFormatter::format($price, $currencyCode);
-    if (strstr($formattedPrice, $currencyCode)) {
-        $symbol = $currencyCode;
-        
-        foreach ($currencies as $currency) {
-
-            if ($currency['code'] === $currencyCode) {
-                if ($currency['symbol'] != "") {
-                    $symbol = $currency['symbol'];
-                }
-                break;
-            }
-        }
-        $formattedPrice = str_replace($currencyCode, $symbol, $formattedPrice);
-    }
-
-    return $formattedPrice;
-}
-
 /**
  * Adds the subscriptions other household members share with the account to
  * its own list, in the same order. Not while the list is filtered by

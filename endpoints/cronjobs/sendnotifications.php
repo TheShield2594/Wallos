@@ -303,6 +303,7 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
         while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
             $currencies[$row['id']] = $row;
         }
+        CurrencyFormatter::useCurrencies($currencies);
 
         // Get all household members
         $query = "SELECT * FROM household WHERE user_id = :userId";
