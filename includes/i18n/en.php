@@ -792,6 +792,13 @@ $i18n = [
     "who_owes_what_info" => "Each member's monthly share of subscriptions someone else pays.",
     "stats_cost_view" => "Statistics show",
     "stats_cost_view_info" => "Gross counts full prices. My cost counts your share of split subscriptions, less reimbursements. You can switch on the statistics page.",
+    // Categories v2
+    "parent_category" => "Parent category",
+    "top_level_category" => "Top level",
+    "default_categories" => "Default categories",
+    "apply_to_all_users" => "Apply to all users",
+    "default_categories_applied" => "Added %d categories.",
+    "default_categories_info" => "New accounts start with these categories instead of the built-in ones. Apply to all users adds the ones an account is missing; it never renames or removes anyone's own categories.",
     // Active months
     "active_months" => "Active months",
     "active_months_info" => "Payments in unselected months are skipped. The monthly cost spreads the active months' payments over the year.",

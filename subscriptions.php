@@ -69,7 +69,8 @@ if (isset($_GET['member'])) {
 }
 
 if (isset($_GET['category'])) {
-  $categoryIds = explode(',', $_GET['category']);
+  // A parent category includes its sub-categories.
+  $categoryIds = wallos_expand_category_ids($categories, explode(',', $_GET['category']));
   $placeholders = array_map(function ($key) {
     return ":category{$key}";
   }, array_keys($categoryIds));
@@ -677,7 +678,7 @@ if ($db->querySingle("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND 
         foreach ($categories as $category) {
           ?>
           <option value="<?= $category['id'] ?>">
-            <?= $category['name'] ?>
+            <?= $category['label'] ?? $category['name'] ?>
           </option>
           <?php
         }

@@ -3,6 +3,7 @@ require_once 'includes/header.php';
 require_once 'includes/oidc_settings.php';
 require_once 'includes/ssrf_helper.php';
 require_once 'includes/instance_config.php';
+require_once 'includes/categories.php';
 
 if ($isAdmin != 1) {
     header('Location: index.php');
@@ -203,6 +204,71 @@ $loginDisabledAllowed = $userCount == 1 && $settings['registrations_open'] == 0;
         <?php
     }
     ?>
+
+    <?php
+    // Default categories for new accounts (issue #31).
+    $categoryTemplates = wallos_category_templates($db);
+    $templateParents = array_filter($categoryTemplates, function ($template) {
+        return (int) ($template['parent_template_id'] ?? 0) === 0;
+    });
+    $templateHasChildren = [];
+    foreach ($categoryTemplates as $template) {
+        if ((int) ($template['parent_template_id'] ?? 0) > 0) {
+            $templateHasChildren[(int) $template['parent_template_id']] = true;
+        }
+    }
+    $renderTemplateParentSelect = function ($id, $selectedParent, $disabled) use ($templateParents, $i18n) {
+        ?>
+        <select name="parent" aria-label="<?= translate('parent_category', $i18n) ?>" <?= $disabled ? 'disabled' : '' ?>>
+            <option value=""><?= translate('top_level_category', $i18n) ?></option>
+            <?php foreach ($templateParents as $parentId => $parent) {
+                if ($id !== null && (int) $parentId === (int) $id) {
+                    continue;
+                } ?>
+                <option value="<?= (int) $parentId ?>" <?= (int) $selectedParent === (int) $parentId ? 'selected' : '' ?>><?= htmlspecialchars($parent['name']) ?></option>
+            <?php } ?>
+        </select>
+        <?php
+    };
+    ?>
+    <section class="account-section">
+        <header>
+            <h2><?= translate('default_categories', $i18n) ?></h2>
+        </header>
+        <div id="categoryTemplates">
+            <?php foreach ($categoryTemplates as $templateId => $template) { ?>
+                <div class="form-group-inline<?= (int) ($template['parent_template_id'] ?? 0) > 0 ? ' is-subcategory' : '' ?>" data-templateid="<?= (int) $templateId ?>">
+                    <input type="text" name="name" autocomplete="off" maxlength="100" value="<?= htmlspecialchars($template['name']) ?>"
+                        aria-label="<?= translate('category', $i18n) ?>">
+                    <?php $renderTemplateParentSelect($templateId, $template['parent_template_id'] ?? 0, isset($templateHasChildren[(int) $templateId])); ?>
+                    <button class="image-button medium" name="save" onClick="saveCategoryTemplate(<?= (int) $templateId ?>)"
+                        title="<?= translate('save_category', $i18n) ?>">
+                        <i class="fa-solid fa-check"></i>
+                    </button>
+                    <button class="image-button medium" onClick="deleteCategoryTemplate(<?= (int) $templateId ?>)"
+                        title="<?= translate('delete_category', $i18n) ?>">
+                        <i class="fa-solid fa-trash-can"></i>
+                    </button>
+                </div>
+            <?php } ?>
+            <div class="form-group-inline" id="newCategoryTemplate">
+                <input type="text" name="name" autocomplete="off" maxlength="100" placeholder="<?= translate('category', $i18n) ?>"
+                    aria-label="<?= translate('category', $i18n) ?>">
+                <?php $renderTemplateParentSelect(null, 0, false); ?>
+                <input type="submit" class="thin" value="<?= translate('add', $i18n) ?>" onClick="addCategoryTemplate(this)" />
+            </div>
+        </div>
+        <div class="buttons">
+            <input type="submit" class="thin mobile-grow" id="applyCategoryTemplates" value="<?= translate('apply_to_all_users', $i18n) ?>"
+                onClick="applyCategoryTemplates(this)" <?= $categoryTemplates === [] ? 'disabled' : '' ?> />
+        </div>
+        <div class="settings-notes">
+            <p>
+                <i class="fa-solid fa-circle-info"></i>
+                <?= translate('default_categories_info', $i18n) ?>
+            </p>
+        </div>
+    </section>
 
     <section class="account-section">
         <header>

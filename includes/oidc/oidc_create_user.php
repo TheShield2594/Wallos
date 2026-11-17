@@ -58,14 +58,9 @@ $stmt->execute();
 
 require_once __DIR__ . '/../default_names.php';
 
-// Categories
-$stmt = $db->prepare("INSERT INTO categories (name, \"order\", user_id) VALUES (:name, :order, :user_id)");
-foreach (default_categories($language) as $index => $name) {
-    $stmt->bindValue(':name', $name, SQLITE3_TEXT);
-    $stmt->bindValue(':order', $index + 1, SQLITE3_INTEGER);
-    $stmt->bindValue(':user_id', $newUserId, SQLITE3_INTEGER);
-    $stmt->execute();
-}
+// Categories: the admin's defaults, or the built-in ones
+require_once __DIR__ . '/../categories.php';
+wallos_seed_user_categories($db, $newUserId, $language);
 
 // Payment Methods
 $stmt = $db->prepare("INSERT INTO payment_methods (name, icon, \"order\", user_id) VALUES (:name, :icon, :order, :user_id)");

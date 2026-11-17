@@ -1106,7 +1106,20 @@ $upcomingPaymentsLimit = normalize_upcoming_payments_limit($settings['upcoming_p
     if ($result) {
         $categories = array();
         while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
-            $categories[] = $row;
+            $categories[$row['id']] = $row;
+        }
+        require_once 'includes/categories.php';
+        $categories = wallos_category_tree($categories);
+    }
+    // Top-level categories that can take sub-categories ("No category" can't).
+    $noCategoryId = (int) (array_key_first($categories) ?? 0);
+    $parentOptions = array_filter($categories, function ($category) use ($noCategoryId) {
+        return (int) $category['depth'] === 0 && (int) $category['id'] !== $noCategoryId && (int) $category['id'] !== 1;
+    });
+    $categoriesWithChildren = [];
+    foreach ($categories as $category) {
+        if ((int) ($category['parent_id'] ?? 0) > 0) {
+            $categoriesWithChildren[(int) $category['parent_id']] = true;
         }
     }
     ?>
@@ -1148,10 +1161,22 @@ $upcomingPaymentsLimit = normalize_upcoming_payments_limit($settings['upcoming_p
                             $canDelete = false;
                         }
                         ?>
-                        <div class="form-group-inline" data-categoryid="<?= $category['id'] ?>">
+                        <div class="form-group-inline<?= (int) $category['depth'] === 1 ? ' is-subcategory' : '' ?>" data-categoryid="<?= $category['id'] ?>">
                             <div class=" drag-icon"><i class="fa-solid fa-grip-vertical"></i></div>
                             <input type="text" name="category" autocomplete="off" value="<?= htmlspecialchars($category['name']) ?>"
                                 placeholder="Category">
+                            <select name="parent" class="category-parent" aria-label="<?= translate('parent_category', $i18n) ?>"
+                                title="<?= translate('parent_category', $i18n) ?>" onchange="editCategory(<?= $category['id'] ?>)"
+                                <?= isset($categoriesWithChildren[(int) $category['id']]) ? 'disabled' : '' ?>>
+                                <option value=""><?= translate('top_level_category', $i18n) ?></option>
+                                <?php foreach ($parentOptions as $parentOption) {
+                                    if ((int) $parentOption['id'] === (int) $category['id']) {
+                                        continue;
+                                    } ?>
+                                    <option value="<?= $parentOption['id'] ?>" <?= (int) ($category['parent_id'] ?? 0) === (int) $parentOption['id'] ? 'selected' : '' ?>>
+                                        <?= htmlspecialchars($parentOption['name']) ?></option>
+                                <?php } ?>
+                            </select>
                             <button class="image-button medium" onClick="editCategory(<?= $category['id'] ?>)" name="save"
                                 title="<?= translate('save_category', $i18n) ?>">
                                 <i class="fa-solid fa-check"></i>

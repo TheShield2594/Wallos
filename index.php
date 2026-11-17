@@ -8,6 +8,7 @@ require_once 'includes/upcoming_cancellations.php';
 require_once 'includes/ui_helpers.php';
 require_once 'includes/payment_ledger.php';
 require_once 'includes/category_spend.php';
+require_once 'includes/categories.php';
 require_once 'includes/households.php';
 
 // Get the first name of the user
@@ -91,9 +92,12 @@ if ($showCategoryCard && !empty($categoryCost)) {
     foreach ($categories as $categoryRowId => $categoryRow) {
         $categoryNames[$categoryRowId] = (int) $categoryRowId === 1 ? translate('no_category', $i18n) : html_entity_decode($categoryRow['name']);
     }
-    $categorySpendMonthly = wallos_category_spend_monthly($categoryCost, $categoryNames);
+    // Sub-categories count towards their parent (issue #31).
+    $categorySpendMonthly = wallos_category_spend_monthly(wallos_roll_up_categories($categoryCost, $categories), $categoryNames);
     $categorySpendPeriod = wallos_category_spend_in_period(
-        $subscriptions ?? [],
+        array_map(function ($row) use ($categories) {
+            return array_merge($row, ['category_id' => wallos_category_root_id($categories, $row['category_id'] ?? 1)]);
+        }, $subscriptions ?? []),
         $categoryNames,
         $budgetPeriodStart,
         $budgetPeriodEnd,

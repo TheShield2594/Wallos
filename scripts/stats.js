@@ -44,6 +44,15 @@ function loadGraph(container, dataPoints, currency, run) {
             height: 320,
             background: 'transparent',
             fontFamily: t.font,
+            events: {
+                // A parent category's slice opens its sub-categories.
+                dataPointSelection: (event, ctx, config) => {
+                    const point = dataPoints.filter((_, i) => !hidden[i])[config.dataPointIndex];
+                    if (point && point.href) {
+                        window.location.href = point.href;
+                    }
+                },
+            },
         },
         theme: { mode: t.dark ? 'dark' : 'light' },
         ...activeSubset(),

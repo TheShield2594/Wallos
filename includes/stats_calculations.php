@@ -8,6 +8,7 @@ require_once __DIR__ . '/households.php';
 require_once __DIR__ . '/monthly_cost.php';
 require_once __DIR__ . '/price_changes.php';
 require_once __DIR__ . '/cost_sharing.php';
+require_once __DIR__ . '/categories.php';
 
 function getPriceConverted($price, $currency, $database, $userId)
 {
@@ -116,7 +117,8 @@ if (isset($_GET['member']) && $_GET['member'] !== '') {
 
 if (isset($_GET['category']) && $_GET['category'] !== '') {
     $categoryIds = array_map('intval', explode(',', $_GET['category']));
-    $conditions[] = "category_id IN (" . implode(',', $categoryIds) . ")";
+    // A parent category includes its sub-categories (issue #31).
+    $conditions[] = "category_id IN (" . implode(',', wallos_expand_category_ids($categories, $categoryIds)) . ")";
     // A category still carrying its untouched default name is recognised
     // against the account's own creation-language default, not a literal
     // English string - #1216 gives every language its own default, so an

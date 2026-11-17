@@ -88,9 +88,11 @@ $navItems = [
 // Sidebar: subscription count and categories in use (with active counts).
 $navSubscriptionCount = 0;
 $navCategories = [];
-$navStmt = $db->prepare("SELECT c.id, c.name, COUNT(s.id) AS cnt FROM categories c
+// Sub-categories follow their parent and read "Parent › Child".
+$navStmt = $db->prepare("SELECT c.id, c.name, p.name AS parent_name, COUNT(s.id) AS cnt FROM categories c
   JOIN subscriptions s ON s.category_id = c.id AND s.user_id = :userId AND s.inactive = 0
-  WHERE c.user_id = :userId GROUP BY c.id ORDER BY c.`order` ASC");
+  LEFT JOIN categories p ON p.id = c.parent_id AND p.user_id = c.user_id
+  WHERE c.user_id = :userId GROUP BY c.id ORDER BY COALESCE(p.`order`, c.`order`) ASC, c.parent_id IS NOT NULL, c.`order` ASC");
 $navStmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
 $navResult = $navStmt->execute();
 while ($navRow = $navResult->fetchArray(SQLITE3_ASSOC)) {
@@ -258,6 +260,9 @@ function page_toolbar_end()
         <?php foreach ($navCategories as $navCategory) {
           $isCurrent = $activeCategoryFilter === (int) $navCategory['id'];
           $categoryName = $navCategory['id'] == 1 ? translate('no_category', $i18n) : $navCategory['name'];
+          if (!empty($navCategory['parent_name'])) {
+            $categoryName = $navCategory['parent_name'] . ' › ' . $categoryName;
+          }
           ?>
           <a href="<?= $isCurrent ? 'subscriptions.php' : 'subscriptions.php?category=' . (int) $navCategory['id'] ?>"
             class="sidebar-item sidebar-category<?= $isCurrent ? ' is-current' : '' ?>" <?= $isCurrent ? 'aria-current="page"' : '' ?>>

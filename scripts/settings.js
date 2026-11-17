@@ -381,6 +381,11 @@ function editCategory(categoryId) {
   saveButton.disabled = true;
 
   const categoryName = inputElement.value;
+  const parentElement = document.querySelector(`div[data-categoryid="${categoryId}"] select[name="parent"]`);
+  const body = { action: 'edit', categoryId: categoryId, name: categoryName };
+  if (parentElement && !parentElement.disabled) {
+    body.parentId = parentElement.value;
+  }
 
   fetch('endpoints/categories/category.php', {
     method: 'POST',
@@ -388,11 +393,7 @@ function editCategory(categoryId) {
       'Content-Type': 'application/x-www-form-urlencoded',
       'X-CSRF-Token': window.csrfToken,
     },
-    body: new URLSearchParams({
-      action: 'edit',
-      categoryId: categoryId,
-      name: categoryName,
-    }),
+    body: new URLSearchParams(body),
   })
     .then(response => {
       saveButton.classList.remove("disabled");
@@ -409,6 +410,10 @@ function editCategory(categoryId) {
         showSuccessMessage(responseData.message);
       } else {
         showErrorMessage(responseData.message || translate('failed_save_category'));
+      }
+      // A new parent reorders the list and changes which rows can be parents.
+      if (responseData.parentChanged || (!responseData.success && body.parentId !== undefined)) {
+        setTimeout(() => window.location.reload(), 600);
       }
     })
     .catch(error => {

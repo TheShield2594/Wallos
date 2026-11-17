@@ -42,6 +42,9 @@
         $categories[$categoryId] = $row;
         $categories[$categoryId]['count'] = 0;
     }
+    // Parents followed by their sub-categories, each with a "Parent › Child" label.
+    require_once __DIR__ . '/categories.php';
+    $categories = wallos_category_tree($categories);
 
     $cycles = array();
     $query = "SELECT * FROM cycles";

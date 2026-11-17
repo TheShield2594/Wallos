@@ -31,7 +31,8 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
   $sql = "SELECT * FROM subscriptions WHERE user_id = :userId";
 
   if (isset($_GET['categories']) && $_GET['categories'] != "") {
-    $allCategories = explode(',', $_GET['categories']);
+    // A parent category includes its sub-categories.
+    $allCategories = wallos_expand_category_ids($categories, explode(',', $_GET['categories']));
     $placeholders = array_map(function ($idx) {
       return ":categories{$idx}";
     }, array_keys($allCategories));

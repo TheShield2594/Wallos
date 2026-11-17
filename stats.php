@@ -25,6 +25,8 @@ $mainCurrencyDecimals = CurrencyFormatter::sanitizeDecimals($row['decimals'] ?? 
 
 $statsCostModeEnabled = true;
 require_once 'includes/stats_calculations.php';
+// The filter menu re-sorts $categories into a list; the split views need them by id.
+$categoriesById = $categories;
 require_once 'includes/stats_extra_calculations.php';
 require_once 'includes/upcoming_cancellations.php';
 
@@ -287,15 +289,30 @@ $actualYearOverYear = $actualLastYear > 0 ? ($actualThisYear - $actualLastYear) 
   ?>
   <?php
   // Graph datasets for the split views
+  // Sub-categories roll up into their parent; filtered to one parent, the
+  // split shows its sub-categories instead (drill-down). A parent's slice
+  // links to that view.
+  $categoryFilterIds = isset($_GET['category']) && $_GET['category'] !== '' ? array_map('intval', explode(',', $_GET['category'])) : [];
+  $categoryDrillDown = count($categoryFilterIds) === 1 && isset($categoriesById[$categoryFilterIds[0]])
+    && (int) ($categoriesById[$categoryFilterIds[0]]['parent_id'] ?? 0) === 0;
+  $categoryHasChildren = [];
+  foreach ($categoriesById as $categoryRow) {
+    if ((int) ($categoryRow['parent_id'] ?? 0) > 0) {
+      $categoryHasChildren[(int) $categoryRow['parent_id']] = true;
+    }
+  }
+  $splitCategoryCost = $categoryDrillDown ? ($categoryCost ?? []) : wallos_roll_up_categories($categoryCost ?? [], $categoriesById);
   $categoryDataPoints = [];
-  if (isset($categoryCost)) {
-    foreach ($categoryCost as $category) {
-      if ($category['cost'] != 0) {
-        $categoryDataPoints[] = [
-          "label" => html_entity_decode($category['name']),
-          "y" => $category["cost"],
-        ];
+  foreach ($splitCategoryCost as $splitCategoryId => $category) {
+    if ($category['cost'] != 0) {
+      $point = [
+        "label" => html_entity_decode($category['name']),
+        "y" => $category["cost"],
+      ];
+      if (!$categoryDrillDown && isset($categoryHasChildren[(int) $splitCategoryId])) {
+        $point['href'] = 'stats.php?' . http_build_query(array_merge($_GET, ['category' => (int) $splitCategoryId]));
       }
+      $categoryDataPoints[] = $point;
     }
   }
   usort($categoryDataPoints, fn($a, $b) => $b['y'] <=> $a['y']);
@@ -331,7 +348,16 @@ $actualYearOverYear = $actualLastYear > 0 ? ($actualThisYear - $actualLastYear) 
   $splitSubHeader = translate('monthly_cost', $i18n);
   if ($statsPeriodActive) {
     $splitSubHeader = $statsPeriodLabel;
-    $categoryDataPoints = wallos_period_split_points($periodCharges['by_category'], array_map(fn($row) => $row['name'], $categoryCost ?? []));
+    $periodByCategory = $periodCharges['by_category'];
+    if (!$categoryDrillDown) {
+      $rolledUp = [];
+      foreach ($periodByCategory as $periodCategoryId => $amount) {
+        $rootId = wallos_category_root_id($categoriesById, $periodCategoryId);
+        $rolledUp[$rootId] = ($rolledUp[$rootId] ?? 0) + $amount;
+      }
+      $periodByCategory = $rolledUp;
+    }
+    $categoryDataPoints = wallos_period_split_points($periodByCategory, array_map(fn($row) => $row['name'], $categoryCost ?? []));
     $memberDataPoints = wallos_period_split_points($periodCharges['by_member'], array_map(fn($row) => $row['name'], $memberCost ?? []));
     $paymentMethodDataPoints = wallos_period_split_points($periodCharges['by_payment'], array_map(fn($row) => $row['name'], $paymentMethodsCount ?? []));
     $showCategoryCostGraph = count($categoryDataPoints) > 1;

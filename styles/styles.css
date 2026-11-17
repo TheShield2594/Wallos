@@ -4825,3 +4825,13 @@ a.segmented-option {
   font-size: 12px;
   white-space: nowrap;
 }
+
+/* Sub-categories in Settings and Admin (issue #31) */
+.form-group-inline.is-subcategory {
+  padding-inline-start: 28px;
+}
+
+.form-group-inline select.category-parent,
+#categoryTemplates select[name="parent"] {
+  max-width: 11rem;
+}
