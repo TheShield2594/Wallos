@@ -18,7 +18,8 @@ if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true) {
 // includes/household_payments.php).
 $history = wallos_member_ledger_list($db, $userId, (int) ($_GET['id'] ?? 0), 12);
 if (!$history['success']) {
-    die(json_encode(['success' => false, 'message' => translate('error', $i18n)]));
+    $message = ($history['error'] ?? '') === 'no_conversion' ? 'household_currency_changed' : 'error';
+    die(json_encode(['success' => false, 'error' => $history['error'] ?? 'error', 'message' => translate($message, $i18n)]));
 }
 $payments = $history['payments'];
 

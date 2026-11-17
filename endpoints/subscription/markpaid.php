@@ -25,8 +25,14 @@ $shownCurrencyId = is_array($data) && isset($data['currency_id']) && $data['curr
 // conversion path (see includes/household_payments.php).
 $outcome = wallos_member_mark_paid($db, $userId, $subscriptionId, $amount, new DateTime('today'), $shownCurrencyId);
 if (!$outcome['success']) {
-    $message = ($outcome['error'] ?? '') === 'already_paid' ? translate('payment_already_recorded', $i18n) : translate('error', $i18n);
-    die(json_encode(["success" => false, "message" => $message]));
+    $messages = [
+        'already_paid' => 'payment_already_recorded',
+        // A shared subscription whose currencies changed since the dialog opened.
+        'no_conversion' => 'household_currency_changed',
+        'currency_changed' => 'household_currency_changed',
+    ];
+    $message = translate($messages[$outcome['error'] ?? ''] ?? 'error', $i18n);
+    die(json_encode(["success" => false, "error" => $outcome['error'] ?? 'error', "message" => $message]));
 }
 
 echo json_encode([

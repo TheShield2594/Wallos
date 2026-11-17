@@ -694,6 +694,7 @@ $i18n = [
     "household_error_already_member" => "That account is already in a household.",
     "household_error_user_not_found" => "No account with that username or email.",
     "household_error_self" => "You are already in your household.",
+    "household_currency_changed" => "The currencies of this shared subscription changed. Reload the page and try again.",
     "household_error_owner_leave" => "The owner can’t leave. Delete the household instead.",
     "visibility" => "Visibility",
     "visibility_private" => "Private",
