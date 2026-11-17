@@ -19,7 +19,7 @@ if ($subscriptionToClone === false) {
     ]));
 }
 
-$query = "INSERT INTO subscriptions (name, logo, price, currency_id, next_payment, auto_renew, start_date, cycle, frequency, notes, payment_method_id, payer_user_id, category_id, notify, url, inactive, notify_days_before, user_id, cancellation_date, replacement_subscription_id, billing_anchor_day, renew_from_action, variable_amount, end_date, total_payments, payments_made, ended_reason, plan_mode, tier_name) VALUES (:name, :logo, :price, :currency_id, :next_payment, :auto_renew, :start_date, :cycle, :frequency, :notes, :payment_method_id, :payer_user_id, :category_id, :notify, :url, :inactive, :notify_days_before, :user_id, :cancellation_date, :replacement_subscription_id, :billing_anchor_day, :renew_from_action, :variable_amount, :end_date, :total_payments, :payments_made, :ended_reason, :plan_mode, :tier_name)";
+$query = "INSERT INTO subscriptions (name, logo, price, currency_id, next_payment, auto_renew, start_date, cycle, frequency, notes, payment_method_id, payer_user_id, category_id, notify, url, inactive, notify_days_before, user_id, cancellation_date, replacement_subscription_id, billing_anchor_day, renew_from_action, variable_amount, end_date, total_payments, payments_made, ended_reason, plan_mode, tier_name, active_months, reimbursed_percent, reimbursed_reason) VALUES (:name, :logo, :price, :currency_id, :next_payment, :auto_renew, :start_date, :cycle, :frequency, :notes, :payment_method_id, :payer_user_id, :category_id, :notify, :url, :inactive, :notify_days_before, :user_id, :cancellation_date, :replacement_subscription_id, :billing_anchor_day, :renew_from_action, :variable_amount, :end_date, :total_payments, :payments_made, :ended_reason, :plan_mode, :tier_name, :active_months, :reimbursed_percent, :reimbursed_reason)";
 $cloneStmt = $db->prepare($query);
 $cloneStmt->bindValue(':name', $subscriptionToClone['name'], SQLITE3_TEXT);
 $cloneStmt->bindValue(':logo', $subscriptionToClone['logo'], SQLITE3_TEXT);
@@ -45,6 +45,10 @@ foreach (['billing_anchor_day', 'renew_from_action', 'variable_amount', 'total_p
     $value = $subscriptionToClone[$scheduleColumn] ?? null;
     $cloneStmt->bindValue(':' . $scheduleColumn, $value, $value === null ? SQLITE3_NULL : SQLITE3_INTEGER);
 }
+$cloneStmt->bindValue(':active_months', (int) ($subscriptionToClone['active_months'] ?? 4095), SQLITE3_INTEGER);
+$cloneStmt->bindValue(':reimbursed_percent', (float) ($subscriptionToClone['reimbursed_percent'] ?? 0), SQLITE3_FLOAT);
+$cloneStmt->bindValue(':reimbursed_reason', $subscriptionToClone['reimbursed_reason'] ?? null,
+    ($subscriptionToClone['reimbursed_reason'] ?? null) === null ? SQLITE3_NULL : SQLITE3_TEXT);
 foreach (['end_date', 'ended_reason', 'plan_mode', 'tier_name'] as $scheduleColumn) {
     $value = $subscriptionToClone[$scheduleColumn] ?? null;
     $cloneStmt->bindValue(':' . $scheduleColumn, $value, $value === null ? SQLITE3_NULL : SQLITE3_TEXT);
@@ -69,7 +73,17 @@ if ($cloned) {
     $carryStmt->bindValue(':sourceId', $subscriptionId, SQLITE3_INTEGER);
     $carryStmt->bindValue(':newId', $newId, SQLITE3_INTEGER);
     $carryStmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
-    $cloned = $carryStmt->execute() !== false && $db->exec('COMMIT') !== false;
+    $cloned = $carryStmt->execute() !== false;
+    // How it is split between household members.
+    if ($cloned) {
+        $sharesStmt = $db->prepare('INSERT INTO subscription_shares (subscription_id, household_id, share_percent, user_id)
+            SELECT :newId, household_id, share_percent, user_id FROM subscription_shares WHERE subscription_id = :sourceId AND user_id = :userId');
+        $sharesStmt->bindValue(':sourceId', $subscriptionId, SQLITE3_INTEGER);
+        $sharesStmt->bindValue(':newId', $newId, SQLITE3_INTEGER);
+        $sharesStmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
+        $cloned = $sharesStmt->execute() !== false;
+    }
+    $cloned = $cloned && $db->exec('COMMIT') !== false;
 }
 if (!$cloned) {
     @$db->exec('ROLLBACK');

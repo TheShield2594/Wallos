@@ -69,7 +69,8 @@ if (isset($_GET['member'])) {
 }
 
 if (isset($_GET['category'])) {
-  $categoryIds = explode(',', $_GET['category']);
+  // A parent category includes its sub-categories.
+  $categoryIds = wallos_expand_category_ids($categories, explode(',', $_GET['category']));
   $placeholders = array_map(function ($key) {
     return ":category{$key}";
   }, array_keys($categoryIds));
@@ -194,14 +195,6 @@ if (isset($_GET['category']) && ctype_digit((string) $_GET['category']) && isset
   $pageTitle = (int) $_GET['category'] === 1 ? translate('no_category', $i18n) : htmlspecialchars_decode($categories[(int) $_GET['category']]['name']);
 }
 
-$formatter = new IntlDateFormatter(
-  'en', // Force English locale
-  IntlDateFormatter::SHORT,
-  IntlDateFormatter::NONE,
-  null,
-  null,
-  'MMM d, yyyy'
-);
 
 $print = [];
 foreach ($subscriptions as $subscription) {
@@ -222,7 +215,7 @@ foreach ($subscriptions as $subscription) {
   $print[$id]['currency_code'] = $currencies[$subscription['currency_id']]['code'];
   $currencyId = $subscription['currency_id'];
   $print[$id]['auto_renew'] = $subscription['auto_renew'];
-  $print[$id]['next_payment'] = $formatter->format(strtotime($subscription['next_payment']));
+  $print[$id]['next_payment'] = tally_format_date($subscription['next_payment'], 'long', $lang);
   $print[$id]['payment_method_name'] = $payment_methods[$paymentMethodId]['name'] ?? '';
   $print[$id]['payment_method_id'] = $paymentMethodId;
   $print[$id]['category_id'] = $subscription['category_id'];
@@ -242,14 +235,14 @@ foreach ($subscriptions as $subscription) {
     $print[$id]['currency_code'] = $currencies[$mainCurrencyId]['code'];
   }
   if (isset($settings['showMonthlyPrice']) && $settings['showMonthlyPrice'] === 'true') {
-    $print[$id]['price'] = getPricePerMonth($cycle, $frequency, $print[$id]['price']);
-    $print[$id]['regular_price'] = getPricePerMonth($cycle, $frequency, $print[$id]['regular_price']);
+    $print[$id]['price'] = getPricePerMonth($cycle, $frequency, $print[$id]['price'], wallos_cycle_active_months($subscription));
+    $print[$id]['regular_price'] = getPricePerMonth($cycle, $frequency, $print[$id]['regular_price'], wallos_cycle_active_months($subscription));
   }
   // Sort on the price in the main currency, whether or not it is displayed
   // converted, so mixed currencies order by value rather than raw number.
   $sortPrice = $currencyId != $mainCurrencyId ? getPriceConverted(wallos_current_price($subscription), $currencyId, $db) : wallos_current_price($subscription);
   if (isset($settings['showMonthlyPrice']) && $settings['showMonthlyPrice'] === 'true') {
-    $sortPrice = getPricePerMonth($cycle, $frequency, $sortPrice);
+    $sortPrice = getPricePerMonth($cycle, $frequency, $sortPrice, wallos_cycle_active_months($subscription));
   }
   $print[$id]['sort_price'] = $sortPrice;
   if (isset($settings['showOriginalPrice']) && $settings['showOriginalPrice'] === 'true') {
@@ -399,7 +392,7 @@ if ($db->querySingle("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND 
     </div>
 
     <div class="form-group-inline">
-      <input type="number" step="0.01" id="price" name="price" autocomplete="off"
+      <input type="number" step="0.01" min="0" id="price" name="price" autocomplete="off"
         placeholder="<?= translate('price', $i18n) ?>" data-placeholder-price="<?= translate('price', $i18n) ?>"
         data-placeholder-estimate="<?= translate('estimated_price', $i18n) ?>" required>
       <select id="currency" name="currency_id" placeholder="<?= translate('add_subscription', $i18n) ?>">
@@ -407,7 +400,10 @@ if ($db->querySingle("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND 
         foreach ($currencies as $currency) {
           $selected = ($currency['id'] == $main_currency) ? 'selected' : '';
           ?>
-          <option value="<?= $currency['id'] ?>" data-code="<?= htmlspecialchars($currency['code']) ?>" <?= $selected ?>><?= $currency['name'] ?></option>
+          <option value="<?= $currency['id'] ?>" data-code="<?= htmlspecialchars($currency['code']) ?>"
+            data-symbol="<?= htmlspecialchars($currency['symbol']) ?>"
+            data-decimals="<?= CurrencyFormatter::inputDecimals($currency['code'], $currency['decimals'] ?? null) ?>"
+            data-decimals-setting="<?= htmlspecialchars((string) ($currency['decimals'] ?? '')) ?>" <?= $selected ?>><?= $currency['name'] ?></option>
           <?php
         }
         ?>
@@ -466,6 +462,32 @@ if ($db->querySingle("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND 
           </div>
         </div>
       </div>
+    </div>
+
+    <div class="form-group" id="active-months-group">
+      <fieldset class="month-chips-fieldset">
+        <legend><?= translate('active_months', $i18n) ?></legend>
+        <div class="month-chips">
+          <?php
+          $monthChipFormatter = null;
+          try {
+            $monthChipFormatter = new IntlDateFormatter($lang, IntlDateFormatter::NONE, IntlDateFormatter::NONE, null, null, 'LLL');
+          } catch (Throwable $e) {
+            $monthChipFormatter = null;
+          }
+          for ($month = 1; $month <= 12; $month++) {
+            $monthDate = new DateTime(sprintf('2001-%02d-01', $month));
+            $monthChipName = $monthChipFormatter ? $monthChipFormatter->format($monthDate) : $monthDate->format('M');
+            ?>
+            <input type="checkbox" class="month-chip-input" id="active_month_<?= $month ?>" name="active_months[]"
+              value="<?= $month ?>" checked onchange="updateActiveMonthsHint()">
+            <label class="month-chip" for="active_month_<?= $month ?>"><?= htmlspecialchars($monthChipName) ?></label>
+            <?php
+          }
+          ?>
+        </div>
+      </fieldset>
+      <p class="form-hint" id="active-months-hint" data-none="<?= translate('active_months_none', $i18n) ?>"><?= translate('active_months_info', $i18n) ?></p>
     </div>
 
     <div class="form-group">
@@ -612,6 +634,43 @@ if ($db->querySingle("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND 
       </div>
     </div>
 
+    <details class="form-group form-disclosure" id="sharing-group">
+      <summary><?= translate('sharing_and_reimbursement', $i18n) ?></summary>
+      <div class="sharing-fields">
+        <?php if (count($members) > 1) { ?>
+          <fieldset class="sharing-members">
+            <legend><?= translate('split_with', $i18n) ?></legend>
+            <?php foreach ($members as $member) { ?>
+              <div class="sharing-member" data-member-id="<?= (int) $member['id'] ?>">
+                <label for="share_<?= (int) $member['id'] ?>"><?= htmlspecialchars($member['name']) ?></label>
+                <div class="inline">
+                  <input type="number" id="share_<?= (int) $member['id'] ?>" name="shares[<?= (int) $member['id'] ?>]" class="share-percent"
+                    min="0" max="100" step="0.01" inputmode="decimal" placeholder="%" aria-describedby="sharing-hint" oninput="updateSharingHint()">
+                  <span class="share-amount" aria-live="off"></span>
+                </div>
+              </div>
+            <?php } ?>
+            <button type="button" class="button secondary-button thin" onclick="splitSharesEqually()"><?= translate('split_equally', $i18n) ?></button>
+          </fieldset>
+        <?php } ?>
+        <div class="inline sharing-reimbursed">
+          <div class="split33">
+            <label for="reimbursed_percent"><?= translate('reimbursed_percent', $i18n) ?></label>
+            <input type="number" id="reimbursed_percent" name="reimbursed_percent" min="0" max="100" step="0.01" inputmode="decimal"
+              placeholder="0" oninput="updateSharingHint()">
+          </div>
+          <div class="split66">
+            <label for="reimbursed_reason"><?= translate('reimbursed_reason', $i18n) ?></label>
+            <input type="text" id="reimbursed_reason" name="reimbursed_reason" maxlength="80" autocomplete="off"
+              placeholder="<?= translate('reimbursed_reason_placeholder', $i18n) ?>">
+          </div>
+        </div>
+        <p class="form-hint" id="sharing-hint" data-your-share="<?= translate('your_share_amount', $i18n) ?>"
+          data-must-total="<?= translate('shares_must_total', $i18n) ?>"
+          data-self-member="<?= (int) array_key_first($members) ?>"><?= translate('sharing_info', $i18n) ?></p>
+      </div>
+    </details>
+
     <div class="form-group">
       <label for="category"><?= translate('category', $i18n) ?></label>
       <select id="category" name="category_id">
@@ -619,7 +678,7 @@ if ($db->querySingle("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND 
         foreach ($categories as $category) {
           ?>
           <option value="<?= $category['id'] ?>">
-            <?= $category['name'] ?>
+            <?= $category['label'] ?? $category['name'] ?>
           </option>
           <?php
         }

@@ -12,6 +12,8 @@ require_once '../../includes/cancellation_deadline.php';
 require_once '../../includes/intro_pricing.php';
 require_once '../../includes/households.php';
 require_once '../../includes/price_changes.php';
+require_once '../../includes/currency_formatter.php';
+require_once '../../includes/cost_sharing.php';
 
 if (!file_exists('../../images/uploads/logos')) {
     mkdir('../../images/uploads/logos', 0777, true);
@@ -298,6 +300,18 @@ if ($isEdit) {
     }
 }
 
+// Store the price at the precision its currency shows (Settings > Currencies > Decimals).
+$priceCurrencyStmt = $db->prepare('SELECT code, decimals FROM currencies WHERE id = :id AND user_id = :userId');
+$priceCurrencyStmt->bindValue(':id', (int) $currencyId, SQLITE3_INTEGER);
+$priceCurrencyStmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
+$priceCurrency = $priceCurrencyStmt->execute()->fetchArray(SQLITE3_ASSOC);
+if ($priceCurrency !== false && is_numeric($price)) {
+    $price = wallos_round_price($price, $priceCurrency['code'], $priceCurrency['decimals']);
+    if (isset($_POST['intro_price']) && is_numeric($_POST['intro_price'])) {
+        $_POST['intro_price'] = wallos_round_price($_POST['intro_price'], $priceCurrency['code'], $priceCurrency['decimals']);
+    }
+}
+
 if ($replacementSubscriptionId == 0 || $inactive == 0) {
     $replacementSubscriptionId = null;
 }
@@ -385,6 +399,46 @@ if ($intro['next_payment'] !== null) {
     $nextPayment = $intro['next_payment'];
 }
 
+// Sharing & reimbursement (issue #34): the split between household members
+// and the part of the cost that comes back. A shared edit keeps the owner's.
+$memberIds = [];
+$memberStmt = $db->prepare('SELECT id FROM household WHERE user_id = :userId');
+$memberStmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
+$memberResult = $memberStmt->execute();
+while ($memberResult && ($memberRow = $memberResult->fetchArray(SQLITE3_NUM))) {
+    $memberIds[] = (int) $memberRow[0];
+}
+$sharesInput = wallos_shares_from_input($_POST['shares'] ?? [], $memberIds);
+if ($sharesInput['error'] !== null) {
+    rejectForeignId($sharesInput['error']);
+}
+$reimbursedPercent = wallos_sanitize_reimbursed_percent($_POST['reimbursed_percent'] ?? 0);
+$reimbursedReason = trim(validate($_POST['reimbursed_reason'] ?? ''));
+$reimbursedReason = $reimbursedPercent > 0 && $reimbursedReason !== '' ? mb_substr($reimbursedReason, 0, 80) : null;
+if ($sharedEdit) {
+    $reimbursedPercent = (float) ($editable['reimbursed_percent'] ?? 0);
+    $reimbursedReason = $editable['reimbursed_reason'] ?? null;
+}
+
+// Active months (issue #25): daily, weekly and monthly plans can bill in some
+// months only. The next payment moves to the first date in an active month.
+$activeMonths = WALLOS_ALL_MONTHS;
+if (wallos_cycle_supports_active_months($cycle, $frequency) && isset($_POST['active_months']) && is_array($_POST['active_months'])) {
+    $activeMonths = wallos_active_months_from_list($_POST['active_months']);
+}
+if ($activeMonths !== WALLOS_ALL_MONTHS) {
+    $firstActive = wallos_first_active_occurrence([
+        'next_payment' => $nextPayment,
+        'start_date' => $startDate,
+        'cycle' => $cycle,
+        'frequency' => $frequency,
+        'active_months' => $activeMonths,
+    ], wallos_parse_date($nextPayment));
+    if ($firstActive !== null) {
+        $nextPayment = $firstActive->format('Y-m-d');
+    }
+}
+
 $existingSchedule = [];
 if ($isEdit) {
     $scheduleStmt = $db->prepare("SELECT id, billing_anchor_day, payments_made, ended_reason, next_payment, start_date, cycle, frequency, renew_from_action
@@ -402,6 +456,7 @@ $plan = wallos_plan_fields([
     'cycle' => $cycle,
     'frequency' => $frequency,
     'billing_anchor_day' => $billingAnchorDay,
+    'active_months' => $activeMonths,
     'payments_made' => $existingSchedule['payments_made'] ?? 0,
     // A plan that stays completed keeps the payments it counted.
     'ended_reason' => $inactive ? ($existingSchedule['ended_reason'] ?? null) : null,
@@ -521,14 +576,16 @@ if (!$isEdit) {
                         notify_days_before, user_id, cancellation_date, replacement_subscription_id,
                         auto_renew, start_date, logo_text_color, logo_variant,
                         billing_anchor_day, renew_from_action, variable_amount, end_date,
-                        total_payments, payments_made, ended_reason, plan_mode, tier_name
+                        total_payments, payments_made, ended_reason, plan_mode, tier_name, active_months,
+                        reimbursed_percent, reimbursed_reason
                     ) VALUES (
                         :name, :logo, :price, :currencyId, :nextPayment, :cycle, :frequency, :notes,
                         :paymentMethodId, :payerUserId, :categoryId, :notify, :inactive, :url,
                         :notifyDaysBefore, :userId, :cancellationDate, :replacement_subscription_id,
                         :autoRenew, :startDate, :logoTextColor, :logoVariant,
                         :billingAnchorDay, :renewFromAction, :variableAmount, :endDate,
-                        :totalPayments, :paymentsMade, :endedReason, :planMode, :tierName
+                        :totalPayments, :paymentsMade, :endedReason, :planMode, :tierName, :activeMonths,
+                        :reimbursedPercent, :reimbursedReason
                     )";
 } else {
     $id = $_POST['id'];
@@ -575,7 +632,10 @@ if (!$isEdit) {
                         payments_made = :paymentsMade,
                         ended_reason = :endedReason,
                         plan_mode = :planMode,
-                        tier_name = :tierName";
+                        tier_name = :tierName,
+                        active_months = :activeMonths,
+                        reimbursed_percent = :reimbursedPercent,
+                        reimbursed_reason = :reimbursedReason";
 
     if ($logo != "") {
         $sql .= ", logo = :logo, logo_text_color = :logoTextColor, logo_variant = :logoVariant";
@@ -621,6 +681,9 @@ $stmt->bindValue(':paymentsMade', $paymentsMade, SQLITE3_INTEGER);
 $stmt->bindValue(':endedReason', $endedReason, $endedReason === null ? SQLITE3_NULL : SQLITE3_TEXT);
 $stmt->bindValue(':planMode', $planMode, $planMode === null ? SQLITE3_NULL : SQLITE3_TEXT);
 $stmt->bindValue(':tierName', $tierName, $tierName === null ? SQLITE3_NULL : SQLITE3_TEXT);
+$stmt->bindValue(':activeMonths', $activeMonths, SQLITE3_INTEGER);
+$stmt->bindValue(':reimbursedPercent', $reimbursedPercent, SQLITE3_FLOAT);
+$stmt->bindValue(':reimbursedReason', $reimbursedReason, $reimbursedReason === null ? SQLITE3_NULL : SQLITE3_TEXT);
 
 // The row, its cancellation notice, intro period and sharing are saved as
 // one unit: if any part fails, nothing is saved and the form stays open.
@@ -644,6 +707,9 @@ if ($saved) {
                 'frequency' => $frequency,
                 'tier_name' => $tierName,
             ], $priceChangeReason);
+        }
+        if ($saved && !$sharedEdit) {
+            $saved = wallos_store_subscription_shares($db, $savedId, $userId, $sharesInput['shares']);
         }
         if ($saved && !$sharedEdit) {
             // Private, or shared with the owner's household.

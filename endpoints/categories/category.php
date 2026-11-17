@@ -2,6 +2,7 @@
 require_once '../../includes/connect_endpoint.php';
 require_once '../../includes/inputvalidation.php';
 require_once '../../includes/validate_endpoint.php';
+require_once '../../includes/categories.php';
 
 $action = $_POST['action'] ?? '';
 
@@ -66,17 +67,22 @@ function handleEditCategory($db, $userId, $i18n)
     if (isset($_POST['categoryId']) && $_POST['categoryId'] != "" && isset($_POST['name']) && $_POST['name'] != "") {
         $categoryId = $_POST['categoryId'];
         $name = validate($_POST['name']);
-        $sql = "UPDATE categories SET name = :name WHERE id = :categoryId AND user_id = :userId";
-        $stmt = $db->prepare($sql);
-        $stmt->bindParam(':name', $name, SQLITE3_TEXT);
-        $stmt->bindParam(':categoryId', $categoryId, SQLITE3_INTEGER);
-        $stmt->bindParam(':userId', $userId, SQLITE3_INTEGER);
-        $result = $stmt->execute();
+        // Optional parent (sub-categories, see includes/categories.php).
+        $parentGiven = array_key_exists('parentId', $_POST);
+        $parentId = $parentGiven && ctype_digit((string) $_POST['parentId']) && (int) $_POST['parentId'] > 0 ? (int) $_POST['parentId'] : null;
+        $update = wallos_update_category($db, $userId, $categoryId, $name, $parentGiven, $parentId);
+        if ($update['error'] !== null) {
+            echo json_encode(["success" => false, "message" => $update['error']]);
+            return;
+        }
+        $result = $update['success'];
+        $parentChanged = $update['parent_changed'];
 
         if ($result) {
             $response = [
                 "success" => true,
-                "message" => translate('category_saved', $i18n)
+                "message" => translate('category_saved', $i18n),
+                "parentChanged" => $parentChanged
             ];
             echo json_encode($response);
         } else {
@@ -114,11 +120,8 @@ function handleDeleteCategory($db, $userId, $i18n)
             ];
             echo json_encode($response);
         } else {
-            $sql = "DELETE FROM categories WHERE id = :categoryId AND user_id = :userId";
-            $stmt = $db->prepare($sql);
-            $stmt->bindParam(':categoryId', $categoryId, SQLITE3_INTEGER);
-            $stmt->bindParam(':userId', $userId, SQLITE3_INTEGER);
-            $result = $stmt->execute();
+            // Its sub-categories become top-level categories, in the same transaction.
+            $result = wallos_delete_category($db, $userId, $categoryId);
             if ($result) {
                 $response = [
                     "success" => true,

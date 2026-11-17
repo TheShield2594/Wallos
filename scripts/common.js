@@ -178,4 +178,135 @@ function getCookie(name) {
     }
   }
   return null;
-}
+}
+/*
+  Date formatting that follows Settings > Display > Date format, the same
+  table as includes/date_format.php. style: 'short' (year only when it is not
+  the current year), 'long' (always the year) or 'month'.
+*/
+const TALLY_DATE_FORMATS = {
+  dmy: { order: ['day', 'month', 'year'], sep: '/', numeric: true },
+  mdy: { order: ['month', 'day', 'year'], sep: '/', numeric: true },
+  iso: { order: ['year', 'month', 'day'], sep: '-', numeric: true, alwaysYear: true },
+  d_mon_y: { order: ['day', 'month', 'year'], sep: ' ', numeric: false },
+  mon_d_y: { order: ['month', 'day', 'year'], sep: ' ', numeric: false },
+};
+
+// The UI language as an Intl locale tag: Tally's keys use underscores and
+// lower case ("pt_br", "zh_cn", "sr_lat"), which Intl rejects.
+function tallyLocale() {
+  const key = String(window.lang || 'en').toLowerCase();
+  const special = { sr_lat: 'sr-Latn', jp: 'ja' };
+  let tag = special[key];
+  if (!tag) {
+    const parts = key.split(/[_-]/);
+    tag = parts[0] + (parts[1] ? '-' + (parts[1].length === 2 ? parts[1].toUpperCase() : parts[1].charAt(0).toUpperCase() + parts[1].slice(1)) : '');
+  }
+  try {
+    return Intl.getCanonicalLocales(tag)[0] || 'en';
+  } catch (e) {
+    return 'en';
+  }
+}
+
+function tallyParseDate(value) {
+  if (value instanceof Date) {
+    return isNaN(value) ? null : value;
+  }
+  if (typeof value !== 'string' || value.length < 10) {
+    return null;
+  }
+  const date = new Date(value.substring(0, 10) + 'T00:00:00');
+  return isNaN(date) ? null : date;
+}
+
+function tallyFormatDate(value, style) {
+  const date = tallyParseDate(value);
+  if (!date) {
+    return value || '';
+  }
+  style = style || 'short';
+  const lang = tallyLocale();
+  const withYear = style !== 'short' || date.getFullYear() !== new Date().getFullYear();
+  const format = TALLY_DATE_FORMATS[window.tallyDateFormat];
+
+  if (!format) {
+    const options = style === 'month'
+      ? { month: 'short', year: '2-digit' }
+      : { day: 'numeric', month: 'short', year: withYear ? 'numeric' : undefined };
+    try {
+      return date.toLocaleDateString(lang, options);
+    } catch (e) {
+      return date.toLocaleDateString('en', options);
+    }
+  }
+
+  const pad = (number) => String(number).padStart(2, '0');
+  let monthName;
+  try {
+    monthName = date.toLocaleDateString(lang, { month: 'short' });
+  } catch (e) {
+    monthName = date.toLocaleDateString('en', { month: 'short' });
+  }
+  const parts = {
+    day: format.numeric ? pad(date.getDate()) : String(date.getDate()),
+    month: format.numeric ? pad(date.getMonth() + 1) : monthName,
+    year: String(date.getFullYear()),
+  };
+
+  if (style === 'month') {
+    if (window.tallyDateFormat === 'iso') {
+      return parts.year + '-' + parts.month;
+    }
+    const year = parts.year.substring(2);
+    return format.numeric ? parts.month + '/' + year : monthName + ' ' + year;
+  }
+
+  const fields = format.order.filter((field) => field !== 'year' || withYear || format.alwaysYear);
+  if (window.tallyDateFormat === 'mon_d_y' && fields.includes('year')) {
+    return parts.month + ' ' + parts.day + ', ' + parts.year;
+  }
+  return fields.map((field) => parts[field]).join(format.sep);
+}
+
+/*
+  Money formatting that follows Settings > Currencies > Decimals, like
+  CurrencyFormatter::format(): a set number of decimals, or automatic (the
+  currency's usual digits; 2 to 8 for codes such as BTC that Intl rejects).
+*/
+function tallyFormatMoney(amount, code, decimals, symbol) {
+  const value = Number(amount) || 0;
+  const lang = tallyLocale();
+  const digits = decimals === null || decimals === undefined || decimals === '' || decimals === 'auto'
+    ? null : Math.max(0, Math.min(8, Number(decimals)));
+  const fixed = digits === null ? {} : { minimumFractionDigits: digits, maximumFractionDigits: digits };
+  if (code && tallyIsIsoCurrency(code)) {
+    try {
+      return new Intl.NumberFormat(lang, Object.assign({ style: 'currency', currency: code }, fixed)).format(value);
+    } catch (e) { /* format the number and add the symbol */ }
+  }
+  const options = digits === null ? { minimumFractionDigits: 2, maximumFractionDigits: 8 } : fixed;
+  let number;
+  try {
+    number = new Intl.NumberFormat(lang, options).format(value);
+  } catch (e) {
+    number = value.toFixed(digits === null ? 2 : digits);
+  }
+  return `${symbol || code || ''}${number}`;
+}
+
+// Intl formats any three letters as a currency; only ISO codes have known
+// decimals, so BTC and friends take the symbol path above.
+function tallyIsIsoCurrency(code) {
+  if (typeof Intl.supportedValuesOf !== 'function') {
+    return /^[A-Z]{3}$/.test(code) && !['BTC', 'ETH', 'XBT', 'LTC', 'USDT', 'USDC'].includes(code);
+  }
+  if (!window.tallyIsoCurrencies) {
+    try {
+      window.tallyIsoCurrencies = new Set(Intl.supportedValuesOf('currency'));
+    } catch (e) {
+      window.tallyIsoCurrencies = new Set();
+    }
+  }
+  return window.tallyIsoCurrencies.has(String(code).toUpperCase());
+}

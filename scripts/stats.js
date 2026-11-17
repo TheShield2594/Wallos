@@ -11,13 +11,19 @@ function _chartTheme() {
     return { main, text, border, dark, font };
 }
 
+// Chart amounts are in the main currency and follow its decimals setting.
+function statsFormatValue(val, currency) {
+    if (!currency) {
+        return new Intl.NumberFormat(window.lang || navigator.language).format(val);
+    }
+    return tallyFormatMoney(val, currency, window.mainCurrencyDecimals, window.mainCurrencySymbol);
+}
+
 function loadGraph(container, dataPoints, currency, run) {
     if (!run) return;
 
     const t = _chartTheme();
-    const fmt = val => currency
-        ? new Intl.NumberFormat(navigator.language, { style: 'currency', currency }).format(val)
-        : new Intl.NumberFormat(navigator.language).format(val);
+    const fmt = val => statsFormatValue(val, currency);
 
     const hidden = new Array(dataPoints.length).fill(false);
 
@@ -38,6 +44,15 @@ function loadGraph(container, dataPoints, currency, run) {
             height: 320,
             background: 'transparent',
             fontFamily: t.font,
+            events: {
+                // A parent category's slice opens its sub-categories.
+                dataPointSelection: (event, ctx, config) => {
+                    const point = dataPoints.filter((_, i) => !hidden[i])[config.dataPointIndex];
+                    if (point && point.href) {
+                        window.location.href = point.href;
+                    }
+                },
+            },
         },
         theme: { mode: t.dark ? 'dark' : 'light' },
         ...activeSubset(),
@@ -75,9 +90,7 @@ function loadLineGraph(container, dataPoints, currency, run) {
     if (!run) return;
 
     const t = _chartTheme();
-    const fmt = val => currency
-        ? new Intl.NumberFormat(navigator.language, { style: 'currency', currency }).format(val)
-        : new Intl.NumberFormat(navigator.language).format(val);
+    const fmt = val => statsFormatValue(val, currency);
 
     // Mark the 12-month high and low so the extremes read at a glance
     const values = dataPoints.map(p => p.y);
@@ -137,9 +150,7 @@ function loadBarGraph(container, dataPoints, currency, run, thresholdLine) {
     const t = _chartTheme();
     const cs = getComputedStyle(document.documentElement);
     const errorColor = cs.getPropertyValue('--error-color').trim() || '#EF4444';
-    const fmt = val => currency
-        ? new Intl.NumberFormat(navigator.language, { style: 'currency', currency }).format(val)
-        : new Intl.NumberFormat(navigator.language).format(val);
+    const fmt = val => statsFormatValue(val, currency);
 
     const annotations = {};
     if (thresholdLine !== null && thresholdLine !== undefined) {
@@ -205,9 +216,7 @@ function loadHorizontalBarGraph(container, dataPoints, currency, run) {
     if (!run) return;
 
     const t = _chartTheme();
-    const fmt = val => currency
-        ? new Intl.NumberFormat(navigator.language, { style: 'currency', currency }).format(val)
-        : new Intl.NumberFormat(navigator.language).format(val);
+    const fmt = val => statsFormatValue(val, currency);
 
     const chart = new ApexCharts(document.getElementById(container), {
         chart: {

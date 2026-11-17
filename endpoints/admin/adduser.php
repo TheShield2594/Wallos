@@ -120,15 +120,9 @@ if ($result) {
 
     if ($newUserId > 1) {
 
-        // Add categories for that user
-        $query = 'INSERT INTO categories (name, "order", user_id) VALUES (:name, :order, :user_id)';
-        $stmt = $db->prepare($query);
-        foreach (default_categories($language) as $index => $name) {
-            $stmt->bindValue(':name', $name, SQLITE3_TEXT);
-            $stmt->bindValue(':order', $index + 1, SQLITE3_INTEGER);
-            $stmt->bindValue(':user_id', $newUserId, SQLITE3_INTEGER);
-            $stmt->execute();
-        }
+        // Add categories for that user: the admin's defaults, or the built-in ones
+        require_once '../../includes/categories.php';
+        wallos_seed_user_categories($db, $newUserId, $language);
 
         // Add payment methods for that user
         $query = 'INSERT INTO payment_methods (name, icon, "order", user_id) VALUES (:name, :icon, :order, :user_id)';

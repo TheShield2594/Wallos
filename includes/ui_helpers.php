@@ -3,6 +3,8 @@
   Small rendering helpers shared by the dashboard, the subscriptions list and
   the endpoint that re-renders that list.
 */
+
+require_once __DIR__ . '/date_format.php';
 require_once __DIR__ . '/logo_theme_variant.php';
 
 // Hue for a subscription's letter tile. Mirrors detailsTileHue() in

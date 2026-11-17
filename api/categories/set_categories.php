@@ -6,6 +6,7 @@ It receives the following parameters:
 - action: the action to perform ('add', 'edit', 'delete').
 - name: (required for 'add' and 'edit') the name of the category.
 - id / categoryId: (required for 'edit' and 'delete') the ID of the category.
+- parent_id: (optional for 'edit') a top-level category to nest it under, or empty for top level. Sub-categories go one level deep; deleting a parent makes its children top-level.
 
 It returns a JSON object with the following properties:
 - success: whether the request was successful (boolean).
@@ -23,6 +24,7 @@ Example response:
 */
 
 require_once '../../includes/connect_endpoint.php';
+require_once '../../includes/categories.php';
 require_once '../../includes/inputvalidation.php';
 
 header('Content-Type: application/json; charset=UTF-8');
@@ -152,13 +154,20 @@ switch ($action) {
             exit;
         }
 
-        // Update
-        $sqlEdit = "UPDATE categories SET name = :name WHERE id = :categoryId AND user_id = :userId";
-        $stmtEdit = $db->prepare($sqlEdit);
-        $stmtEdit->bindParam(':name', $name, SQLITE3_TEXT);
-        $stmtEdit->bindParam(':categoryId', $categoryId, SQLITE3_INTEGER);
-        $stmtEdit->bindParam(':userId', $userId, SQLITE3_INTEGER);
-        $resultEdit = $stmtEdit->execute();
+        // Optional parent (see includes/categories.php)
+        $parentGiven = array_key_exists('parent_id', $_POST);
+        $parentId = $parentGiven && ctype_digit((string) $_POST['parent_id']) && (int) $_POST['parent_id'] > 0 ? (int) $_POST['parent_id'] : null;
+        // The parent check and the update share one write lock.
+        $update = wallos_update_category($db, $userId, $categoryId, $name, $parentGiven, $parentId);
+        if ($update['error'] !== null) {
+            echo json_encode([
+                'success' => false,
+                'title' => 'Invalid parent',
+                'message' => $update['error']
+            ]);
+            exit;
+        }
+        $resultEdit = $update['success'];
 
         if ($resultEdit) {
             echo json_encode([
@@ -234,11 +243,15 @@ switch ($action) {
         }
 
         // Delete
-        $sqlDelete = "DELETE FROM categories WHERE id = :categoryId AND user_id = :userId";
-        $stmtDelete = $db->prepare($sqlDelete);
-        $stmtDelete->bindParam(':categoryId', $categoryId, SQLITE3_INTEGER);
-        $stmtDelete->bindParam(':userId', $userId, SQLITE3_INTEGER);
-        $resultDelete = $stmtDelete->execute();
+        // Its sub-categories become top-level categories, in the same transaction.
+        $resultDelete = wallos_delete_category($db, $userId, $categoryId);
+
+        if ($resultDelete) {
+            $stmtOrphans = $db->prepare("UPDATE categories SET parent_id = NULL WHERE parent_id = :categoryId AND user_id = :userId");
+            $stmtOrphans->bindParam(':categoryId', $categoryId, SQLITE3_INTEGER);
+            $stmtOrphans->bindParam(':userId', $userId, SQLITE3_INTEGER);
+            $resultDelete = $stmtOrphans->execute();
+        }
 
         if ($resultDelete) {
             echo json_encode([

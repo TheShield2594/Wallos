@@ -4696,3 +4696,142 @@ a.segmented-option {
   color: var(--text2);
   font-size: 12px;
 }
+
+/* Active months chips on the subscription form (issue #25). The checkboxes
+   stay hidden like every other one; the label is a pill, not a switch. */
+.month-chips-fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.month-chips-fieldset legend {
+  padding: 0;
+  margin-bottom: 8px;
+}
+
+.month-chips {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.month-chips input[type="checkbox"]+label.month-chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  margin: 0;
+  padding: 0 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text2);
+  font-size: 14px;
+  user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.month-chips input[type="checkbox"]+label.month-chip::before,
+.month-chips input[type="checkbox"]+label.month-chip::after {
+  content: none;
+}
+
+.month-chips input[type="checkbox"]:checked+label.month-chip {
+  background-color: var(--tint);
+  border-color: var(--tint);
+  color: #FFFFFF;
+}
+
+.month-chips input[type="checkbox"]:focus-visible+label.month-chip {
+  outline: 2px solid var(--tint);
+  outline-offset: 2px;
+}
+
+.form-hint.is-danger {
+  color: var(--danger);
+}
+
+/* Sharing & reimbursement on the subscription form (issue #34) */
+.form-disclosure > summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 6px 0;
+}
+
+.sharing-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.sharing-members {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.sharing-members legend {
+  padding: 0;
+  margin-bottom: 4px;
+}
+
+.sharing-member {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.sharing-member label {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sharing-member .inline {
+  align-items: center;
+  gap: 8px;
+}
+
+.sharing-member .share-amount {
+  min-width: 5em;
+  color: var(--text2);
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}
+
+.sharing-members > button {
+  align-self: flex-start;
+}
+
+.share-chip {
+  display: inline-block;
+  margin-inline-start: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background-color: var(--fill);
+  color: var(--text2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* Sub-categories in Settings and Admin (issue #31) */
+.form-group-inline.is-subcategory {
+  padding-inline-start: 28px;
+}
+
+.form-group-inline select.category-parent,
+#categoryTemplates select[name="parent"] {
+  max-width: 11rem;
+}

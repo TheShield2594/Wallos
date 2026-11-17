@@ -508,3 +508,64 @@ function saveOidcSettingsButton() {
       button.disabled = false;
     });
 }
+// Default categories for new accounts (issue #31). Each change reloads the
+// list, since a new parent changes which rows can take sub-categories.
+function categoryTemplateRequest(data, button) {
+  if (button) {
+    button.disabled = true;
+  }
+  return fetch('endpoints/admin/category_templates.php', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRF-Token': window.csrfToken,
+    },
+    body: JSON.stringify(data),
+  })
+    .then(response => response.json())
+    .then(result => {
+      if (result.success) {
+        showSuccessMessage(result.message);
+        setTimeout(() => window.location.reload(), 700);
+      } else {
+        showErrorMessage(result.message);
+      }
+      if (button) {
+        button.disabled = false;
+      }
+    })
+    .catch((error) => {
+      showErrorMessage(error);
+      if (button) {
+        button.disabled = false;
+      }
+    });
+}
+
+function addCategoryTemplate(button) {
+  const row = document.getElementById('newCategoryTemplate');
+  categoryTemplateRequest({
+    action: 'add',
+    name: row.querySelector('input[name="name"]').value,
+    parent_id: row.querySelector('select[name="parent"]').value || null,
+  }, button);
+}
+
+function saveCategoryTemplate(id) {
+  const row = document.querySelector(`[data-templateid="${id}"]`);
+  const parent = row.querySelector('select[name="parent"]');
+  categoryTemplateRequest({
+    action: 'edit',
+    id: id,
+    name: row.querySelector('input[name="name"]').value,
+    parent_id: parent.disabled ? null : (parent.value || null),
+  }, row.querySelector('button[name="save"]'));
+}
+
+function deleteCategoryTemplate(id) {
+  categoryTemplateRequest({ action: 'delete', id: id }, null);
+}
+
+function applyCategoryTemplates(button) {
+  categoryTemplateRequest({ action: 'apply' }, button);
+}

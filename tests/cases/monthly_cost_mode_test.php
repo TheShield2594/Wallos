@@ -24,15 +24,13 @@ wallos_test('short cycles bill at least once a month', function () {
 });
 
 wallos_test('the API spreads prices like the pages do', function () {
-    // getPricePerMonth() in includes/stats_calculations.php, which needs a page to load.
+    // getPricePerMonth() is a wrapper around it.
     assert_equals(10.0, wallos_price_per_month(4, 1, 120), 'yearly 120 is 10 a month');
     assert_equals(30.0, wallos_price_per_month(1, 1, 1), 'daily 1 is 30 a month');
     assert_equals(4.35, wallos_price_per_month(2, 1, 1), 'weekly 1 is 4.35 a month');
     assert_equals(5.0, wallos_price_per_month(3, 2, 10), 'every two months');
     assert_equals(0.0, wallos_price_per_month(5, 1, 99), 'one-time has no monthly cost');
-    $source = file_get_contents(WALLOS_ROOT . '/includes/stats_calculations.php');
-    assert_contains('(4.35 / $frequency)', $source, 'the pages still use 4.35 weeks a month');
-    assert_contains('(30 / $frequency)', $source, 'the pages still use 30 days a month');
+    assert_equals(wallos_price_per_month(2, 3, 7), getPricePerMonth(2, 3, 7), 'the pages use the same function');
 });
 
 wallos_test('the headline monthly cost follows the mode', function () {

@@ -4,13 +4,8 @@
 // All monetary values are converted to the main currency. Lifetime figures assume current prices.
 
 require_once __DIR__ . '/price_histogram.php';
+require_once __DIR__ . '/date_format.php';
 
-$monthLabelFormatter = null;
-try {
-    $monthLabelFormatter = new IntlDateFormatter($lang, IntlDateFormatter::SHORT, IntlDateFormatter::NONE, null, null, 'MMM yy');
-} catch (Throwable $e) {
-    $monthLabelFormatter = new IntlDateFormatter('en', IntlDateFormatter::SHORT, IntlDateFormatter::NONE, null, null, 'MMM yy');
-}
 
 // Currency codes for the currency exposure split
 $currencyCodesById = [];
@@ -28,7 +23,7 @@ $projectionEnd = (clone $projectionStart)->modify('+12 months');
 for ($i = 0; $i < 12; $i++) {
     $bucketDate = (clone $projectionStart)->modify("+$i months");
     $projectionBuckets[$bucketDate->format('Y-m')] = [
-        'label' => $monthLabelFormatter->format($bucketDate),
+        'label' => tally_format_date($bucketDate, 'month', $lang),
         'total' => 0,
     ];
 }
@@ -53,7 +48,7 @@ if (isset($subscriptions)) {
         $cycle = (int) $subscription['cycle'];
         $frequency = max(1, (int) $subscription['frequency']);
         $convertedPrice = getPriceConverted($subscription['price'], $subscription['currency_id'], $db, $userId);
-        $monthlyPrice = getPricePerMonth($cycle, $frequency, $convertedPrice);
+        $monthlyPrice = getPricePerMonth($cycle, $frequency, $convertedPrice, wallos_cycle_active_months($subscription));
 
         // New subscriptions per year (all subscriptions, active or not)
         $startDate = null;
@@ -95,20 +90,15 @@ if (isset($subscriptions)) {
                 $manualRenewalsCount++;
             }
 
-            // Projection: walk renewals forward into the buckets
-            $paymentTimestamp = strtotime($subscription['next_payment'] ?? '');
-            if ($paymentTimestamp !== false && isset($cycleStepUnits[$cycle])) {
-                $paymentDate = (new DateTime())->setTimestamp($paymentTimestamp);
-                $safety = 0;
-                while ($paymentDate < $projectionEnd && $safety < 1000) {
-                    if ($paymentDate >= $projectionStart) {
-                        $bucketKey = $paymentDate->format('Y-m');
-                        if (isset($projectionBuckets[$bucketKey])) {
-                            $projectionBuckets[$bucketKey]['total'] += $convertedPrice;
-                        }
+            // Projection: the renewals in each bucket, from the shared schedule
+            // (anchored days, plan end dates and active months included).
+            if (isset($cycleStepUnits[$cycle])) {
+                $projectionLastDay = (clone $projectionEnd)->modify('-1 day');
+                foreach (wallos_occurrences_in_range($subscription, $projectionStart, $projectionLastDay) as $paymentDate) {
+                    $bucketKey = $paymentDate->format('Y-m');
+                    if (isset($projectionBuckets[$bucketKey])) {
+                        $projectionBuckets[$bucketKey]['total'] += $convertedPrice;
                     }
-                    $paymentDate->modify("+{$frequency} {$cycleStepUnits[$cycle]}");
-                    $safety++;
                 }
             }
 

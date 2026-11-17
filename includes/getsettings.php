@@ -1,6 +1,8 @@
 <?php
 
 require_once __DIR__ . '/theme_helpers.php';
+require_once __DIR__ . '/date_format.php';
+require_once __DIR__ . '/currency_formatter.php';
 
 $query = "SELECT * FROM settings WHERE user_id = :userId";
 $stmt = $db->prepare($query);
@@ -32,7 +34,19 @@ if ($settings !== false) {
     $settings['mobileNavigation'] = $settings['mobile_nav'] ? 'true': 'false';
     $settings['showSubscriptionProgress'] = $settings['show_subscription_progress'] ? 'true': 'false';
     $settings['week_starts_sunday'] = isset($settings['week_starts_sunday']) ? $settings['week_starts_sunday'] : 0;
+    $settings['date_format'] = wallos_sanitize_date_format($settings['date_format'] ?? null);
+    $GLOBALS['wallos_date_format'] = $settings['date_format'];
 }
+
+// Each currency's decimals for every CurrencyFormatter::format() call.
+$currencyDecimalsStmt = $db->prepare("SELECT code, decimals FROM currencies WHERE user_id = :userId");
+$currencyDecimalsStmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
+$currencyDecimalsResult = $currencyDecimalsStmt->execute();
+$currencyDecimalsRows = [];
+while ($currencyDecimalsResult && $row = $currencyDecimalsResult->fetchArray(SQLITE3_ASSOC)) {
+    $currencyDecimalsRows[] = $row;
+}
+CurrencyFormatter::useCurrencies($currencyDecimalsRows);
 
 $query = "SELECT * FROM custom_colors WHERE user_id = :userId";
 $stmt = $db->prepare($query);

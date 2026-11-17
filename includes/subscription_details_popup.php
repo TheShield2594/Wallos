@@ -241,6 +241,7 @@ foreach ($currencies as $currencyId => $currency) {
   $detailsLookups['currencies']->{$currencyId} = [
     'code' => $currency['code'],
     'symbol' => $currency['symbol'],
+    'decimals' => CurrencyFormatter::sanitizeDecimals($currency['decimals'] ?? null),
   ];
 }
 foreach ($subscriptions as $detailsSubscription) {

@@ -29,6 +29,8 @@ require_once __DIR__ . '/renewal_dates.php';
 const WALLOS_RECURRING_CYCLES = [1 => 'Daily', 2 => 'Weekly', 3 => 'Monthly', 4 => 'Yearly'];
 const WALLOS_CYCLE_ONE_TIME = 5;
 const WALLOS_RECURRENCE_MAX_STEPS = 10000;
+const WALLOS_ALL_MONTHS = 4095;
+const WALLOS_ACTIVE_MONTHS_MAX_SKIPS = 800;
 
 /**
  * @param int|string $cycleId
@@ -155,6 +157,159 @@ function wallos_subscription_anchor_day(array $subscription)
 }
 
 /**
+ * Whether a schedule can be limited to some months: one that bills at least
+ * once a month (every 1-31 days, every 1-4 weeks, or monthly). Such a
+ * schedule reaches every month, so each active month gets its payments and
+ * the monthly cost counts them exactly; longer schedules (every two months,
+ * yearly) ignore the mask.
+ *
+ * @param int|string      $cycleId
+ * @param int|string|null $frequency null when only the cycle is known
+ * @return bool
+ */
+function wallos_cycle_supports_active_months($cycleId, $frequency = null)
+{
+    $cycleId = (int) $cycleId;
+    if (!in_array($cycleId, [1, 2, 3], true)) {
+        return false;
+    }
+    if ($frequency === null) {
+        return true;
+    }
+    $frequency = (int) $frequency;
+    $limits = [1 => 31, 2 => 4, 3 => 1];
+
+    return $frequency >= 1 && $frequency <= $limits[$cycleId];
+}
+
+/**
+ * @param mixed $mask a 12-bit mask, bit 0 = January
+ * @return int 1-4095; anything else is every month
+ */
+function wallos_sanitize_active_months($mask)
+{
+    if (!is_numeric($mask)) {
+        return WALLOS_ALL_MONTHS;
+    }
+    $mask = (int) $mask;
+
+    return $mask >= 1 && $mask <= WALLOS_ALL_MONTHS ? $mask : WALLOS_ALL_MONTHS;
+}
+
+/**
+ * Builds the mask from month numbers.
+ *
+ * @param iterable $months 1-12 (January = 1)
+ * @return int
+ */
+function wallos_active_months_from_list($months)
+{
+    $mask = 0;
+    foreach ($months as $month) {
+        $month = (int) $month;
+        if ($month >= 1 && $month <= 12) {
+            $mask |= 1 << ($month - 1);
+        }
+    }
+
+    return $mask === 0 ? WALLOS_ALL_MONTHS : $mask;
+}
+
+/**
+ * The months a subscription bills in. Schedules longer than a month (yearly,
+ * every two months, one-time) bill every month their schedule lands on.
+ *
+ * @return int
+ */
+function wallos_subscription_active_months(array $subscription)
+{
+    if (!wallos_cycle_supports_active_months($subscription['cycle'] ?? 0, $subscription['frequency'] ?? 1)) {
+        return WALLOS_ALL_MONTHS;
+    }
+
+    return wallos_sanitize_active_months($subscription['active_months'] ?? WALLOS_ALL_MONTHS);
+}
+
+/**
+ * @return bool
+ */
+function wallos_month_is_active($mask, DateTimeInterface $date)
+{
+    return ((int) $mask & (1 << ((int) $date->format('n') - 1))) !== 0;
+}
+
+/**
+ * Moves a date forward to the first scheduled date in an active month (the
+ * date itself when its month is active).
+ *
+ * @return DateTime|null
+ */
+function wallos_first_active_occurrence(array $subscription, DateTimeInterface $date)
+{
+    $date = new DateTime($date->format('Y-m-d'));
+    $mask = wallos_subscription_active_months($subscription);
+    if ($mask === WALLOS_ALL_MONTHS || wallos_month_is_active($mask, $date) || !wallos_is_recurring($subscription)) {
+        return $date;
+    }
+
+    return wallos_step_occurrence($date, $subscription, 1);
+}
+
+/**
+ * Short label of the active months: "Sep–Dec", "Jan, Mar–May", "Nov–Feb".
+ *
+ * @return string empty for every month
+ */
+function wallos_active_months_label($mask, $lang = 'en')
+{
+    $mask = wallos_sanitize_active_months($mask);
+    if ($mask === WALLOS_ALL_MONTHS) {
+        return '';
+    }
+    $names = [];
+    for ($month = 1; $month <= 12; $month++) {
+        $name = false;
+        try {
+            $formatter = new IntlDateFormatter($lang, IntlDateFormatter::NONE, IntlDateFormatter::NONE, null, null, 'LLL');
+            $name = $formatter->format(new DateTime(sprintf('2001-%02d-01', $month)));
+        } catch (Throwable $e) {
+            $name = false;
+        }
+        $names[$month] = $name !== false ? $name : date('M', mktime(0, 0, 0, $month, 1, 2001));
+    }
+
+    $active = function ($month) use ($mask) {
+        return ($mask & (1 << ((($month - 1) % 12 + 12) % 12))) !== 0;
+    };
+    // Start after an inactive month so a run across December stays whole.
+    $start = 1;
+    while ($active($start)) {
+        $start++;
+    }
+    $ranges = [];
+    for ($offset = 0; $offset < 12; $offset++) {
+        $month = ($start + $offset - 1) % 12 + 1;
+        if (!$active($month)) {
+            continue;
+        }
+        $previous = ($month + 10) % 12 + 1;
+        if ($offset > 0 && $active($previous) && $ranges !== []) {
+            $ranges[count($ranges) - 1][1] = $month;
+        } else {
+            $ranges[] = [$month, $month];
+        }
+    }
+
+    usort($ranges, function ($a, $b) {
+        return $a[0] <=> $b[0];
+    });
+
+    return implode(', ', array_map(function ($range) use ($names) {
+        return $range[0] === $range[1] ? $names[$range[0]] : $names[$range[0]] . '–' . $names[$range[1]];
+    }, $ranges));
+}
+
+/**
  * Whether the subscription has a schedule to step along.
  *
  * @param array $subscription
@@ -166,14 +321,11 @@ function wallos_is_recurring(array $subscription)
 }
 
 /**
- * Steps a date along a subscription's schedule.
+ * Steps a date along a subscription's schedule, ignoring active months.
  *
- * @param DateTimeInterface $date
- * @param array             $subscription needs cycle and frequency; billing_anchor_day is honoured
- * @param int               $steps        negative steps go backwards
- * @return DateTime|null null when the subscription does not recur
+ * @return DateTime|null
  */
-function wallos_step_occurrence(DateTimeInterface $date, array $subscription, $steps = 1)
+function wallos_step_schedule(DateTimeInterface $date, array $subscription, $steps)
 {
     $cycleName = wallos_cycle_name($subscription['cycle'] ?? 0);
     $frequency = (int) ($subscription['frequency'] ?? 0);
@@ -187,6 +339,50 @@ function wallos_step_occurrence(DateTimeInterface $date, array $subscription, $s
     }
 
     return $result;
+}
+
+/**
+ * Steps a date along a subscription's schedule.
+ *
+ * With active months (issue #25), occurrences in an inactive month are
+ * skipped: each step lands on the next date of the schedule that falls in an
+ * active month.
+ *
+ * @param DateTimeInterface $date
+ * @param array             $subscription needs cycle and frequency; billing_anchor_day
+ *                                        and active_months are honoured
+ * @param int               $steps        negative steps go backwards
+ * @return DateTime|null null when the subscription does not recur
+ */
+function wallos_step_occurrence(DateTimeInterface $date, array $subscription, $steps = 1)
+{
+    $steps = (int) $steps;
+    $mask = wallos_subscription_active_months($subscription);
+    if ($mask === WALLOS_ALL_MONTHS || $steps === 0) {
+        return wallos_step_schedule($date, $subscription, $steps);
+    }
+
+    $direction = $steps > 0 ? 1 : -1;
+    $current = new DateTime($date->format('Y-m-d'));
+    for ($remaining = abs($steps); $remaining > 0; $remaining--) {
+        $candidate = $current;
+        $found = false;
+        for ($guard = 0; $guard < WALLOS_ACTIVE_MONTHS_MAX_SKIPS; $guard++) {
+            $candidate = wallos_step_schedule($candidate, $subscription, $direction);
+            if ($candidate === null) {
+                return null;
+            }
+            if (wallos_month_is_active($mask, $candidate)) {
+                $found = true;
+                break;
+            }
+        }
+        // A schedule that never reaches an active month (every 2 months from
+        // January with only February active) bills as if every month were active.
+        $current = $found ? $candidate : wallos_step_schedule($current, $subscription, $direction);
+    }
+
+    return $current;
 }
 
 /**
@@ -279,6 +475,13 @@ function wallos_occurrences_in_range(array $subscription, DateTimeInterface $ran
             break;
         }
         $current = $following;
+    }
+
+    $mask = wallos_subscription_active_months($subscription);
+    if ($mask !== WALLOS_ALL_MONTHS) {
+        $occurrences = array_values(array_filter($occurrences, function (DateTime $date) use ($mask) {
+            return wallos_month_is_active($mask, $date);
+        }));
     }
 
     return $occurrences;

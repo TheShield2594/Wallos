@@ -11,7 +11,7 @@ $statsScope = ($statsHousehold !== null && ($_GET['scope'] ?? '') === 'household
 
 
 // Get code of main currency to display on statistics
-$query = "SELECT c.code
+$query = "SELECT c.code, c.symbol, c.decimals
           FROM currencies c
           INNER JOIN user u ON c.id = u.main_currency
           WHERE u.id = :userId";
@@ -20,8 +20,13 @@ $stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
 $result = $stmt->execute();
 $row = $result->fetchArray(SQLITE3_ASSOC);
 $code = $row['code'];
+$mainCurrencySymbol = $row['symbol'] ?? '';
+$mainCurrencyDecimals = CurrencyFormatter::sanitizeDecimals($row['decimals'] ?? null);
 
+$statsCostModeEnabled = true;
 require_once 'includes/stats_calculations.php';
+// The filter menu re-sorts $categories into a list; the split views need them by id.
+$categoriesById = $categories;
 require_once 'includes/stats_extra_calculations.php';
 require_once 'includes/upcoming_cancellations.php';
 
@@ -65,7 +70,7 @@ $ledgerMonths = wallos_ledger_monthly_totals($db, $userId,
 $actualPaymentsDataPoints = [];
 foreach (array_slice($ledgerMonths, -12, null, true) as $month => $total) {
     $actualPaymentsDataPoints[] = [
-        'label' => (new IntlDateFormatter($lang, IntlDateFormatter::NONE, IntlDateFormatter::NONE, null, null, 'MMM yy'))->format(new DateTime($month . '-01')),
+        'label' => tally_format_date($month . '-01', 'month', $lang),
         'y' => round($total, 2),
     ];
 }
@@ -98,6 +103,27 @@ $actualYearOverYear = $actualLastYear > 0 ? ($actualThisYear - $actualLastYear) 
           ?>
           <a class="segmented-option<?= $statsScope === $scopeValue ? ' is-selected' : '' ?>" aria-current="<?= $statsScope === $scopeValue ? 'true' : 'false' ?>"
             href="stats.php?<?= htmlspecialchars(http_build_query($scopeQuery)) ?>"><?= htmlspecialchars($scopeLabel) ?></a>
+        <?php } ?>
+      </div>
+    <?php } ?>
+    <?php
+    // Gross / My cost (issue #34), offered once something is split or reimbursed.
+    $hasCostAdjustments = $costSharesById !== [] || $statsCostMode === 'net';
+    foreach ($subscriptions as $costRow) {
+      if ((float) ($costRow['reimbursed_percent'] ?? 0) > 0) {
+        $hasCostAdjustments = true;
+        break;
+      }
+    }
+    if ($hasCostAdjustments) {
+      $costQuery = $_GET;
+      ?>
+      <div class="segmented" role="group" aria-label="<?= translate('cost_view', $i18n) ?>">
+        <?php foreach (['gross' => translate('cost_gross', $i18n), 'net' => translate('cost_mine', $i18n)] as $costValue => $costLabel) {
+          $costQuery['cost'] = $costValue;
+          ?>
+          <a class="segmented-option<?= $statsCostMode === $costValue ? ' is-selected' : '' ?>" aria-current="<?= $statsCostMode === $costValue ? 'true' : 'false' ?>"
+            href="stats.php?<?= htmlspecialchars(http_build_query($costQuery)) ?>"><?= htmlspecialchars($costLabel) ?></a>
         <?php } ?>
       </div>
     <?php } ?>
@@ -263,19 +289,36 @@ $actualYearOverYear = $actualLastYear > 0 ? ($actualThisYear - $actualLastYear) 
   ?>
   <?php
   // Graph datasets for the split views
+  // Sub-categories roll up into their parent; filtered to one parent, the
+  // split shows its sub-categories instead (drill-down). A parent's slice
+  // links to that view.
+  $categoryFilterIds = isset($_GET['category']) && $_GET['category'] !== '' ? array_map('intval', explode(',', $_GET['category'])) : [];
+  $categoryDrillDown = count($categoryFilterIds) === 1 && isset($categoriesById[$categoryFilterIds[0]])
+    && (int) ($categoriesById[$categoryFilterIds[0]]['parent_id'] ?? 0) === 0;
+  $categoryHasChildren = [];
+  foreach ($categoriesById as $categoryRow) {
+    if ((int) ($categoryRow['parent_id'] ?? 0) > 0) {
+      $categoryHasChildren[(int) $categoryRow['parent_id']] = true;
+    }
+  }
+  $splitCategoryCost = $categoryDrillDown ? ($categoryCost ?? []) : wallos_roll_up_categories($categoryCost ?? [], $categoriesById);
   $categoryDataPoints = [];
-  if (isset($categoryCost)) {
-    foreach ($categoryCost as $category) {
-      if ($category['cost'] != 0) {
-        $categoryDataPoints[] = [
-          "label" => html_entity_decode($category['name']),
-          "y" => $category["cost"],
-        ];
+  foreach ($splitCategoryCost as $splitCategoryId => $category) {
+    if ($category['cost'] != 0) {
+      $point = [
+        "label" => html_entity_decode($category['name']),
+        "y" => $category["cost"],
+      ];
+      if (!$categoryDrillDown && isset($categoryHasChildren[(int) $splitCategoryId])) {
+        $point['href'] = 'stats.php?' . http_build_query(array_merge($_GET, ['category' => (int) $splitCategoryId]));
       }
+      $categoryDataPoints[] = $point;
     }
   }
   usort($categoryDataPoints, fn($a, $b) => $b['y'] <=> $a['y']);
-  $showCategoryCostGraph = count($categoryDataPoints) > 1;
+  // A single slice says nothing, unless it is a parent that opens its sub-categories.
+  $categorySplitWorthShowing = fn($points) => count($points) > 1 || (count($points) === 1 && !empty($points[0]['href']));
+  $showCategoryCostGraph = $categorySplitWorthShowing($categoryDataPoints);
 
   $memberDataPoints = [];
   if (isset($memberCost)) {
@@ -307,10 +350,30 @@ $actualYearOverYear = $actualLastYear > 0 ? ($actualThisYear - $actualLastYear) 
   $splitSubHeader = translate('monthly_cost', $i18n);
   if ($statsPeriodActive) {
     $splitSubHeader = $statsPeriodLabel;
-    $categoryDataPoints = wallos_period_split_points($periodCharges['by_category'], array_map(fn($row) => $row['name'], $categoryCost ?? []));
+    $periodByCategory = $periodCharges['by_category'];
+    if (!$categoryDrillDown) {
+      $rolledUp = [];
+      foreach ($periodByCategory as $periodCategoryId => $amount) {
+        $rootId = wallos_category_root_id($categoriesById, $periodCategoryId);
+        $rolledUp[$rootId] = ($rolledUp[$rootId] ?? 0) + $amount;
+      }
+      $periodByCategory = $rolledUp;
+    }
+    // Same points as wallos_period_split_points(), keeping the drill-down link on parents.
+    $categoryDataPoints = [];
+    foreach ($periodByCategory as $periodCategoryId => $amount) {
+      if ($amount > 0 && isset($categoryCost[$periodCategoryId])) {
+        $point = ['label' => html_entity_decode($categoryCost[$periodCategoryId]['name']), 'y' => round($amount, 2)];
+        if (!$categoryDrillDown && isset($categoryHasChildren[(int) $periodCategoryId])) {
+          $point['href'] = 'stats.php?' . http_build_query(array_merge($_GET, ['category' => (int) $periodCategoryId]));
+        }
+        $categoryDataPoints[] = $point;
+      }
+    }
+    usort($categoryDataPoints, fn($a, $b) => $b['y'] <=> $a['y']);
     $memberDataPoints = wallos_period_split_points($periodCharges['by_member'], array_map(fn($row) => $row['name'], $memberCost ?? []));
     $paymentMethodDataPoints = wallos_period_split_points($periodCharges['by_payment'], array_map(fn($row) => $row['name'], $paymentMethodsCount ?? []));
-    $showCategoryCostGraph = count($categoryDataPoints) > 1;
+    $showCategoryCostGraph = $categorySplitWorthShowing($categoryDataPoints);
     $showMemberCostGraph = count($memberDataPoints) > 1;
     $showPaymentMethodsGraph = count($paymentMethodDataPoints) > 1;
   }
@@ -360,9 +423,8 @@ $actualYearOverYear = $actualLastYear > 0 ? ($actualThisYear - $actualLastYear) 
         <div class="card period-charges">
           <div class="card-list">
             <?php
-            $chargeDateFormatter = new IntlDateFormatter($lang, IntlDateFormatter::MEDIUM, IntlDateFormatter::NONE);
             foreach ($periodCharges['charges'] as $charge) {
-              $chargeSubtitle = $chargeDateFormatter->format(new DateTime($charge['date']));
+              $chargeSubtitle = tally_format_date($charge['date'], 'long', $lang);
               if (!empty($charge['shared_owner_name'])) {
                 $chargeSubtitle = sprintf(translate('shared_by', $i18n), $charge['shared_owner_name']) . ' · ' . $chargeSubtitle;
               }
@@ -388,6 +450,11 @@ $actualYearOverYear = $actualLastYear > 0 ? ($actualThisYear - $actualLastYear) 
 
   <section class="stats-section">
     <h2><?= translate('overview', $i18n) ?></h2>
+    <?php if ($statsCostMode === 'net') { ?>
+      <p class="stats-note"><?= translate('cost_mine_note', $i18n) ?></p>
+    <?php } elseif ($hasCostAdjustments) { ?>
+      <p class="stats-note"><?= translate('cost_gross_note', $i18n) ?></p>
+    <?php } ?>
     <div class="statistics">
       <div class="statistic">
         <span><?= $activeSubscriptions ?></span>
@@ -646,6 +713,37 @@ $actualYearOverYear = $actualLastYear > 0 ? ($actualThisYear - $actualLastYear) 
         <?php
       }
       ?>
+    </section>
+    <?php
+  }
+
+  // Who owes what: each member's monthly share of what someone else pays.
+  if (!empty($memberOwed)) {
+    ?>
+    <section class="stats-section">
+      <h2><?= translate('who_owes_what', $i18n) ?></h2>
+      <div class="card">
+        <div class="card-list">
+          <?php foreach ($memberOwed as $owingMemberId => $owedByPayer) {
+            foreach ($owedByPayer as $owedPayerId => $owedAmount) {
+              $owingName = $members[$owingMemberId]['name'] ?? '';
+              $owedPayerName = $members[$owedPayerId]['name'] ?? '';
+              ?>
+              <div class="list-row">
+                <?= render_tile($owingName, '', null, null) ?>
+                <span class="list-row-text">
+                  <span class="list-row-title"><?= htmlspecialchars($owingName) ?></span>
+                  <span class="list-row-subtitle"><?= htmlspecialchars(sprintf(translate('owes_payer', $i18n), $owedPayerName)) ?></span>
+                </span>
+                <span class="list-row-trailing">
+                  <span class="list-row-value"><?= htmlspecialchars(CurrencyFormatter::format($owedAmount, $code)) ?><?= translate('per_month_short', $i18n) ?></span>
+                </span>
+              </div>
+            <?php }
+          } ?>
+        </div>
+      </div>
+      <p class="stats-note"><?= translate('who_owes_what_info', $i18n) ?></p>
     </section>
     <?php
   }
@@ -947,6 +1045,8 @@ if ($showAnyGraph) {
   ?>
   <script src="scripts/libs/apexcharts.min.js"></script>
   <script type="text/javascript">
+    window.mainCurrencyDecimals = <?= json_encode($mainCurrencyDecimals) ?>;
+    window.mainCurrencySymbol = <?= json_encode($mainCurrencySymbol, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;
     window.onload = function () {
       loadLineGraph("totalMonthlyCostChart", <?php echo json_encode($totalMonthlyCostDataPoints, JSON_NUMERIC_CHECK); ?>, "<?= $code ?>", <?= $showTotalMonthlyCostGraph ? 1 : 0 ?>);
       loadBarGraph("projectionChart", <?php echo json_encode($projectionDataPoints, JSON_NUMERIC_CHECK); ?>, "<?= $code ?>", <?= $showProjectionGraph ? 1 : 0 ?>, <?= isset($budget) && $budget > 0 ? $budget : 'null' ?>);

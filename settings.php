@@ -1106,7 +1106,20 @@ $upcomingPaymentsLimit = normalize_upcoming_payments_limit($settings['upcoming_p
     if ($result) {
         $categories = array();
         while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
-            $categories[] = $row;
+            $categories[$row['id']] = $row;
+        }
+        require_once 'includes/categories.php';
+        $categories = wallos_category_tree($categories);
+    }
+    // Top-level categories that can take sub-categories ("No category" can't).
+    $noCategoryId = (int) (array_key_first($categories) ?? 0);
+    $parentOptions = array_filter($categories, function ($category) use ($noCategoryId) {
+        return (int) $category['depth'] === 0 && (int) $category['id'] !== $noCategoryId && (int) $category['id'] !== 1;
+    });
+    $categoriesWithChildren = [];
+    foreach ($categories as $category) {
+        if ((int) ($category['parent_id'] ?? 0) > 0) {
+            $categoriesWithChildren[(int) $category['parent_id']] = true;
         }
     }
     ?>
@@ -1148,10 +1161,22 @@ $upcomingPaymentsLimit = normalize_upcoming_payments_limit($settings['upcoming_p
                             $canDelete = false;
                         }
                         ?>
-                        <div class="form-group-inline" data-categoryid="<?= $category['id'] ?>">
+                        <div class="form-group-inline<?= (int) $category['depth'] === 1 ? ' is-subcategory' : '' ?>" data-categoryid="<?= $category['id'] ?>">
                             <div class=" drag-icon"><i class="fa-solid fa-grip-vertical"></i></div>
-                            <input type="text" name="category" autocomplete="off" value="<?= htmlspecialchars($category['name']) ?>"
+                            <input type="text" name="category" autocomplete="off" value="<?= htmlspecialchars(htmlspecialchars_decode($category['name'])) ?>"
                                 placeholder="Category">
+                            <select name="parent" class="category-parent" aria-label="<?= translate('parent_category', $i18n) ?>"
+                                title="<?= translate('parent_category', $i18n) ?>" onchange="editCategory(<?= $category['id'] ?>)"
+                                <?= isset($categoriesWithChildren[(int) $category['id']]) || (int) $category['id'] === $noCategoryId ? 'disabled' : '' ?>>
+                                <option value=""><?= translate('top_level_category', $i18n) ?></option>
+                                <?php foreach ($parentOptions as $parentOption) {
+                                    if ((int) $parentOption['id'] === (int) $category['id']) {
+                                        continue;
+                                    } ?>
+                                    <option value="<?= $parentOption['id'] ?>" <?= (int) ($category['parent_id'] ?? 0) === (int) $parentOption['id'] ? 'selected' : '' ?>>
+                                        <?= htmlspecialchars(htmlspecialchars_decode($parentOption['name'])) ?></option>
+                                <?php } ?>
+                            </select>
                             <button class="image-button medium" onClick="editCategory(<?= $category['id'] ?>)" name="save"
                                 title="<?= translate('save_category', $i18n) ?>">
                                 <i class="fa-solid fa-check"></i>
@@ -1256,6 +1281,14 @@ $upcomingPaymentsLimit = normalize_upcoming_payments_limit($settings['upcoming_p
                             placeholder="Currency Name">
                         <input type="text" name="code" autocomplete="off" value="<?= htmlspecialchars($currency['code']) ?>"
                             placeholder="Currency Code" <?= !$canDelete ? 'disabled' : '' ?>>
+                        <?php $currencyDecimals = CurrencyFormatter::sanitizeDecimals($currency['decimals'] ?? null); ?>
+                        <select name="decimals" class="currency-decimals" title="<?= translate('decimals', $i18n) ?>"
+                            aria-label="<?= translate('decimals', $i18n) ?>">
+                            <option value="auto" <?= $currencyDecimals === null ? 'selected' : '' ?>><?= translate('decimals_auto', $i18n) ?></option>
+                            <?php for ($digits = 0; $digits <= WALLOS_CURRENCY_MAX_DECIMALS; $digits++) { ?>
+                                <option value="<?= $digits ?>" <?= $currencyDecimals === $digits ? 'selected' : '' ?>><?= sprintf(translate('decimals_count', $i18n), $digits) ?></option>
+                            <?php } ?>
+                        </select>
                         <button class="image-button medium" onClick="editCurrency(<?= $currency['id'] ?>)" name="save"
                             title="<?= translate('save_currency', $i18n) ?>">
                             <i class="fa-solid fa-check"></i>
@@ -1298,6 +1331,10 @@ $upcomingPaymentsLimit = normalize_upcoming_payments_limit($settings['upcoming_p
                 <p>
                     <i class="fa-solid fa-circle-info"></i>
                     <?= translate('currency_info', $i18n) ?>
+                </p>
+                <p>
+                    <i class="fa-solid fa-circle-info"></i>
+                    <?= translate('decimals_info', $i18n) ?>
                     <span>
                         fixer.io
                         <a href="https://fixer.io/symbols" target="_blank" title="Currency codes">
@@ -1800,6 +1837,32 @@ $upcomingPaymentsLimit = normalize_upcoming_payments_limit($settings['upcoming_p
                     <input type="checkbox" id="showoriginalprice" name="showoriginalprice"
                         onChange="setShowOriginalPrice()" <?= $settings['show_original_price'] ? 'checked' : '' ?>>
                     <label for="showoriginalprice"><?= translate('show_original_price', $i18n) ?></label>
+                </div>
+            </div>
+            <div>
+                <div class="form-group">
+                    <label for="dateformat"><?= translate('date_format', $i18n) ?></label>
+                    <?php
+                    $dateFormatSetting = wallos_sanitize_date_format($settings['date_format'] ?? null);
+                    $dateFormatSample = new DateTime(date('Y') . '-12-31');
+                    ?>
+                    <select id="dateformat" name="dateformat" onChange="setDateFormat()">
+                        <option value="auto" <?= $dateFormatSetting === 'auto' ? 'selected' : '' ?>><?= translate('date_format_auto', $i18n) ?></option>
+                        <?php foreach (['dmy', 'mdy', 'iso', 'd_mon_y', 'mon_d_y'] as $formatValue) { ?>
+                            <option value="<?= $formatValue ?>" <?= $dateFormatSetting === $formatValue ? 'selected' : '' ?>><?= htmlspecialchars(tally_format_date($dateFormatSample, 'long', $lang, $formatValue)) ?></option>
+                        <?php } ?>
+                    </select>
+                    <p class="form-hint"><?= translate('date_format_info', $i18n) ?></p>
+                </div>
+            </div>
+            <div>
+                <div class="form-group">
+                    <label for="statscostview"><?= translate('stats_cost_view', $i18n) ?></label>
+                    <select id="statscostview" name="statscostview" onChange="setStatsCostView()">
+                        <option value="gross" <?= empty($settings['stats_net_cost']) ? 'selected' : '' ?>><?= translate('cost_gross', $i18n) ?></option>
+                        <option value="net" <?= !empty($settings['stats_net_cost']) ? 'selected' : '' ?>><?= translate('cost_mine', $i18n) ?></option>
+                    </select>
+                    <p class="form-hint"><?= translate('stats_cost_view_info', $i18n) ?></p>
                 </div>
             </div>
             <div>

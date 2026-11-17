@@ -4,6 +4,7 @@ require_once __DIR__ . '/../../includes/connect_endpoint_crontabs.php';
 require_once __DIR__ . '/../../includes/currency_rates.php';
 
 require 'settimezone.php';
+require_once __DIR__ . '/../../includes/monthly_cost.php';
 
 if (php_sapi_name() == 'cli') {
     $date = new DateTime('now');
@@ -12,24 +13,6 @@ if (php_sapi_name() == 'cli') {
 
 $currentDate = new DateTime();
 $currentDateString = $currentDate->format('Y-m-d');
-
-function getPricePerMonth($cycle, $frequency, $price)
-{
-  switch ($cycle) {
-    case 1:
-      $numberOfPaymentsPerMonth = (30 / $frequency);
-      return $price * $numberOfPaymentsPerMonth;
-    case 2:
-      $numberOfPaymentsPerMonth = (4.35 / $frequency);
-      return $price * $numberOfPaymentsPerMonth;
-    case 3:
-      $numberOfPaymentsPerMonth = (1 / $frequency);
-      return $price * $numberOfPaymentsPerMonth;
-    case 4:
-      $numberOfMonths = (12 * $frequency);
-      return $price / $numberOfMonths;
-  }
-}
 
 function getPriceConverted($price, $currency, $database, $userId)
 {
@@ -54,7 +37,7 @@ while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
 
     while ($rowSubscriptions = $resultSubscriptions->fetchArray(SQLITE3_ASSOC)) {
         $originalSubscriptionPrice = getPriceConverted($rowSubscriptions['price'], $rowSubscriptions['currency_id'], $db, $userId);
-        $price = getPricePerMonth($rowSubscriptions['cycle'], $rowSubscriptions['frequency'], $originalSubscriptionPrice) * 12;
+        $price = getPricePerMonth($rowSubscriptions['cycle'], $rowSubscriptions['frequency'], $originalSubscriptionPrice, wallos_cycle_active_months($rowSubscriptions)) * 12;
         $totalYearlyCost += $price;
     }
 

@@ -52,6 +52,9 @@ function resetForm() {
   toggleCancelNoticeFields(false);
   delete document.querySelector("#next_payment").dataset.trialBase;
   toggleIntroFields();
+  updatePriceStep();
+  setActiveMonths(4095);
+  setSharingFields(null);
   setSharedEditMode(null);
   rememberPriceForChange(null);
   closeLogoSearch();
@@ -92,11 +95,14 @@ function fillEditFormFields(subscription) {
 
   const currencySelect = document.querySelector("#currency");
   currencySelect.value = subscription.currency_id.toString();
+  updatePriceStep();
   const frequencySelect = document.querySelector("#frequency");
   frequencySelect.value = subscription.frequency;
   const cycleSelect = document.querySelector("#cycle");
   cycleSelect.value = subscription.cycle;
   toggleOneTimeCycleUI(subscription.cycle == 5);
+  setActiveMonths(subscription.active_months);
+  setSharingFields(subscription);
   const paymentSelect = document.querySelector("#payment_method");
   paymentSelect.value = subscription.payment_method_id;
   const categorySelect = document.querySelector("#category");
@@ -1006,7 +1012,8 @@ function autoFillNextPaymentDate(e) {
 
   // Each occurrence is computed from the start date, with months and years
   // clamped to the end of the month, so Jan 31 renews Feb 28 then Mar 31.
-  while (nextDate <= today && safetyCounter < maxIterations) {
+  // Dates in an inactive month (Settings: Active months) are skipped too.
+  while ((nextDate <= today || !formMonthIsActive(nextDate)) && safetyCounter < maxIterations) {
     safetyCounter++;
     switch (cycle) {
     case '1': // Days
@@ -1208,7 +1215,7 @@ function updateEndsHint() {
     if (total >= 1) {
       const final = stepOccurrence(schedule.next, schedule.cycle, schedule.frequency, total - schedule.made - 1, schedule.anchorDay);
       if (final) {
-        hint.textContent = hint.dataset.finalPayment.replace('%s', final.toLocaleDateString(window.lang || 'en', { day: 'numeric', month: 'short', year: 'numeric' }));
+        hint.textContent = hint.dataset.finalPayment.replace('%s', tallyFormatDate(final, 'long'));
       }
     }
     return;
@@ -1332,7 +1339,7 @@ function updateCancelNoticeHint() {
     return;
   }
   const cancelBy = subtractNotice(renewal, value, document.querySelector("#cancel_notice_unit").value);
-  const format = (date) => date.toLocaleDateString(window.lang || 'en', { day: 'numeric', month: 'short', year: 'numeric' });
+  const format = (date) => tallyFormatDate(date, 'long');
   if (minTermEnd && schedule.next < minTermEnd) {
     hint.textContent = hint.dataset.locked
       .replace('%1$s', format(minTermEnd)).replace('%2$s', format(cancelBy)).replace('%3$s', format(renewal));
@@ -1400,7 +1407,7 @@ function updateIntroHint() {
   if (!end) {
     return;
   }
-  const formatted = end.toLocaleDateString(window.lang || 'en', { day: 'numeric', month: 'short', year: 'numeric' });
+  const formatted = tallyFormatDate(end, 'long');
   hint.textContent = (type === 'trial' ? hint.dataset.trial : hint.dataset.promo).replace('%s', formatted);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -1426,6 +1433,7 @@ function updateIntroHint() {
 */
 function setSharedEditMode(subscription) {
   const shared = !!subscription && (subscription.access || 'owner') !== 'owner';
+  document.querySelectorAll('.share-percent').forEach((field) => { field.disabled = shared; });
   ['#currency', '#category', '#payer_user', '#payment_method', '#visibility', '#notifications', '#notify_days_before',
     '#cancel_notice_mode', '#cancellation_date', '#cancel_notice_value', '#cancel_notice_unit', '#min_term_end',
     '#replacement_subscription_id'].forEach((selector) => {
@@ -1466,11 +1474,8 @@ function priceChangeMonthly(cycle, frequency, price) {
 }
 
 function priceChangeFormat(amount, currencyCode) {
-  try {
-    return new Intl.NumberFormat(window.lang || 'en', { style: 'currency', currency: currencyCode }).format(amount);
-  } catch (e) {
-    return amount.toFixed(2);
-  }
+  const option = document.querySelector(`#currency option[data-code="${CSS.escape(currencyCode || '')}"]`);
+  return tallyFormatMoney(amount, currencyCode, option ? option.dataset.decimalsSetting : '', option ? option.dataset.symbol : '');
 }
 
 function rememberPriceForChange(subscription) {
@@ -1538,12 +1543,198 @@ function updatePriceChangeNotice() {
   delta.classList.toggle("is-danger", difference > 0);
 }
 
+// The price inputs accept as many decimals as the selected currency shows
+// (Settings > Currencies > Decimals): 0.0001 for BTC, 1 for COP set to 0.
+function updatePriceStep() {
+  const currencySelect = document.querySelector("#currency");
+  const option = currencySelect ? currencySelect.selectedOptions[0] : null;
+  const decimals = option ? Number(option.dataset.decimals) : 2;
+  const step = decimals > 0 ? (1 / Math.pow(10, decimals)).toFixed(decimals) : "1";
+  ["#price", "#intro_price"].forEach((selector) => {
+    const field = document.querySelector(selector);
+    if (field) {
+      field.step = step;
+    }
+  });
+}
+
 document.addEventListener("DOMContentLoaded", function () {
+  const currencySelect = document.querySelector("#currency");
+  if (currencySelect) {
+    currencySelect.addEventListener("change", updatePriceStep);
+    updatePriceStep();
+  }
   ["#price", "#currency", "#cycle", "#frequency"].forEach((selector) => {
     const field = document.querySelector(selector);
     if (field) {
       field.addEventListener("input", updatePriceChangeNotice);
       field.addEventListener("change", updatePriceChangeNotice);
+    }
+  });
+});
+
+/*
+  Active months (issue #25): daily, weekly and monthly plans can bill in some
+  months only. The mask matches subscriptions.active_months: bit 0 = January.
+*/
+function activeMonthInputs() {
+  return Array.from(document.querySelectorAll('.month-chip-input'));
+}
+
+function setActiveMonths(mask) {
+  const value = Number(mask) >= 1 && Number(mask) <= 4095 ? Number(mask) : 4095;
+  activeMonthInputs().forEach((input) => {
+    input.checked = (value & (1 << (Number(input.value) - 1))) !== 0;
+  });
+  toggleActiveMonthsGroup();
+}
+
+function formActiveMonthsMask() {
+  if (!activeMonthsApply()) {
+    return 4095;
+  }
+  const mask = activeMonthInputs().reduce((total, input) => input.checked ? total | (1 << (Number(input.value) - 1)) : total, 0);
+  return mask === 0 ? 4095 : mask;
+}
+
+// Only schedules that bill at least monthly can skip months, as on the
+// server (wallos_cycle_supports_active_months()).
+function activeMonthsApply() {
+  const cycle = document.querySelector("#cycle");
+  const frequency = Number((document.querySelector("#frequency") || {}).value) || 1;
+  const limits = { '1': 31, '2': 4, '3': 1 };
+  return !!cycle && limits[String(cycle.value)] !== undefined && frequency <= limits[String(cycle.value)];
+}
+
+function formMonthIsActive(date) {
+  return (formActiveMonthsMask() & (1 << date.getMonth())) !== 0;
+}
+
+function toggleActiveMonthsGroup() {
+  const group = document.querySelector("#active-months-group");
+  if (!group) {
+    return;
+  }
+  const applies = activeMonthsApply();
+  group.classList.toggle('hide', !applies);
+  activeMonthInputs().forEach((input) => { input.disabled = !applies; });
+  updateActiveMonthsHint();
+}
+
+function updateActiveMonthsHint() {
+  const inputs = activeMonthInputs();
+  if (inputs.length === 0) {
+    return;
+  }
+  const none = activeMonthsApply() && !inputs.some((input) => input.checked);
+  const hint = document.querySelector("#active-months-hint");
+  if (hint) {
+    if (!hint.dataset.info) {
+      hint.dataset.info = hint.textContent;
+    }
+    hint.textContent = none ? hint.dataset.none : hint.dataset.info;
+    hint.classList.toggle('is-danger', none);
+  }
+  inputs[0].setCustomValidity(none ? (hint ? hint.dataset.none : 'none') : '');
+}
+
+document.addEventListener("DOMContentLoaded", function () {
+  const cycle = document.querySelector("#cycle");
+  if (cycle) {
+    cycle.addEventListener("change", toggleActiveMonthsGroup);
+    document.querySelector("#frequency").addEventListener("change", toggleActiveMonthsGroup);
+    toggleActiveMonthsGroup();
+  }
+});
+
+/*
+  Sharing & reimbursement (issue #34): how the cost splits between household
+  members, and what part of it comes back. The hint shows the account
+  holder's own cost ("Your share €2.50").
+*/
+function setSharingFields(subscription) {
+  const shares = (subscription && subscription.shares) || {};
+  document.querySelectorAll('.share-percent').forEach((field) => {
+    const memberId = field.closest('.sharing-member').dataset.memberId;
+    field.value = shares[memberId] !== undefined ? Number(shares[memberId]) : '';
+  });
+  const reimbursed = document.querySelector('#reimbursed_percent');
+  if (reimbursed) {
+    reimbursed.value = subscription && Number(subscription.reimbursed_percent) > 0 ? Number(subscription.reimbursed_percent) : '';
+    document.querySelector('#reimbursed_reason').value = (subscription && subscription.reimbursed_reason) || '';
+  }
+  const group = document.querySelector('#sharing-group');
+  if (group) {
+    group.open = Object.keys(shares).length > 0 || (subscription && Number(subscription.reimbursed_percent) > 0);
+  }
+  updateSharingHint();
+}
+
+function splitSharesEqually() {
+  const fields = Array.from(document.querySelectorAll('.share-percent')).filter((field) => !field.disabled);
+  let chosen = fields.filter((field) => field.value !== '' && Number(field.value) > 0);
+  if (chosen.length < 2) {
+    chosen = fields;
+  }
+  fields.forEach((field) => { if (!chosen.includes(field)) field.value = ''; });
+  const each = Math.floor(10000 / chosen.length) / 100;
+  chosen.forEach((field, index) => {
+    // The last share takes the rounding remainder so the total is exactly 100.
+    field.value = index === chosen.length - 1 ? (100 - each * (chosen.length - 1)).toFixed(2) : each.toFixed(2);
+  });
+  updateSharingHint();
+}
+
+function updateSharingHint() {
+  const hint = document.querySelector('#sharing-hint');
+  if (!hint) {
+    return;
+  }
+  if (!hint.dataset.info) {
+    hint.dataset.info = hint.textContent;
+  }
+  const fields = Array.from(document.querySelectorAll('.share-percent'));
+  const price = Number(document.querySelector('#price').value) || 0;
+  const option = document.querySelector('#currency').selectedOptions[0];
+  const money = (amount) => tallyFormatMoney(amount, option ? option.dataset.code : '', option ? option.dataset.decimalsSetting : '', option ? option.dataset.symbol : '');
+  const used = fields.filter((field) => field.value !== '' && Number(field.value) > 0);
+  const total = used.reduce((sum, field) => sum + Number(field.value), 0);
+  fields.forEach((field) => {
+    const amount = field.parentElement.querySelector('.share-amount');
+    if (amount) {
+      amount.textContent = field.value !== '' && Number(field.value) > 0 ? money(price * Number(field.value) / 100) : '';
+    }
+  });
+  const invalid = used.length > 0 && Math.abs(total - 100) > 0.05;
+  fields.forEach((field, index) => field.setCustomValidity(invalid && index === 0 ? hint.dataset.mustTotal : ''));
+  hint.classList.toggle('is-danger', invalid);
+  if (invalid) {
+    hint.textContent = hint.dataset.mustTotal;
+    return;
+  }
+
+  const reimbursed = Math.min(100, Math.max(0, Number(document.querySelector('#reimbursed_percent').value) || 0));
+  const selfField = document.querySelector(`#share_${hint.dataset.selfMember}`);
+  const payer = document.querySelector('#payer_user');
+  let mine;
+  if (used.length > 0) {
+    mine = selfField && selfField.value !== '' ? Number(selfField.value) / 100 : 0;
+  } else {
+    mine = !payer || payer.value === hint.dataset.selfMember ? 1 : 0;
+  }
+  if (used.length === 0 && reimbursed === 0) {
+    hint.textContent = hint.dataset.info;
+    return;
+  }
+  hint.textContent = hint.dataset.yourShare.replace('%s', money(price * mine * (1 - reimbursed / 100)));
+}
+
+document.addEventListener("DOMContentLoaded", function () {
+  ['#price', '#currency', '#payer_user'].forEach((selector) => {
+    const field = document.querySelector(selector);
+    if (field) {
+      field.addEventListener('input', updateSharingHint);
+      field.addEventListener('change', updateSharingHint);
     }
   });
 });

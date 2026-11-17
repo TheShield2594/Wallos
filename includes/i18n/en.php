@@ -763,6 +763,46 @@ $i18n = [
     "provider_price_changes" => "Provider price changes",
     "since_changes_total" => "%s since the changes",
     "plan_changes_info" => "Per month, from the price changes of active subscriptions. Downgrades count towards your savings.",
+    // Date format
+    "date_format" => "Date format",
+    "date_format_auto" => "Automatic (from language)",
+    "date_format_info" => "Used for dates across Tally. Date pickers follow your browser's settings.",
+    // Currency decimals
+    "decimals" => "Decimals",
+    "decimals_auto" => "Auto",
+    "decimals_count" => "%d decimals",
+    "decimals_info" => "Decimals sets how many digits each currency shows after the decimal point. Auto uses the currency's usual digits, and up to 8 for codes like BTC.",
+    // Cost sharing
+    "sharing_and_reimbursement" => "Sharing & reimbursement",
+    "split_with" => "Split with",
+    "split_equally" => "Split equally",
+    "reimbursed_percent" => "Reimbursed %",
+    "reimbursed_reason" => "Reason",
+    "reimbursed_reason_placeholder" => "Tax relief, employer…",
+    "your_share_amount" => "Your share %s",
+    "shares_must_total" => "The shares must add up to 100%.",
+    "sharing_info" => "Give each member a percentage of the cost. Lists keep the full price; statistics can show your own cost.",
+    "cost_view" => "Cost view",
+    "cost_gross" => "Gross",
+    "cost_mine" => "My cost",
+    "cost_mine_note" => "My cost: your share of split subscriptions, less reimbursements.",
+    "cost_gross_note" => "Gross: full prices, before splits and reimbursements.",
+    "who_owes_what" => "Who owes what",
+    "owes_payer" => "Owes %s",
+    "who_owes_what_info" => "Each member's monthly share of subscriptions someone else pays.",
+    "stats_cost_view" => "Statistics show",
+    "stats_cost_view_info" => "Gross counts full prices. My cost counts your share of split subscriptions, less reimbursements. You can switch on the statistics page.",
+    // Categories v2
+    "parent_category" => "Parent category",
+    "top_level_category" => "Top level",
+    "default_categories" => "Default categories",
+    "apply_to_all_users" => "Apply to all users",
+    "default_categories_applied" => "Added %d categories.",
+    "default_categories_info" => "New accounts start with these categories instead of the built-in ones. Apply to all users adds the ones an account is missing; it never renames or removes anyone's own categories.",
+    // Active months
+    "active_months" => "Active months",
+    "active_months_info" => "Payments in unselected months are skipped. The monthly cost spreads the active months' payments over the year. Only for plans that bill at least once a month.",
+    "active_months_none" => "Pick at least one month.",
 ];
 
 

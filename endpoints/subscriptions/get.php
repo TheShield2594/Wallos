@@ -19,14 +19,6 @@ if (isset($settings['color_theme'])) {
   $colorTheme = $settings['color_theme'];
 }
 
-$formatter = new IntlDateFormatter(
-  'en', // Force English locale
-  IntlDateFormatter::SHORT,
-  IntlDateFormatter::NONE,
-  null,
-  null,
-  'MMM d, yyyy'
-);
 
 if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
 
@@ -39,7 +31,8 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
   $sql = "SELECT * FROM subscriptions WHERE user_id = :userId";
 
   if (isset($_GET['categories']) && $_GET['categories'] != "") {
-    $allCategories = explode(',', $_GET['categories']);
+    // A parent category includes its sub-categories.
+    $allCategories = wallos_expand_category_ids($categories, explode(',', $_GET['categories']));
     $placeholders = array_map(function ($idx) {
       return ":categories{$idx}";
     }, array_keys($allCategories));
@@ -208,9 +201,7 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
     $paymentMethodId = $subscription['payment_method_id'];
     $print[$id]['currency_code'] = $currencies[$subscription['currency_id']]['code'];
     $currencyId = $subscription['currency_id'];
-    $next_payment_timestamp = strtotime($subscription['next_payment']);
-    $formatted_date = $formatter->format($next_payment_timestamp);
-    $print[$id]['next_payment'] = $formatted_date;
+    $print[$id]['next_payment'] = tally_format_date($subscription['next_payment'], 'long', $lang);
     $print[$id]['auto_renew'] = $subscription['auto_renew'];
     $paymentMethodIcon = $payment_methods[$paymentMethodId]['icon'] ?? '';
     $paymentIconFolder = (strpos($paymentMethodIcon, 'images/uploads/icons/') !== false) ? "" : "images/uploads/logos/";
@@ -237,14 +228,14 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
       $print[$id]['currency_code'] = $currencies[$mainCurrencyId]['code'];
     }
     if (isset($settings['showMonthlyPrice']) && $settings['showMonthlyPrice'] === 'true') {
-      $print[$id]['price'] = getPricePerMonth($cycle, $frequency, $print[$id]['price']);
-      $print[$id]['regular_price'] = getPricePerMonth($cycle, $frequency, $print[$id]['regular_price']);
+      $print[$id]['price'] = getPricePerMonth($cycle, $frequency, $print[$id]['price'], wallos_cycle_active_months($subscription));
+      $print[$id]['regular_price'] = getPricePerMonth($cycle, $frequency, $print[$id]['regular_price'], wallos_cycle_active_months($subscription));
     }
     // Sort on the price in the main currency, whether or not it is displayed
     // converted, so mixed currencies order by value rather than raw number.
     $sortPrice = $currencyId != $mainCurrencyId ? getPriceConverted(wallos_current_price($subscription), $currencyId, $db) : wallos_current_price($subscription);
     if (isset($settings['showMonthlyPrice']) && $settings['showMonthlyPrice'] === 'true') {
-      $sortPrice = getPricePerMonth($cycle, $frequency, $sortPrice);
+      $sortPrice = getPricePerMonth($cycle, $frequency, $sortPrice, wallos_cycle_active_months($subscription));
     }
     $print[$id]['sort_price'] = $sortPrice;
     if (isset($settings['showOriginalPrice']) && $settings['showOriginalPrice'] === 'true') {

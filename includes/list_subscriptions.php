@@ -6,6 +6,8 @@ require_once __DIR__ . '/ui_helpers.php';
 require_once __DIR__ . '/payment_ledger.php';
 require_once __DIR__ . '/cancellation_deadline.php';
 require_once __DIR__ . '/households.php';
+require_once __DIR__ . '/monthly_cost.php';
+require_once __DIR__ . '/cost_sharing.php';
 
 function getBillingCycle($cycle, $frequency, $i18n)
 {
@@ -36,91 +38,9 @@ function getSubscriptionProgress($cycle, $frequency, $next_payment, $subscriptio
     return wallos_cycle_progress($subscription, new DateTime('today'));
 }
 
-function getPricePerMonth($cycle, $frequency, $price)
-{
-    switch ($cycle) {
-        case 1:
-            $numberOfPaymentsPerMonth = (30 / $frequency);
-            return $price * $numberOfPaymentsPerMonth;
-        case 2:
-            $numberOfPaymentsPerMonth = (4.35 / $frequency);
-            return $price * $numberOfPaymentsPerMonth;
-        case 3:
-            $numberOfPaymentsPerMonth = (1 / $frequency);
-            return $price * $numberOfPaymentsPerMonth;
-        case 4:
-            $numberOfMonths = (12 * $frequency);
-            return $price / $numberOfMonths;
-        case 5:
-            return 0;
-    }
-}
-
-
 function getPriceConverted($price, $currency, $database)
 {
     return wallos_convert_price($price, $currency, $database);
-}
-
-function formatPrice($price, $currencyCode, $currencies)
-{
-    $formattedPrice = CurrencyFormatter::format($price, $currencyCode);
-    if (strstr($formattedPrice, $currencyCode)) {
-        $symbol = $currencyCode;
-        
-        foreach ($currencies as $currency) {
-
-            if ($currency['code'] === $currencyCode) {
-                if ($currency['symbol'] != "") {
-                    $symbol = $currency['symbol'];
-                }
-                break;
-            }
-        }
-        $formattedPrice = str_replace($currencyCode, $symbol, $formattedPrice);
-    }
-
-    return $formattedPrice;
-}
-
-function formatDate($date, $lang = 'en')
-{
-    $currentYear = date('Y');
-    $dateYear = date('Y', strtotime($date));
-
-    // Determine the date format based on whether the year matches the current year
-    $dateFormat = ($currentYear == $dateYear) ? 'MMM d' : 'MMM yyyy';
-
-    // Try to create an IntlDateFormatter; if it fails, fallback to 'en'
-    try {
-        $formatter = new IntlDateFormatter(
-            $lang,
-            IntlDateFormatter::SHORT,
-            IntlDateFormatter::NONE,
-            null,
-            null,
-            $dateFormat
-        );
-
-        if (!$formatter) {
-            throw new Exception('Failed to create IntlDateFormatter with language: ' . $lang);
-        }
-    } catch (Throwable $e) {
-        $lang = 'en'; // Fallback to English on error
-        $formatter = new IntlDateFormatter(
-            $lang,
-            IntlDateFormatter::SHORT,
-            IntlDateFormatter::NONE,
-            null,
-            null,
-            $dateFormat
-        );
-    }
-
-    // Format the date
-    $formattedDate = $formatter->format(new DateTime($date));
-
-    return $formattedDate;
 }
 
 /**
@@ -196,7 +116,18 @@ function addListRowFields(&$printRow, $subscription, $mainCurrencyId, $db)
     $printRow['next_payment_raw'] = $subscription['next_payment'];
     $printRow['start_date'] = $subscription['start_date'] ?? '';
     $printRow['cycle'] = (int) $subscription['cycle'];
-    $monthly = getPricePerMonth((int) $subscription['cycle'], (int) $subscription['frequency'], wallos_current_price($subscription));
+    $printRow['active_months'] = wallos_cycle_active_months($subscription);
+    // "Your share €2.50" when the cost is split or partly reimbursed.
+    $printRow['my_cost_fraction'] = null;
+    if (empty($subscription['shared_owner_name']) && isset($subscription['user_id'])) {
+        [$sharesById, $selfMemberId] = wallos_cost_sharing_context($db, $subscription['user_id']);
+        $rowShares = $sharesById[(int) $subscription['id']] ?? [];
+        if (wallos_has_cost_adjustment($subscription, $rowShares)) {
+            $printRow['my_cost_fraction'] = wallos_my_cost_fraction($subscription, $rowShares, $selfMemberId);
+        }
+    }
+    $printRow['active_months_label'] = wallos_active_months_label($printRow['active_months'], $GLOBALS['lang'] ?? 'en');
+    $monthly = getPricePerMonth((int) $subscription['cycle'], (int) $subscription['frequency'], wallos_current_price($subscription), wallos_cycle_active_months($subscription));
     if ($subscription['currency_id'] != $mainCurrencyId) {
         $monthly = getPriceConverted($monthly, $subscription['currency_id'], $db);
     }
@@ -254,6 +185,10 @@ function listRowSubtitle($subscription, $i18n, $lang)
         return [$sharedPrefix . $text, $tone];
     }
     $cycle = $subscription['billing_cycle'];
+    // "Monthly · Sep–Dec" for a plan limited to some months.
+    if (!empty($subscription['active_months_label'])) {
+        $cycle .= ' · ' . $subscription['active_months_label'];
+    }
     if (!empty($subscription['ended'])) {
         $total = (int) ($subscription['plan_total'] ?? 0);
         return [translate('plan_completed_label', $i18n) . ($total ? ' · ' . sprintf(translate('n_payments', $i18n), $total) : ''), ''];
@@ -381,6 +316,9 @@ function printSubscriptions($subscriptions, $sort, $categories, $members, $i18n,
                         $trailingStrike = true;
                     } elseif (isset($subscription['original_price']) && $subscription['original_price'] != $subscription['price']) {
                         $trailingSub = formatPrice($subscription['original_price'], $subscription['original_currency_code'], $currencies);
+                    } elseif (isset($subscription['my_cost_fraction']) && $subscription['my_cost_fraction'] !== null) {
+                        $trailingSub = sprintf(translate('your_share_amount', $i18n),
+                            formatPrice((float) $subscription['price'] * $subscription['my_cost_fraction'], $subscription['currency_code'], $currencies));
                     }
                     echo render_list_row([
                         'id' => $subscription['id'],

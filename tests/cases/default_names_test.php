@@ -197,7 +197,9 @@ wallos_test('the seeding paths no longer carry an English list of their own', fu
     foreach (['registration.php', 'endpoints/admin/adduser.php', 'includes/oidc/oidc_create_user.php'] as $file) {
         $source = file_get_contents(WALLOS_ROOT . '/' . $file);
 
-        assert_contains('default_categories($language)', $source,
+        // Categories come from includes/categories.php, which falls back to
+        // default_categories($language) when the admin set no defaults.
+        assert_contains('wallos_seed_user_categories($db, ', $source,
             $file . ' seeds the categories in the account language');
         assert_contains('default_payment_methods($language)', $source,
             $file . ' seeds the payment methods in the account language');

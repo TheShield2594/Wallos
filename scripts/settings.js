@@ -381,6 +381,11 @@ function editCategory(categoryId) {
   saveButton.disabled = true;
 
   const categoryName = inputElement.value;
+  const parentElement = document.querySelector(`div[data-categoryid="${categoryId}"] select[name="parent"]`);
+  const body = { action: 'edit', categoryId: categoryId, name: categoryName };
+  if (parentElement && !parentElement.disabled) {
+    body.parentId = parentElement.value;
+  }
 
   fetch('endpoints/categories/category.php', {
     method: 'POST',
@@ -388,11 +393,7 @@ function editCategory(categoryId) {
       'Content-Type': 'application/x-www-form-urlencoded',
       'X-CSRF-Token': window.csrfToken,
     },
-    body: new URLSearchParams({
-      action: 'edit',
-      categoryId: categoryId,
-      name: categoryName,
-    }),
+    body: new URLSearchParams(body),
   })
     .then(response => {
       saveButton.classList.remove("disabled");
@@ -409,6 +410,10 @@ function editCategory(categoryId) {
         showSuccessMessage(responseData.message);
       } else {
         showErrorMessage(responseData.message || translate('failed_save_category'));
+      }
+      // A new parent reorders the list and changes which rows can be parents.
+      if (responseData.parentChanged || (!responseData.success && body.parentId !== undefined)) {
+        setTimeout(() => window.location.reload(), 600);
       }
     })
     .catch(error => {
@@ -487,6 +492,13 @@ function addCurrencyButton(currencyId) {
         div.appendChild(inputSymbol);
         div.appendChild(inputName);
         div.appendChild(inputCode);
+        // The labels come from the page, so copy an existing row's select.
+        const existingDecimals = container.querySelector('select[name="decimals"]');
+        if (existingDecimals) {
+          const inputDecimals = existingDecimals.cloneNode(true);
+          inputDecimals.value = "auto";
+          div.appendChild(inputDecimals);
+        }
         div.appendChild(editLink);
         div.appendChild(deleteLink);
 
@@ -542,6 +554,7 @@ function editCurrency(currencyId) {
   const inputSymbolElement = document.querySelector(`div[data-currencyid="${currencyId}"] input[name="symbol"]`);
   const inputNameElement = document.querySelector(`div[data-currencyid="${currencyId}"] input[name="currency"]`);
   const inputCodeElement = document.querySelector(`div[data-currencyid="${currencyId}"] input[name="code"]`);
+  const inputDecimalsElement = document.querySelector(`div[data-currencyid="${currencyId}"] select[name="decimals"]`);
 
   if (!inputNameElement) return;
 
@@ -564,6 +577,7 @@ function editCurrency(currencyId) {
       name: currencyName,
       symbol: currencySymbol,
       code: currencyCode,
+      decimals: inputDecimalsElement ? inputDecimalsElement.value : 'auto',
     }),
   })
     .then(response => {
@@ -1091,6 +1105,14 @@ function setShowSubscriptionProgress() {
 
 function setMonthlyCostMode() {
   storeSettingsOnDB('monthly_cost_mode', document.querySelector("#monthlycostmode").value);
+}
+
+function setStatsCostView() {
+  storeSettingsOnDB('stats_cost_view', document.querySelector("#statscostview").value);
+}
+
+function setDateFormat() {
+  storeSettingsOnDB('date_format', document.querySelector("#dateformat").value);
 }
 
 function setShowCategoryCard() {
