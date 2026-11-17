@@ -14,24 +14,35 @@ $logoStmt->bindParam(':userId', $userId, SQLITE3_INTEGER);
 $logoResult = $logoStmt->execute();
 $logoRow = $logoResult ? $logoResult->fetchArray(SQLITE3_ASSOC) : false;
 
-$deleteQuery = "DELETE FROM subscriptions WHERE id = :subscriptionId AND user_id = :userId";
-$deleteStmt = $db->prepare($deleteQuery);
-$deleteStmt->bindParam(':subscriptionId', $subscriptionId, SQLITE3_INTEGER);
-$deleteStmt->bindParam(':userId', $userId, SQLITE3_INTEGER);
-
-if ($deleteStmt->execute()) {
-    $query = "DELETE FROM subscription_payments WHERE subscription_id = :subscriptionId AND user_id = :userId";
+// The row, its payment and price history, and the references to it go
+// together: if any part fails, nothing is deleted.
+$deleteStatements = [
+    "DELETE FROM subscriptions WHERE id = :subscriptionId AND user_id = :userId",
+    "DELETE FROM subscription_payments WHERE subscription_id = :subscriptionId AND user_id = :userId",
+    "DELETE FROM subscription_price_changes WHERE subscription_id = :subscriptionId AND user_id = :userId",
+    "UPDATE subscriptions SET replacement_subscription_id = NULL WHERE replacement_subscription_id = :subscriptionId AND user_id = :userId",
+];
+$deleted = @$db->exec('BEGIN IMMEDIATE') !== false;
+foreach ($deleteStatements as $query) {
+    if (!$deleted) {
+        break;
+    }
     $stmt = $db->prepare($query);
-    $stmt->bindParam(':subscriptionId', $subscriptionId, SQLITE3_INTEGER);
-    $stmt->bindParam(':userId', $userId, SQLITE3_INTEGER);
-    $stmt->execute();
+    $deleted = $stmt !== false;
+    if ($deleted) {
+        $stmt->bindValue(':subscriptionId', (int) $subscriptionId, SQLITE3_INTEGER);
+        $stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
+        $deleted = $stmt->execute() !== false;
+    }
+}
+if ($deleted && $db->exec('COMMIT') === false) {
+    $deleted = false;
+}
+if (!$deleted) {
+    @$db->exec('ROLLBACK');
+}
 
-    $query = "UPDATE subscriptions SET replacement_subscription_id = NULL WHERE replacement_subscription_id = :subscriptionId AND user_id = :userId";
-    $stmt = $db->prepare($query);
-    $stmt->bindParam(':subscriptionId', $subscriptionId, SQLITE3_INTEGER);
-    $stmt->bindParam(':userId', $userId, SQLITE3_INTEGER);
-    $stmt->execute();
-
+if ($deleted) {
     if ($logoRow !== false) {
         deleteLogoFileIfUnused($db, $logoRow['logo'], '../../images/uploads/logos/');
         deleteLogoFileIfUnused($db, $logoRow['logo_variant'], '../../images/uploads/logos/');

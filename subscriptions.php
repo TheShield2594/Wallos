@@ -25,8 +25,14 @@ if (isset($_COOKIE['sortOrder']) && $_COOKIE['sortOrder'] != "") {
   $sort = $_COOKIE['sortOrder'] ?? 'next_payment';
 }
 
+$allowedSortCriteria = ['name', 'id', 'next_payment', 'price', 'payer_user_id', 'category_id', 'payment_method_id', 'inactive', 'alphanumeric', 'renewal_type', 'cancellation_date'];
+// A link can pick the sort (e.g. the dashboard's "View all" cancellations);
+// the page stores it in the cookie so the list keeps it after a refresh.
+if (isset($_GET['sort']) && in_array($_GET['sort'], $allowedSortCriteria, true)) {
+  $sort = $_GET['sort'];
+}
+
 $sortOrder = $sort;
-$allowedSortCriteria = ['name', 'id', 'next_payment', 'price', 'payer_user_id', 'category_id', 'payment_method_id', 'inactive', 'alphanumeric', 'renewal_type'];
 $order = ($sort == "price" || $sort == "id") ? "DESC" : "ASC";
 
 if ($sort == "alphanumeric") {
@@ -39,6 +45,12 @@ if (!in_array($sort, $allowedSortCriteria)) {
 
 if ($sort == "renewal_type") {
   $sort = "auto_renew";
+}
+
+// Cancel-by dates are computed per row; SQL orders by the next payment and
+// printSubscriptions() re-sorts.
+if ($sort == "cancellation_date") {
+  $sort = "next_payment";
 }
 
 $sql = "SELECT * FROM subscriptions WHERE user_id = :userId";
@@ -80,6 +92,11 @@ if (isset($_GET['payment'])) {
   foreach ($paymentIds as $key => $paymentId) {
     $params[":payment{$key}"] = $paymentId;
   }
+}
+
+$notificationFilter = wallos_notification_filter_types($_GET['notifications'] ?? '');
+if ($notificationFilter !== []) {
+  $sql .= " AND (" . implode(' OR ', array_map('wallos_notification_filter_condition', $notificationFilter)) . ")";
 }
 
 if (!isset($settings['hideDisabledSubscriptions']) || $settings['hideDisabledSubscriptions'] !== 'true') {
@@ -133,7 +150,8 @@ if ($result) {
 // is filtered by the account's own categories, members or payment methods.
 if (!isset($_GET['member']) && !isset($_GET['category']) && !isset($_GET['payment'])) {
   $stateFilter = (!isset($settings['hideDisabledSubscriptions']) || $settings['hideDisabledSubscriptions'] !== 'true') ? ($_GET['state'] ?? null) : null;
-  $subscriptions = mergeSharedSubscriptions($subscriptions ?? [], $db, $userId, $sort, $order, $settings['disabledToBottom'] === 'true', $stateFilter);
+  $subscriptions = mergeSharedSubscriptions($subscriptions ?? [], $db, $userId, $sort, $order, $settings['disabledToBottom'] === 'true', $stateFilter,
+    fn($row) => wallos_notification_filter_matches($row, $notificationFilter));
 }
 
 foreach ($subscriptions as $subscription) {
@@ -304,7 +322,7 @@ if ($db->querySingle("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND 
   <div class="subscriptions" id="subscriptions">
     <?php
     if (!empty($print)) {
-      printSubscriptions($print, $sort, $categories, $members, $i18n, $settings, $currencies, $mainCurrencyId, $lang);
+      printSubscriptions($print, $sortOrder === 'cancellation_date' ? 'cancellation_date' : $sort, $categories, $members, $i18n, $settings, $currencies, $mainCurrencyId, $lang);
     }
 
     if (!$hasSubscriptions) {
@@ -389,11 +407,28 @@ if ($db->querySingle("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND 
         foreach ($currencies as $currency) {
           $selected = ($currency['id'] == $main_currency) ? 'selected' : '';
           ?>
-          <option value="<?= $currency['id'] ?>" <?= $selected ?>><?= $currency['name'] ?></option>
+          <option value="<?= $currency['id'] ?>" data-code="<?= htmlspecialchars($currency['code']) ?>" <?= $selected ?>><?= $currency['name'] ?></option>
           <?php
         }
         ?>
       </select>
+    </div>
+
+    <div class="form-group">
+      <input type="text" id="tier_name" name="tier_name" maxlength="60" autocomplete="off"
+        placeholder="<?= translate('plan_tier_optional', $i18n) ?>" aria-label="<?= translate('plan_tier', $i18n) ?>">
+    </div>
+
+    <div class="price-change-notice hide" id="price-change-notice" role="status"
+      data-per-month="<?= htmlspecialchars(translate('per_month_short', $i18n)) ?>"
+      data-per-year="<?= htmlspecialchars(translate('per_year_short', $i18n)) ?>"
+      data-currency-changed="<?= htmlspecialchars(translate('price_change_currency', $i18n)) ?>"
+      data-one-time="<?= htmlspecialchars(translate('price_change_one_time', $i18n)) ?>">
+      <p class="price-change-delta" id="price-change-delta"></p>
+      <div class="form-group-inline">
+        <input type="checkbox" id="price_change_provider" name="price_change_reason" value="provider">
+        <label for="price_change_provider"><?= translate('price_change_from_provider', $i18n) ?></label>
+      </div>
     </div>
 
     <div class="form-group">

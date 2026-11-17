@@ -335,3 +335,137 @@ function wallos_store_cancel_fields(SQLite3 $db, $subscriptionId, $userId, array
 
     return $stmt->execute() !== false;
 }
+
+const WALLOS_NOTIFICATION_FILTER_TYPES = ['reminder', 'cancellation', 'none'];
+
+/**
+ * The notification filter types in a comma-separated query value, unknown ones dropped.
+ *
+ * @param mixed $raw e.g. "reminder,cancellation"
+ * @return string[]
+ */
+function wallos_notification_filter_types($raw)
+{
+    if (!is_string($raw) || $raw === '') {
+        return [];
+    }
+
+    return array_values(array_unique(array_filter(explode(',', $raw), fn($type) => in_array($type, WALLOS_NOTIFICATION_FILTER_TYPES, true))));
+}
+
+/**
+ * SQL condition for one type of the list's "notifications" filter.
+ *
+ * One-time purchases are never treated as cancellable, matching the
+ * dashboard, statistics page and cancellation notification cron.
+ *
+ * @param string $type 'reminder', 'cancellation' or 'none'
+ * @return string|null
+ */
+function wallos_notification_filter_condition($type)
+{
+    switch ($type) {
+        case 'reminder':
+            return "notify = 1";
+        case 'cancellation':
+            return "(cycle != 5 AND " . WALLOS_CANCEL_NOTICE_SQL . ")";
+        case 'none':
+            return "(notify = 0 AND (cycle = 5 OR NOT " . WALLOS_CANCEL_NOTICE_SQL . "))";
+    }
+
+    return null;
+}
+
+/**
+ * The same filter in PHP, for rows that are not in the account's own table
+ * (subscriptions shared by the household).
+ *
+ * @param array    $row
+ * @param string[] $types
+ * @return bool true when no type is selected or one of them matches
+ */
+function wallos_notification_filter_matches(array $row, array $types)
+{
+    if ($types === []) {
+        return true;
+    }
+    $hasCancellation = (int) $row['cycle'] !== 5 && wallos_cancel_mode($row) !== 'none';
+
+    return (in_array('reminder', $types, true) && (int) $row['notify'] === 1)
+        || (in_array('cancellation', $types, true) && $hasCancellation)
+        || (in_array('none', $types, true) && (int) $row['notify'] === 0 && !$hasCancellation);
+}
+
+/**
+ * Which "cancel by" window a date falls in, as the list groups it.
+ *
+ * @param string|null $cancelBy Y-m-d
+ * @param string      $today    Y-m-d
+ * @return string 'passed', 'this_month', 'next_month', 'later' or 'none'
+ */
+function wallos_cancel_by_bucket($cancelBy, $today)
+{
+    if (empty($cancelBy)) {
+        return 'none';
+    }
+    if ($cancelBy < $today) {
+        return 'passed';
+    }
+    $thisMonth = substr($today, 0, 7);
+    $nextMonth = (new DateTime(substr($today, 0, 7) . '-01'))->modify('+1 month')->format('Y-m');
+    $month = substr($cancelBy, 0, 7);
+    if ($month <= $thisMonth) {
+        return 'this_month';
+    }
+
+    return $month === $nextMonth ? 'next_month' : 'later';
+}
+
+/**
+ * The last day the dashboard's cancellation card looks ahead to: the end of
+ * next calendar month.
+ *
+ * @param string $today Y-m-d
+ * @return string Y-m-d
+ */
+function wallos_cancel_window_end($today)
+{
+    return (new DateTime(substr($today, 0, 7) . '-01'))->modify('+1 month')->format('Y-m-t');
+}
+
+/**
+ * Orders list rows by their cancel-by date, soonest first; rows without one
+ * keep their order and go last.
+ *
+ * @param array  $rows each with $key (Y-m-d or null)
+ * @param string $key  the field holding the date
+ * @return array
+ */
+function wallos_sort_by_cancel_by(array $rows, $key = 'cancel_by')
+{
+    $position = 0;
+    foreach ($rows as &$row) {
+        $row['__position'] = $position++;
+    }
+    unset($row);
+    usort($rows, function ($a, $b) use ($key) {
+        $left = $a[$key] ?? null;
+        $right = $b[$key] ?? null;
+        if ($left === $right || (empty($left) && empty($right))) {
+            return $a['__position'] <=> $b['__position'];
+        }
+        if (empty($left)) {
+            return 1;
+        }
+        if (empty($right)) {
+            return -1;
+        }
+
+        return strcmp($left, $right);
+    });
+
+    return array_map(function ($row) {
+        unset($row['__position']);
+        return $row;
+    }, $rows);
+}

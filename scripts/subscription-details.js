@@ -332,6 +332,13 @@ function renderSubscriptionDetails(subscription, focusPanel) {
   document.querySelector('#details-replacement').textContent = replacementName || "";
 
   detailsLoadHistory(subscription);
+  detailsLoadPriceChanges(subscription);
+
+  const tierItem = document.querySelector('#details-tier-item');
+  if (tierItem) {
+    tierItem.classList.toggle('hide', !subscription.tier_name);
+    document.querySelector('#details-tier').textContent = subscription.tier_name || "";
+  }
 
   // Notifications (one-time purchases never notify)
   document.querySelector('#details-notifications-card').classList.toggle('hide', isOneTime || (subscription.access || 'owner') !== 'owner');
@@ -816,4 +823,78 @@ function exportCalendar(subscriptionId) {
       }
     })
     .catch(error => console.error('Error:', error));
+}
+
+// Price and plan changes: a timeline of what the subscription used to cost
+// (see includes/price_changes.php). The owner's history only.
+function detailsLoadPriceChanges(subscription) {
+  const card = document.querySelector('#details-price-changes-card');
+  if (!card) {
+    return;
+  }
+  card.classList.add('hide');
+  if ((subscription.access || 'owner') !== 'owner') {
+    return;
+  }
+  const requestedId = Number(subscription.id);
+  fetch(`endpoints/subscription/pricechanges.php?id=${encodeURIComponent(subscription.id)}`)
+    .then((response) => response.json())
+    .then((data) => {
+      if (currentDetailsId !== requestedId || !data || !data.success) {
+        return;
+      }
+      detailsRenderPriceChanges(data.changes || []);
+    })
+    .catch(() => { /* the card just stays hidden */ });
+}
+
+function detailsRenderPriceChanges(changes) {
+  const strings = detailsStrings();
+  const card = document.querySelector('#details-price-changes-card');
+  const list = document.querySelector('#details-price-changes-list');
+  list.innerHTML = "";
+  card.classList.toggle('hide', changes.length === 0);
+
+  const priceText = (price, currencyId, cycle, frequency) => {
+    const cycleText = detailsBillingCycleText(cycle, frequency);
+    return detailsFormatPrice(price, currencyId) + (cycleText ? ` · ${cycleText.toLowerCase()}` : '');
+  };
+
+  changes.forEach((change) => {
+    const item = document.createElement('li');
+    item.className = 'history-row';
+
+    const text = document.createElement('span');
+    text.className = 'history-text';
+    const date = document.createElement('span');
+    date.className = 'history-date';
+    date.textContent = detailsFormatDate(change.changed_at);
+    const status = document.createElement('span');
+    status.className = `history-status is-${change.reason === 'provider' ? 'provider' : 'tier'}`;
+    status.textContent = change.reason === 'provider' ? strings.price_change_provider : strings.price_change_tier;
+    text.append(date, status);
+
+    const detail = document.createElement('span');
+    detail.className = 'history-note';
+    const tiers = (change.old_tier || change.new_tier) && change.old_tier !== change.new_tier
+      ? `${change.old_tier || '—'} → ${change.new_tier || '—'} · ` : '';
+    detail.textContent = tiers + priceText(change.old_price, change.old_currency_id, change.old_cycle, change.old_frequency)
+      + ' → ' + priceText(change.new_price, change.currency_id, change.new_cycle, change.new_frequency);
+    text.append(detail);
+
+    const amount = document.createElement('span');
+    amount.className = 'history-amount';
+    if (change.old_monthly !== null && change.new_monthly !== null) {
+      const delta = change.new_monthly - change.old_monthly;
+      const sign = delta > 0 ? '+' : (delta < 0 ? '−' : '');
+      amount.textContent = `${sign}${detailsFormatPrice(Math.abs(delta), change.currency_id)}${strings.per_month_short}`;
+      amount.classList.toggle('is-success', delta < 0);
+      amount.classList.toggle('is-danger', delta > 0);
+    } else {
+      amount.textContent = '—';
+    }
+
+    item.append(text, amount);
+    list.appendChild(item);
+  });
 }

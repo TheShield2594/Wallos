@@ -97,24 +97,12 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
     }
   }
 
-  if (isset($_GET['notifications']) && $_GET['notifications'] !== "") {
-    $notifTypes = array_filter(explode(',', $_GET['notifications']), fn($t) => in_array($t, ['reminder', 'cancellation', 'none']));
-    $notifConditions = [];
-    foreach ($notifTypes as $type) {
-      if ($type === 'reminder') {
-        $notifConditions[] = "notify = 1";
-      } elseif ($type === 'cancellation') {
-        // One-time purchases are never treated as cancellable, matching the
-        // dashboard, statistics page and cancellation notification cron.
-        // The same rule as wallos_cancel_mode(), which filters shared rows.
-        $notifConditions[] = "(cycle != 5 AND " . WALLOS_CANCEL_NOTICE_SQL . ")";
-      } elseif ($type === 'none') {
-        $notifConditions[] = "(notify = 0 AND (cycle = 5 OR NOT " . WALLOS_CANCEL_NOTICE_SQL . "))";
-      }
-    }
-    if (!empty($notifConditions)) {
-      $sql .= " AND (" . implode(' OR ', $notifConditions) . ")";
-    }
+  $notificationFilter = wallos_notification_filter_types($_GET['notifications'] ?? '');
+  if ($notificationFilter !== []) {
+    // One SQL condition per type (see wallos_notification_filter_condition());
+    // shared rows get the same rule in PHP below.
+    $notifConditions = array_map('wallos_notification_filter_condition', $notificationFilter);
+    $sql .= " AND (" . implode(' OR ', $notifConditions) . ")";
   }
 
   if (isset($_COOKIE['sortOrder']) && $_COOKIE['sortOrder'] != "") {
@@ -122,7 +110,7 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
   }
 
   $sortOrder = $sort;
-  $allowedSortCriteria = ['name', 'id', 'next_payment', 'price', 'payer_user_id', 'category_id', 'payment_method_id', 'inactive', 'alphanumeric', 'renewal_type'];
+  $allowedSortCriteria = ['name', 'id', 'next_payment', 'price', 'payer_user_id', 'category_id', 'payment_method_id', 'inactive', 'alphanumeric', 'renewal_type', 'cancellation_date'];
   $order = ($sort == "price" || $sort == "id") ? "DESC" : "ASC";
 
   if ($sort == "alphanumeric") {
@@ -135,6 +123,12 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
 
   if ($sort == "renewal_type") {
     $sort = "auto_renew";
+  }
+
+  // The cancel-by date is computed per row (it can follow next_payment), so
+  // SQL orders by the next payment and printSubscriptions() re-sorts.
+  if ($sort == "cancellation_date") {
+    $sort = "next_payment";
   }
 
   $orderByClauses = [];
@@ -182,7 +176,6 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
     // The renewal-type and notification filters apply to shared rows as
     // they do to the account's own (see the SQL above).
     $renewalFilter = $_GET['renewalType'] ?? '';
-    $notificationFilter = array_filter(explode(',', $_GET['notifications'] ?? ''), fn($t) => in_array($t, ['reminder', 'cancellation', 'none'], true));
     $sharedFilter = function ($row) use ($renewalFilter, $notificationFilter) {
       if ($renewalFilter !== '') {
         $isOneTime = (int) $row['cycle'] === 5;
@@ -190,14 +183,8 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
           return false;
         }
       }
-      if ($notificationFilter !== []) {
-        $hasCancellation = (int) $row['cycle'] !== 5 && wallos_cancel_mode($row) !== 'none';
-        $matches = (in_array('reminder', $notificationFilter, true) && (int) $row['notify'] === 1)
-          || (in_array('cancellation', $notificationFilter, true) && $hasCancellation)
-          || (in_array('none', $notificationFilter, true) && (int) $row['notify'] === 0 && !$hasCancellation);
-        if (!$matches) {
-          return false;
-        }
+      if (!wallos_notification_filter_matches($row, $notificationFilter)) {
+        return false;
       }
       return true;
     };
@@ -290,7 +277,7 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
   }
 
   if (isset($print)) {
-    printSubscriptions($print, $sort, $categories, $members, $i18n, $settings, $currencies, $mainCurrencyId, $lang);
+    printSubscriptions($print, $sortOrder === 'cancellation_date' ? 'cancellation_date' : $sort, $categories, $members, $i18n, $settings, $currencies, $mainCurrencyId, $lang);
   }
 
   if (count($subscriptions) == 0) {

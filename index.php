@@ -116,8 +116,13 @@ $paymentsToReview = wallos_ledger_open_items($db, $userId, !empty($settings['req
 
 // Fetch the subscriptions whose cancellation reminder is still ahead (shared with
 // the statistics page, so both stay in step).
-$upcomingCancellations = get_upcoming_cancellations($db, $userId);
-$hasUpcomingCancellations = !empty($upcomingCancellations);
+// The card covers this calendar month and the next; "View all" opens the
+// whole list sorted by cancel-by date.
+$allUpcomingCancellations = get_upcoming_cancellations($db, $userId);
+$cancelWindowEnd = wallos_cancel_window_end((new DateTime('today'))->format('Y-m-d'));
+$upcomingCancellations = array_values(array_filter($allUpcomingCancellations, fn($row) => $row['cancellation_date'] <= $cancelWindowEnd));
+$laterCancellationsCount = count($allUpcomingCancellations) - count($upcomingCancellations);
+$hasUpcomingCancellations = !empty($allUpcomingCancellations);
 
 require_once 'includes/stats_calculations.php';
 
@@ -129,6 +134,9 @@ $aiRecommendations = [];
 while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
     $aiRecommendations[] = $row;
 }
+
+// What cancelling the subscriptions on the card would stop costing per month.
+$upcomingCancellationsSaving = get_upcoming_cancellations_monthly_value($upcomingCancellations, $db, $userId);
 
 $mainCurrencyCode = $currencies[$userData['main_currency']]['code'];
 $money = function ($amount) use ($mainCurrencyCode, $currencies) {
@@ -164,7 +172,12 @@ $categoryCardLimit = 6;
 $todayLabel = (new IntlDateFormatter($lang, IntlDateFormatter::FULL, IntlDateFormatter::NONE, null, null, 'EEEE, MMMM d'))->format(new DateTime());
 $monthLabel = (new IntlDateFormatter($lang, IntlDateFormatter::FULL, IntlDateFormatter::NONE, null, null, 'MMMM yyyy'))->format(new DateTime());
 $hasMonthlyBudget = isset($monthlyBudget) && $monthlyBudget > 0;
-$budgetPercent = $hasMonthlyBudget ? min(100, ($totalCostPerMonth ?? 0) / $monthlyBudget * 100) : 0;
+$budgetPercent = $hasMonthlyBudget ? min(100, ($headlineMonthlyCost ?? 0) / $monthlyBudget * 100) : 0;
+
+// Monthly cost tile: "Spread" (everything, or only monthly-or-shorter cycles,
+// per the setting) and "This month" (the calendar month's charges).
+$monthlyCostDefaultView = ($monthlyCostMode ?? 'amortized') === 'cashflow' ? 'month' : 'spread';
+$monthlyCostSpread = ($monthlyCostMode ?? 'amortized') === 'short_cycles' ? $shortCycleCostPerMonth : ($totalCostPerMonth ?? 0);
 
 $convertCurrency = isset($settings['convertCurrency']) && $settings['convertCurrency'] === 'true';
 $dashboardPrice = function ($subscription) use ($convertCurrency, $userData, $currencies, $db, $userId) {
@@ -229,16 +242,43 @@ $dashboardRow = function ($subscription, $subtitle, $tone = '') use ($dashboardP
     ?>
 
     <div class="stat-tiles">
-        <div class="stat-tile">
-            <div class="stat-tile-label"><?= translate('monthly_cost', $i18n) ?></div>
-            <div class="stat-tile-value"><?= $money($totalCostPerMonth ?? 0) ?></div>
-            <div class="stat-tile-caption"><?= sprintf(translate('n_active_subscriptions', $i18n), $activeSubscriptions ?? 0) ?></div>
+        <div class="stat-tile" id="monthly-cost-tile">
+            <div class="stat-tile-head">
+                <div class="stat-tile-label"><?= translate('monthly_cost', $i18n) ?></div>
+                <div class="segmented" role="group" aria-label="<?= translate('monthly_cost', $i18n) ?>">
+                    <?php foreach (['spread' => 'monthly_cost_spread', 'month' => 'monthly_cost_this_month'] as $costView => $costViewLabel) { ?>
+                        <button type="button" class="segmented-option<?= $costView === $monthlyCostDefaultView ? ' is-selected' : '' ?>" data-cost-view="<?= $costView ?>"
+                            aria-pressed="<?= $costView === $monthlyCostDefaultView ? 'true' : 'false' ?>"><?= translate($costViewLabel, $i18n) ?></button>
+                    <?php } ?>
+                </div>
+            </div>
+            <div data-cost-panel="spread"<?= $monthlyCostDefaultView === 'spread' ? '' : ' class="hide"' ?>>
+                <div class="stat-tile-value"><?= $money($monthlyCostSpread) ?></div>
+                <div class="stat-tile-caption">
+                    <?php if (($excludedYearlyCost ?? 0) > 0) { ?>
+                        <?= sprintf(translate('plus_yearly_in_longer_plans', $i18n), $money($excludedYearlyCost)) ?>
+                    <?php } else { ?>
+                        <?= sprintf(translate('n_active_subscriptions', $i18n), $activeSubscriptions ?? 0) ?>
+                    <?php } ?>
+                </div>
+            </div>
+            <div data-cost-panel="month"<?= $monthlyCostDefaultView === 'month' ? '' : ' class="hide"' ?>>
+                <div class="stat-tile-value"><?= $money($chargesThisMonth ?? 0) ?></div>
+                <div class="stat-tile-caption"><?= sprintf(translate('charges_in_month', $i18n), htmlspecialchars($monthLabel)) ?></div>
+            </div>
         </div>
         <div class="stat-tile">
             <div class="stat-tile-label"><?= translate('amount_due', $i18n) ?></div>
             <div class="stat-tile-value"><?= $money($amountDueThisMonth ?? 0) ?></div>
             <div class="stat-tile-caption"><?= htmlspecialchars($monthLabel) ?></div>
         </div>
+        <?php if (!empty($periodDiffersFromCalendarMonth)) { ?>
+            <a class="stat-tile stat-tile-link" href="stats.php?period=pay">
+                <div class="stat-tile-label"><?= translate('due_this_pay_period', $i18n) ?></div>
+                <div class="stat-tile-value"><?= $money($amountNeededThisPeriod ?? 0) ?></div>
+                <div class="stat-tile-caption"><?= htmlspecialchars($budgetPeriodLabel ?? '', ENT_QUOTES, 'UTF-8') ?></div>
+            </a>
+        <?php } ?>
         <div class="stat-tile">
             <div class="stat-tile-label"><?= translate('yearly_cost', $i18n) ?></div>
             <div class="stat-tile-value"><?= $money($totalCostPerYear ?? 0) ?></div>
@@ -344,8 +384,12 @@ $dashboardRow = function ($subscription, $subtitle, $tone = '') use ($dashboardP
                 <section class="card">
                     <header class="card-header">
                         <h2 class="card-title"><?= translate('upcoming_cancellations', $i18n) ?></h2>
+                        <a class="link-button" href="subscriptions.php?notifications=cancellation&amp;sort=cancellation_date"><?= translate('view_all', $i18n) ?></a>
                     </header>
                     <div class="card-list">
+                        <?php if (empty($upcomingCancellations)) { ?>
+                            <p class="card-empty"><?= sprintf(translate('no_cancellations_this_or_next_month', $i18n), $laterCancellationsCount) ?></p>
+                        <?php } ?>
                         <?php foreach ($upcomingCancellations as $subscription) {
                             if (!empty($subscription['locked_until'])) {
                                 $cancelText = sprintf(translate('locked_in_until', $i18n), formatDate($subscription['locked_until'], $lang))
@@ -359,6 +403,9 @@ $dashboardRow = function ($subscription, $subtitle, $tone = '') use ($dashboardP
                             echo $dashboardRow($subscription, $cancelText, $cancelSoon ? 'warning' : '');
                         } ?>
                     </div>
+                    <?php if ($upcomingCancellationsSaving > 0) { ?>
+                        <p class="card-footnote"><?= sprintf(translate('cancelling_these_saves', $i18n), $money($upcomingCancellationsSaving)) ?></p>
+                    <?php } ?>
                 </section>
             <?php } ?>
 
@@ -457,15 +504,20 @@ $dashboardRow = function ($subscription, $subtitle, $tone = '') use ($dashboardP
                 </section>
             <?php } ?>
 
-            <?php if (isset($inactiveSubscriptions) && $inactiveSubscriptions > 0) { ?>
+            <?php if ((isset($inactiveSubscriptions) && $inactiveSubscriptions > 0) || ($planDowngradeSavingsPerMonth ?? 0) > 0) { ?>
                 <section class="card">
                     <header class="card-header">
                         <h2 class="card-title"><?= translate('your_savings', $i18n) ?></h2>
                     </header>
                     <dl class="kv-list">
-                        <div class="kv-row"><dt><?= translate('inactive_subscriptions', $i18n) ?></dt><dd><?= (int) $inactiveSubscriptions ?></dd></div>
+                        <?php if ($inactiveSubscriptions > 0) { ?>
+                            <div class="kv-row"><dt><?= translate('inactive_subscriptions', $i18n) ?></dt><dd><?= (int) $inactiveSubscriptions ?></dd></div>
+                        <?php } ?>
                         <?php if (!empty($cancelledTrials)) { ?>
                             <div class="kv-row"><dt><?= translate('cancelled_trials', $i18n) ?></dt><dd><?= (int) $cancelledTrials ?></dd></div>
+                        <?php } ?>
+                        <?php if (($planDowngradeSavingsPerMonth ?? 0) > 0) { ?>
+                            <div class="kv-row"><dt><?= translate('saved_by_downgrades', $i18n) ?></dt><dd><?= $money($planDowngradeSavingsPerMonth) ?></dd></div>
                         <?php } ?>
                         <?php if (isset($totalSavingsPerMonth) && $totalSavingsPerMonth > 0) { ?>
                             <div class="kv-row"><dt><?= translate('monthly_savings', $i18n) ?></dt><dd><?= $money($totalSavingsPerMonth) ?></dd></div>

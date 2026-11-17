@@ -1089,6 +1089,10 @@ function setShowSubscriptionProgress() {
   storeSettingsOnDB('subscription_progress', value);
 }
 
+function setMonthlyCostMode() {
+  storeSettingsOnDB('monthly_cost_mode', document.querySelector("#monthlycostmode").value);
+}
+
 function setShowCategoryCard() {
   const checkbox = document.querySelector("#showcategorycard");
   storeSettingsOnDB('category_card', checkbox.checked);

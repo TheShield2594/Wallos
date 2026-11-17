@@ -3,6 +3,7 @@ require_once 'includes/header.php';
 require_once 'includes/logo_theme_variant.php';
 require_once 'includes/default_names.php';
 require_once 'includes/households.php';
+require_once 'includes/ui_helpers.php';
 
 // Mine / Household: the household scope adds what other members share.
 $statsHousehold = wallos_household_membership($db, $userId);
@@ -23,6 +24,31 @@ $code = $row['code'];
 require_once 'includes/stats_calculations.php';
 require_once 'includes/stats_extra_calculations.php';
 require_once 'includes/upcoming_cancellations.php';
+
+// Period: per month (normalized, the default), or the charges that actually
+// fall in the calendar month, the pay period or a custom range.
+require_once 'includes/period_stats.php';
+$statsPeriod = wallos_stats_period_range($_GET['period'] ?? null, $_GET['from'] ?? null, $_GET['to'] ?? null,
+  new DateTime('today'), $budgetPeriodType, $budgetPeriodAnchorDate);
+$statsPeriodActive = $statsPeriod['period'] !== 'normalized';
+$periodCharges = null;
+if ($statsPeriodActive) {
+  $periodCharges = wallos_period_charges($subscriptions ?? [], $statsPeriod['start'], $statsPeriod['end'],
+    fn($amount, $currencyId) => getPriceConverted($amount, $currencyId, $db, $userId));
+  $statsPeriodLabel = formatBudgetPeriodLabel($statsPeriod['start'], $statsPeriod['end']);
+  $statsPeriodDays = (int) $statsPeriod['start']->diff($statsPeriod['end'])->format('%a') + 1;
+  // Dates before today are projected from the schedule, not recorded payments.
+  $statsPeriodIncludesPast = $statsPeriod['start'] < new DateTime('today');
+}
+$periodQuery = function (array $changes) {
+  $query = array_merge($_GET, $changes);
+  foreach ($query as $key => $value) {
+    if ($value === null) {
+      unset($query[$key]);
+    }
+  }
+  return 'stats.php' . ($query ? '?' . http_build_query($query) : '');
+};
 
 // Subscriptions flagged for cancellation, and what cancelling them would stop costing.
 $upcomingCancellations = get_upcoming_cancellations($db, $userId);
@@ -75,6 +101,25 @@ $actualYearOverYear = $actualLastYear > 0 ? ($actualThisYear - $actualLastYear) 
         <?php } ?>
       </div>
     <?php } ?>
+    <div class="segmented stats-period" role="group" aria-label="<?= translate('period', $i18n) ?>">
+      <?php
+      $periodOptions = ['normalized' => 'period_normalized', 'calendar' => 'period_calendar_month', 'pay' => 'period_pay_period', 'custom' => 'period_custom'];
+      foreach ($periodOptions as $periodValue => $periodLabelKey) {
+        $isCurrentPeriod = $statsPeriod['period'] === $periodValue;
+        if ($periodValue === 'custom') {
+          ?>
+          <button type="button" class="segmented-option<?= $isCurrentPeriod ? ' is-selected' : '' ?>" aria-pressed="<?= $isCurrentPeriod ? 'true' : 'false' ?>"
+            aria-controls="stats-custom-range" aria-expanded="<?= $statsPeriod['period'] === 'custom' || $statsPeriod['error'] ? 'true' : 'false' ?>"
+            onClick="toggleCustomRange(this)"><?= translate($periodLabelKey, $i18n) ?></button>
+          <?php
+          continue;
+        }
+        $periodHref = $periodQuery(['period' => $periodValue === 'normalized' ? null : $periodValue, 'from' => null, 'to' => null]);
+        ?>
+        <a class="segmented-option<?= $isCurrentPeriod ? ' is-selected' : '' ?>" aria-current="<?= $isCurrentPeriod ? 'true' : 'false' ?>"
+          href="<?= htmlspecialchars($periodHref) ?>"><?= translate($periodLabelKey, $i18n) ?></a>
+      <?php } ?>
+    </div>
     <div class="filtermenu">
       <button type="button" class="btn btn-icon" id="filtermenu-button" title="<?= translate("filter", $i18n) ?>" aria-label="<?= translate("filter", $i18n) ?>">
         <i class="fa-solid fa-filter"></i>
@@ -185,6 +230,25 @@ $actualYearOverYear = $actualLastYear > 0 ? ($actualThisYear - $actualLastYear) 
 <?php page_toolbar_end(); ?>
 
 <section class="contain">
+  <form class="stats-custom-range<?= $statsPeriod['period'] === 'custom' || $statsPeriod['error'] ? '' : ' hide' ?>" id="stats-custom-range" method="get" action="stats.php">
+    <?php foreach ($_GET as $key => $value) {
+      if (in_array($key, ['period', 'from', 'to'], true) || !is_string($value)) {
+        continue;
+      } ?>
+      <input type="hidden" name="<?= htmlspecialchars($key) ?>" value="<?= htmlspecialchars($value) ?>">
+    <?php } ?>
+    <input type="hidden" name="period" value="custom">
+    <label for="stats-range-from"><?= translate('from', $i18n) ?></label>
+    <input type="date" id="stats-range-from" name="from" required
+      value="<?= htmlspecialchars($statsPeriod['period'] === 'custom' ? $statsPeriod['start']->format('Y-m-d') : (new DateTime('first day of this month'))->format('Y-m-d')) ?>">
+    <label for="stats-range-to"><?= translate('to', $i18n) ?></label>
+    <input type="date" id="stats-range-to" name="to" required
+      value="<?= htmlspecialchars($statsPeriod['period'] === 'custom' ? $statsPeriod['end']->format('Y-m-d') : (new DateTime('last day of this month'))->format('Y-m-d')) ?>">
+    <button type="submit" class="btn btn-small"><?= translate('apply', $i18n) ?></button>
+    <?php if ($statsPeriod['error']) { ?>
+      <p class="form-hint is-danger"><?= translate('invalid_date_range', $i18n) ?></p>
+    <?php } ?>
+  </form>
   <?php
   if ($showCantConverErrorMessage) {
     ?>
@@ -239,6 +303,18 @@ $actualYearOverYear = $actualLastYear > 0 ? ($actualThisYear - $actualLastYear) 
   usort($paymentMethodDataPoints, fn($a, $b) => $b['y'] <=> $a['y']);
   $showPaymentMethodsGraph = count($paymentMethodDataPoints) > 1;
 
+  // A period other than "per month" splits what is charged in it instead.
+  $splitSubHeader = translate('monthly_cost', $i18n);
+  if ($statsPeriodActive) {
+    $splitSubHeader = $statsPeriodLabel;
+    $categoryDataPoints = wallos_period_split_points($periodCharges['by_category'], array_map(fn($row) => $row['name'], $categoryCost ?? []));
+    $memberDataPoints = wallos_period_split_points($periodCharges['by_member'], array_map(fn($row) => $row['name'], $memberCost ?? []));
+    $paymentMethodDataPoints = wallos_period_split_points($periodCharges['by_payment'], array_map(fn($row) => $row['name'], $paymentMethodsCount ?? []));
+    $showCategoryCostGraph = count($categoryDataPoints) > 1;
+    $showMemberCostGraph = count($memberDataPoints) > 1;
+    $showPaymentMethodsGraph = count($paymentMethodDataPoints) > 1;
+  }
+
   $showMonthlyStats = !isset($_GET['budget']) || $_GET['budget'] === 'monthly';
   $showPeriodStats = !isset($_GET['budget']) || $_GET['budget'] === 'period';
 
@@ -255,6 +331,61 @@ $actualYearOverYear = $actualLastYear > 0 ? ($actualThisYear - $actualLastYear) 
     || $showActualPaymentsGraph;
   ?>
 
+  <?php if ($statsPeriodActive) {
+    $periodTitleKey = ['calendar' => 'period_calendar_month', 'pay' => 'period_pay_period', 'custom' => 'period_custom'][$statsPeriod['period']];
+    ?>
+    <section class="stats-section">
+      <h2><?= translate('charges_in_period', $i18n) ?> · <?= htmlspecialchars($statsPeriodLabel) ?></h2>
+      <div class="statistics">
+        <div class="statistic">
+          <span><?= CurrencyFormatter::format($periodCharges['total'], $code) ?></span>
+          <div class="title"><?= translate($periodTitleKey, $i18n) ?></div>
+          <div class="period-range"><?= htmlspecialchars($statsPeriodLabel) ?></div>
+        </div>
+        <div class="statistic">
+          <span><?= (int) $periodCharges['count'] ?></span>
+          <div class="title"><?= translate('renewals', $i18n) ?></div>
+        </div>
+        <div class="statistic">
+          <span><?= CurrencyFormatter::format($periodCharges['total'] / max(1, $statsPeriodDays), $code) ?></span>
+          <div class="title"><?= translate('cost_per_day', $i18n) ?></div>
+        </div>
+      </div>
+      <?php if ($statsPeriodIncludesPast) { ?>
+        <p class="stats-note"><?= translate('period_past_is_estimated', $i18n) ?></p>
+      <?php } ?>
+      <?php if (empty($periodCharges['charges'])) { ?>
+        <p class="stats-note"><?= translate('no_charges_in_period', $i18n) ?></p>
+      <?php } else { ?>
+        <div class="card period-charges">
+          <div class="card-list">
+            <?php
+            $chargeDateFormatter = new IntlDateFormatter($lang, IntlDateFormatter::MEDIUM, IntlDateFormatter::NONE);
+            foreach ($periodCharges['charges'] as $charge) {
+              $chargeSubtitle = $chargeDateFormatter->format(new DateTime($charge['date']));
+              if (!empty($charge['shared_owner_name'])) {
+                $chargeSubtitle = sprintf(translate('shared_by', $i18n), $charge['shared_owner_name']) . ' · ' . $chargeSubtitle;
+              }
+              ?>
+              <div class="list-row">
+                <?= render_tile($charge['name'], empty($charge['logo']) ? '' : 'images/uploads/logos/' . $charge['logo'],
+                  empty($charge['logo_variant']) ? null : 'images/uploads/logos/' . $charge['logo_variant'], $charge['logo_text_color']) ?>
+                <span class="list-row-text">
+                  <span class="list-row-title"><?= htmlspecialchars(htmlspecialchars_decode($charge['name'])) ?></span>
+                  <span class="list-row-subtitle"><?= htmlspecialchars($chargeSubtitle) ?></span>
+                </span>
+                <span class="list-row-trailing">
+                  <span class="list-row-value"><?= htmlspecialchars(CurrencyFormatter::format($charge['amount'], $code)) ?></span>
+                </span>
+              </div>
+            <?php
+            } ?>
+          </div>
+        </div>
+      <?php } ?>
+    </section>
+  <?php } ?>
+
   <section class="stats-section">
     <h2><?= translate('overview', $i18n) ?></h2>
     <div class="statistics">
@@ -263,8 +394,13 @@ $actualYearOverYear = $actualLastYear > 0 ? ($actualThisYear - $actualLastYear) 
         <div class="title"><?= translate('active_subscriptions', $i18n) ?></div>
       </div>
       <div class="statistic">
-        <span><?= CurrencyFormatter::format($totalCostPerMonth, $code) ?></span>
-        <div class="title"><?= translate('monthly_cost', $i18n) ?></div>
+        <span><?= CurrencyFormatter::format($headlineMonthlyCost, $code) ?></span>
+        <div class="title"><?= translate($monthlyCostMode === 'cashflow' ? 'charges_this_month' : 'monthly_cost', $i18n) ?></div>
+        <?php if ($excludedYearlyCost > 0) { ?>
+          <div class="subtitle"><?= sprintf(translate('plus_yearly_in_longer_plans', $i18n), CurrencyFormatter::format($excludedYearlyCost, $code)) ?></div>
+        <?php } elseif ($monthlyCostMode !== 'amortized') { ?>
+          <div class="subtitle"><?= sprintf(translate('spread_evenly_amount', $i18n), CurrencyFormatter::format($totalCostPerMonth, $code)) ?></div>
+        <?php } ?>
       </div>
       <div class="statistic">
         <span><?= CurrencyFormatter::format($totalCostPerYear, $code) ?></span>
@@ -525,7 +661,7 @@ $actualYearOverYear = $actualLastYear > 0 ? ($actualThisYear - $actualLastYear) 
           <section class="graph">
             <header>
               <?= translate('household_split', $i18n) ?>
-              <div class="sub-header">(<?= translate('monthly_cost', $i18n) ?>)</div>
+              <div class="sub-header">(<?= htmlspecialchars($splitSubHeader) ?>)</div>
             </header>
             <div id="memberSplitChart" style="width: 100%;"></div>
           </section>
@@ -536,7 +672,7 @@ $actualYearOverYear = $actualLastYear > 0 ? ($actualThisYear - $actualLastYear) 
           <section class="graph">
             <header>
               <?= translate('category_split', $i18n) ?>
-              <div class="sub-header">(<?= translate('monthly_cost', $i18n) ?>)</div>
+              <div class="sub-header">(<?= htmlspecialchars($splitSubHeader) ?>)</div>
             </header>
             <div id="categorySplitChart" style="width: 100%;"></div>
           </section>
@@ -547,7 +683,7 @@ $actualYearOverYear = $actualLastYear > 0 ? ($actualThisYear - $actualLastYear) 
           <section class="graph">
             <header>
               <?= translate('payment_method_split', $i18n) ?>
-              <div class="sub-header">(<?= translate('monthly_cost', $i18n) ?>)</div>
+              <div class="sub-header">(<?= htmlspecialchars($splitSubHeader) ?>)</div>
             </header>
             <div id="paymentMethidSplitChart" style="width: 100%;"></div>
           </section>
@@ -728,15 +864,63 @@ $actualYearOverYear = $actualLastYear > 0 ? ($actualThisYear - $actualLastYear) 
     <?php
   }
 
-  if ($inactiveSubscriptions > 0) {
+  if (!empty($priceChangeTotals['count'])) {
+    ?>
+    <section class="stats-section">
+      <h2><?= translate('plan_changes', $i18n) ?></h2>
+      <div class="statistics">
+        <?php if ($priceChangeTotals['downgrade_monthly'] > 0) { ?>
+          <div class="statistic">
+            <span><?= CurrencyFormatter::format($priceChangeTotals['downgrade_monthly'], $code) ?></span>
+            <div class="title"><?= translate('saved_by_downgrades', $i18n) ?></div>
+            <?php if ($priceChangeTotals['downgrade_accrued'] >= 0.005) { ?>
+              <div class="subtitle"><?= sprintf(translate('saved_so_far', $i18n), CurrencyFormatter::format($priceChangeTotals['downgrade_accrued'], $code)) ?></div>
+            <?php } ?>
+          </div>
+        <?php } ?>
+        <?php if ($priceChangeTotals['upgrade_monthly'] > 0) { ?>
+          <div class="statistic">
+            <span><?= CurrencyFormatter::format($priceChangeTotals['upgrade_monthly'], $code) ?></span>
+            <div class="title"><?= translate('extra_from_upgrades', $i18n) ?></div>
+            <?php if ($priceChangeTotals['upgrade_accrued'] >= 0.005) { ?>
+              <div class="subtitle"><?= sprintf(translate('spent_so_far', $i18n), CurrencyFormatter::format($priceChangeTotals['upgrade_accrued'], $code)) ?></div>
+            <?php } ?>
+          </div>
+        <?php } ?>
+        <?php if (abs($priceChangeTotals['provider_monthly']) >= 0.005) {
+          $providerSign = $priceChangeTotals['provider_monthly'] >= 0 ? '+' : '-';
+          ?>
+          <div class="statistic">
+            <span><?= $providerSign ?><?= CurrencyFormatter::format(abs($priceChangeTotals['provider_monthly']), $code) ?></span>
+            <div class="title"><?= translate('provider_price_changes', $i18n) ?></div>
+            <?php if (abs($priceChangeTotals['provider_accrued']) >= 0.005) { ?>
+              <div class="subtitle"><?= sprintf(translate('since_changes_total', $i18n), ($priceChangeTotals['provider_accrued'] >= 0 ? '+' : '-') . CurrencyFormatter::format(abs($priceChangeTotals['provider_accrued']), $code)) ?></div>
+            <?php } ?>
+          </div>
+        <?php } ?>
+      </div>
+      <p class="stats-note"><?= translate('plan_changes_info', $i18n) ?></p>
+    </section>
+    <?php
+  }
+
+  if ($inactiveSubscriptions > 0 || ($planDowngradeSavingsPerMonth ?? 0) > 0) {
     ?>
     <section class="stats-section">
       <h2><?= translate('your_savings', $i18n) ?></h2>
       <div class="statistics">
-        <div class="statistic">
-          <span><?= $inactiveSubscriptions ?></span>
-          <div class="title"><?= translate('inactive_subscriptions', $i18n) ?></div>
-        </div>
+        <?php if ($inactiveSubscriptions > 0) { ?>
+          <div class="statistic">
+            <span><?= $inactiveSubscriptions ?></span>
+            <div class="title"><?= translate('inactive_subscriptions', $i18n) ?></div>
+          </div>
+        <?php } ?>
+        <?php if (($planDowngradeSavingsPerMonth ?? 0) > 0) { ?>
+          <div class="statistic">
+            <span><?= CurrencyFormatter::format($planDowngradeSavingsPerMonth, $code) ?></span>
+            <div class="title"><?= translate('saved_by_downgrades', $i18n) ?></div>
+          </div>
+        <?php } ?>
         <?php
         if ($totalSavingsPerMonth > 0) {
           ?>

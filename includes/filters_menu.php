@@ -124,9 +124,14 @@
   <div class="filtermenu-submenu">
     <div class="filter-title" onClick="toggleSubMenu('notification')"><?= translate("notifications", $i18n) ?></div>
     <div class="filtermenu-submenu-content" id="filter-notification">
-      <div class="filter-item capitalize" data-notificationtype="reminder"><?= translate("reminder", $i18n) ?></div>
-      <div class="filter-item capitalize" data-notificationtype="cancellation"><?= translate("cancellation", $i18n) ?></div>
-      <div class="filter-item capitalize" data-notificationtype="none"><?= translate("none", $i18n) ?></div>
+      <?php
+      // Pre-selected when the page was opened with ?notifications=...
+      $selectedNotificationTypes = wallos_notification_filter_types($_GET['notifications'] ?? '');
+      foreach (['reminder' => 'reminder', 'cancellation' => 'cancellation', 'none' => 'none'] as $notificationType => $notificationLabel) {
+        ?>
+        <div class="filter-item capitalize<?= in_array($notificationType, $selectedNotificationTypes, true) ? ' selected' : '' ?>"
+          data-notificationtype="<?= $notificationType ?>"><?= translate($notificationLabel, $i18n) ?></div>
+      <?php } ?>
     </div>
   </div>
 

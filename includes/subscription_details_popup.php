@@ -59,6 +59,10 @@ require_once __DIR__ . '/getdbkeys.php';
             <dt><?= translate('billing_cycle', $i18n) ?></dt>
             <dd id="details-cycle"></dd>
           </div>
+          <div class="kv-row hide" id="details-tier-item">
+            <dt><?= translate('plan_tier', $i18n) ?></dt>
+            <dd id="details-tier"></dd>
+          </div>
           <div class="kv-row hide" id="details-plan-item">
             <dt><?= translate('plan', $i18n) ?></dt>
             <dd id="details-plan"></dd>
@@ -138,6 +142,11 @@ require_once __DIR__ . '/getdbkeys.php';
           <p class="card-footnote" id="details-history-empty"><?= translate('no_payments_recorded', $i18n) ?></p>
         </section>
 
+        <section class="card hide" id="details-price-changes-card">
+          <h3 class="card-title"><?= translate('price_changes', $i18n) ?></h3>
+          <ul class="history-list" id="details-price-changes-list"></ul>
+        </section>
+
         <section class="card hide" id="details-notes-item">
           <h3 class="card-title"><?= translate('notes', $i18n) ?></h3>
           <div class="detail-notes" id="details-notes"></div>
@@ -210,6 +219,9 @@ $detailsLookups = [
     'confirm_delete_payment' => translate('confirm_delete_payment', $i18n),
     'invalid_amount' => translate('invalid_amount', $i18n),
     'error' => translate('error', $i18n),
+    'per_month_short' => translate('per_month_short', $i18n),
+    'price_change_provider' => translate('price_change_provider', $i18n),
+    'price_change_tier' => translate('price_change_tier', $i18n),
   ],
 ];
 foreach ($categories as $categoryId => $category) {

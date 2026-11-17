@@ -55,6 +55,14 @@ if ($userIdToDelete == 1 || $userIdToDelete != $userId) {
     $stmt->bindValue(':id', $userIdToDelete, SQLITE3_INTEGER);
     $result = $stmt->execute();
 
+    // Delete the price and plan change history. Tolerates a database that
+    // has not run migration 000068 yet, so the cleanup below still runs.
+    $stmt = @$db->prepare('DELETE FROM subscription_price_changes WHERE user_id = :id');
+    if ($stmt !== false) {
+        $stmt->bindValue(':id', $userIdToDelete, SQLITE3_INTEGER);
+        $result = $stmt->execute();
+    }
+
     // Delete settings
     $stmt = $db->prepare('DELETE FROM settings WHERE user_id = :id');
     $stmt->bindValue(':id', $userIdToDelete, SQLITE3_INTEGER);

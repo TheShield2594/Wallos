@@ -5,33 +5,23 @@
   commitment to cancel, matching the dashboard, statistics page and
   cancellation notification cron (see cancellation_notifications_test.php).
 
-  endpoints/subscriptions/get.php requires connect_endpoint.php and a live
-  session, so it can't be included here. As with the cron test, this reads
-  the two SQL fragments out of the source file and runs them against a
-  seeded database, asserting against the real conditions rather than a copy
-  that could silently drift.
+  Both list pages build the filter with wallos_notification_filter_condition()
+  (includes/cancellation_deadline.php); this runs those conditions against a
+  seeded database.
 */
 
 /**
- * Returns the SQL condition endpoints/subscriptions/get.php builds for one
- * notification filter type ('cancellation' or 'none').
+ * Returns the SQL condition the list endpoint builds for one notification
+ * filter type, from the helper both list pages use.
  *
  * @param string $type
  * @return string
  */
 function notification_filter_condition($type)
 {
-    $source = file_get_contents(WALLOS_ROOT . '/endpoints/subscriptions/get.php');
-
-    if (!preg_match('/\$type === \'' . $type . '\'\) \{\s*(?:\/\/[^\n]*\n\s*)*\$notifConditions\[\] = ([^;]+);/', $source, $matches)) {
-        return '';
-    }
-
-    // The condition is a string expression that may use the shared
-    // WALLOS_CANCEL_NOTICE_SQL fragment; evaluate exactly what the endpoint builds.
     require_once WALLOS_ROOT . '/includes/cancellation_deadline.php';
 
-    return eval('return ' . $matches[1] . ';');
+    return (string) wallos_notification_filter_condition($type);
 }
 
 /**
@@ -58,7 +48,11 @@ function notification_filter_names($db, $userId, $type)
     return $names;
 }
 
-wallos_test('the notification filter conditions were found in the endpoint', function () {
+wallos_test('the notification filter conditions come from the shared helper', function () {
+    assert_contains('wallos_notification_filter_condition', file_get_contents(WALLOS_ROOT . '/endpoints/subscriptions/get.php'),
+        'the list endpoint uses the shared helper');
+    assert_contains('wallos_notification_filter_condition', file_get_contents(WALLOS_ROOT . '/subscriptions.php'),
+        'the list page uses the shared helper');
     assert_contains('cancellation_date', notification_filter_condition('cancellation'),
         'the cancellation condition still filters by cancellation date');
     assert_contains('cancellation_date', notification_filter_condition('none'),

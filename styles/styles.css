@@ -1416,6 +1416,14 @@ body.light img.logo-theme-variant[data-native-theme="dark"] {
   background-color: var(--hover);
 }
 
+.stat-tile-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 8px;
+}
+
 .stat-tile-label,
 .stat-tile-caption {
   font-size: 13px;
@@ -1756,6 +1764,45 @@ body.light img.logo-theme-variant[data-native-theme="dark"] {
   font-size: 14px;
   font-variant-numeric: tabular-nums;
   color: var(--text);
+}
+
+/* Price and plan changes */
+.price-change-notice {
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background-color: var(--fill);
+}
+
+.price-change-delta {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.price-change-delta.is-success {
+  color: var(--success);
+}
+
+.history-status.is-tier {
+  color: var(--tint);
+}
+
+.history-status.is-provider {
+  color: var(--warning);
+}
+
+#details-price-changes-list .history-note {
+  white-space: normal;
+}
+
+.history-amount.is-success {
+  color: var(--success);
+}
+
+.history-amount.is-danger {
+  color: var(--danger);
 }
 
 .detail-actions {
@@ -3651,6 +3698,50 @@ input[type="color"]::-moz-color-swatch {
   order: 3;
   font-size: 13px;
   color: var(--text2);
+}
+
+/* Statistics period: per month, calendar month, pay period, custom range. */
+.segmented.stats-period {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.stats-period .segmented-option {
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.stats-custom-range {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  color: var(--text2);
+}
+
+.stats-custom-range input[type="date"] {
+  width: auto;
+  min-width: 0;
+}
+
+.stats-custom-range .form-hint {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.stats-note {
+  margin: 8px 4px 0;
+  font-size: 13px;
+  color: var(--text2);
+}
+
+.period-charges {
+  margin-top: 12px;
 }
 
 .statistic>.subtitle {

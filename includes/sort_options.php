@@ -9,6 +9,7 @@ $sortChoices = [
     'payer_user_id' => translate('member', $i18n),
     'payment_method_id' => translate('payment_method', $i18n),
     'renewal_type' => translate('renewal_type', $i18n),
+    'cancellation_date' => translate('cancel_by_label', $i18n),
 ];
 if (!isset($settings['hideDisabledSubscriptions']) || $settings['hideDisabledSubscriptions'] !== 'true') {
     $sortChoices['inactive'] = translate('state', $i18n);

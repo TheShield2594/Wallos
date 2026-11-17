@@ -35,6 +35,8 @@ For 'add' and 'edit' actions (all optional for 'edit'):
 - intro_notify_days: days before the end to send the "trial ending" reminder (default 3).
 - shared: 1 to share the subscription with your household, 0 to make it private.
 - replacement_subscription_id: the ID of the replacement subscription (integer).
+- tier_name: (edit) the plan or tier name (string, empty to clear).
+- price_change_reason: (edit) 'tier' (default, you changed plan) or 'provider' (the provider changed the price); recorded in the price history when the price, currency, cycle or frequency changes.
 
 It returns a JSON object with the following properties:
 - success: whether the request was successful (boolean).
@@ -60,6 +62,7 @@ require_once '../../includes/logo_theme_variant.php';
 require_once '../../includes/cancellation_deadline.php';
 require_once '../../includes/intro_pricing.php';
 require_once '../../includes/households.php';
+require_once '../../includes/price_changes.php';
 
 /**
  * Settings saved after the subscription row itself: the cancellation notice
@@ -1027,7 +1030,8 @@ switch ($action) {
                             url = :url,
                             notify_days_before = :notifyDaysBefore,
                             cancellation_date = :cancellationDate,
-                            replacement_subscription_id = :replacement_subscription_id
+                            replacement_subscription_id = :replacement_subscription_id,
+                            tier_name = :tierName
                        WHERE id = :id AND user_id = :userId";
 
         $stmtUpdate = $db->prepare($sqlUpdate);
@@ -1054,9 +1058,45 @@ switch ($action) {
         $stmtUpdate->bindParam(':replacement_subscription_id', $replacementSubscriptionId, SQLITE3_INTEGER);
         $stmtUpdate->bindParam(':id', $subscriptionId, SQLITE3_INTEGER);
         $stmtUpdate->bindParam(':userId', $userId, SQLITE3_INTEGER);
+        $tierName = array_key_exists('tier_name', $_POST) ? wallos_normalize_tier_name($_POST['tier_name']) : ($subscription['tier_name'] ?? null);
+        $stmtUpdate->bindValue(':tierName', $tierName, $tierName === null ? SQLITE3_NULL : SQLITE3_TEXT);
+        $priceChangeReason = ($_POST['price_change_reason'] ?? 'tier') === 'provider' ? 'provider' : 'tier';
 
-        $updated = api_save_atomically($db, function () use ($stmtUpdate, $subscriptionId) {
-            return $stmtUpdate->execute() !== false ? (int) $subscriptionId : false;
+        // Price fields the request sent; the others come from the row read
+        // under the write lock below.
+        $priceInput = [];
+        foreach (['price' => $price, 'currency_id' => $currencyId, 'cycle' => $cycle, 'frequency' => $frequency, 'tier_name' => $tierName] as $field => $value) {
+            if (array_key_exists($field, $_POST)) {
+                $priceInput[$field] = $value;
+            }
+        }
+
+        $updated = api_save_atomically($db, function () use ($db, $stmtUpdate, $subscriptionId, $subscription, $userId, &$price, &$currencyId, &$cycle, &$frequency, &$tierName, $priceInput, $priceChangeReason) {
+            // The price before this edit, read under the write lock so a
+            // concurrent edit can't make both record the same old price, and
+            // a partial edit keeps the price another edit just saved.
+            $priceBefore = wallos_price_snapshot($db, $userId, $subscriptionId) ?? $subscription;
+            $priceFields = wallos_price_fields_for_save($priceBefore, $priceInput);
+            // :price, :currencyId, :cycle and :frequency are bound by reference.
+            $price = $priceFields['price'];
+            $currencyId = $priceFields['currency_id'];
+            $cycle = $priceFields['cycle'];
+            $frequency = $priceFields['frequency'];
+            $tierName = $priceFields['tier_name'];
+            $stmtUpdate->bindValue(':tierName', $tierName, $tierName === null ? SQLITE3_NULL : SQLITE3_TEXT);
+            if ($stmtUpdate->execute() === false) {
+                return false;
+            }
+            // The old price goes into the price history (includes/price_changes.php).
+            $recorded = wallos_record_price_change($db, $userId, $subscriptionId, $priceBefore, [
+                'price' => $price,
+                'currency_id' => $currencyId,
+                'cycle' => $cycle,
+                'frequency' => $frequency,
+                'tier_name' => $tierName,
+            ], $priceChangeReason);
+
+            return $recorded ? (int) $subscriptionId : false;
         }, $extraFields['apply'], $userId);
         if ($updated !== false) {
             $updateResponse = [
@@ -1106,25 +1146,30 @@ switch ($action) {
             exit;
         }
 
-        // Delete
-        $sqlDelete = "DELETE FROM subscriptions WHERE id = :subId AND user_id = :userId";
-        $stmtDelete = $db->prepare($sqlDelete);
-        $stmtDelete->bindParam(':subId', $subscriptionId, SQLITE3_INTEGER);
-        $stmtDelete->bindParam(':userId', $userId, SQLITE3_INTEGER);
+        // Delete the row, its payment and price history and the references to
+        // it as one unit: if any part fails, nothing is deleted.
+        $deleteStatements = [
+            "DELETE FROM subscriptions WHERE id = :subId AND user_id = :userId",
+            "DELETE FROM subscription_payments WHERE subscription_id = :subId AND user_id = :userId",
+            "DELETE FROM subscription_price_changes WHERE subscription_id = :subId AND user_id = :userId",
+            "UPDATE subscriptions SET replacement_subscription_id = NULL WHERE replacement_subscription_id = :subId AND user_id = :userId",
+        ];
+        $deleted = api_save_atomically($db, function () use ($db, $deleteStatements, $subscriptionId, $userId) {
+            foreach ($deleteStatements as $query) {
+                $stmt = $db->prepare($query);
+                if ($stmt === false) {
+                    return false;
+                }
+                $stmt->bindValue(':subId', $subscriptionId, SQLITE3_INTEGER);
+                $stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
+                if ($stmt->execute() === false) {
+                    return false;
+                }
+            }
+            return (int) $subscriptionId;
+        }, fn() => true, $userId);
 
-        if ($stmtDelete->execute()) {
-            $stmtPayments = $db->prepare("DELETE FROM subscription_payments WHERE subscription_id = :subId AND user_id = :userId");
-            $stmtPayments->bindParam(':subId', $subscriptionId, SQLITE3_INTEGER);
-            $stmtPayments->bindParam(':userId', $userId, SQLITE3_INTEGER);
-            $stmtPayments->execute();
-
-            // Nullify replacement_subscription_id references pointing to this subscription
-            $queryCascade = "UPDATE subscriptions SET replacement_subscription_id = NULL WHERE replacement_subscription_id = :subId AND user_id = :userId";
-            $stmtCascade = $db->prepare($queryCascade);
-            $stmtCascade->bindParam(':subId', $subscriptionId, SQLITE3_INTEGER);
-            $stmtCascade->bindParam(':userId', $userId, SQLITE3_INTEGER);
-            $stmtCascade->execute();
-
+        if ($deleted !== false) {
             echo json_encode([
                 'success' => true,
                 'title' => 'Subscription deleted',
