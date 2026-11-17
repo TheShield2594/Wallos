@@ -631,6 +631,12 @@ $i18n = [
     "vs_same_period_last_year" => "%s vs. the same months last year",
     "actual_payments" => "Actual payments",
     "from_payment_history" => "From your payment history, last 12 months",
+    // Dashboard: spend by category
+    "by_category" => "By category",
+    "this_pay_period" => "This pay period",
+    "no_payments_this_period" => "No payments fall in this pay period.",
+    "n_more" => "+%d more",
+    "show_category_card" => "Show spending by category on the dashboard",
 ];
 
 

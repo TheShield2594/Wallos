@@ -49,3 +49,44 @@ document.addEventListener("DOMContentLoaded", function () {
 
 });
 
+
+// "By category" card: Monthly / This pay period. The choice is remembered
+// per browser.
+document.addEventListener("DOMContentLoaded", function () {
+  const card = document.getElementById("category-card");
+  if (!card) {
+    return;
+  }
+  const storageKey = "tally.categoryCardView";
+
+  function show(view) {
+    card.querySelectorAll("[data-category-view]").forEach(function (button) {
+      const selected = button.dataset.categoryView === view;
+      button.classList.toggle("is-selected", selected);
+      button.setAttribute("aria-pressed", selected ? "true" : "false");
+    });
+    card.querySelectorAll("[data-category-panel]").forEach(function (panel) {
+      panel.classList.toggle("hide", panel.dataset.categoryPanel !== view);
+    });
+  }
+
+  card.querySelectorAll("[data-category-view]").forEach(function (button) {
+    button.addEventListener("click", function () {
+      show(button.dataset.categoryView);
+      try {
+        localStorage.setItem(storageKey, button.dataset.categoryView);
+      } catch (e) {
+        // Storage unavailable: the choice just isn't remembered.
+      }
+    });
+  });
+
+  try {
+    const saved = localStorage.getItem(storageKey);
+    if (saved === "period" || saved === "monthly") {
+      show(saved);
+    }
+  } catch (e) {
+    // Storage unavailable: keep the monthly view.
+  }
+});

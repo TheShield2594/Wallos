@@ -1713,6 +1713,13 @@ $upcomingPaymentsLimit = normalize_upcoming_payments_limit($settings['upcoming_p
                     </select>
                 </div>
             </div>
+            <div>
+                <div class="form-group-inline">
+                    <input type="checkbox" id="showcategorycard" name="showcategorycard"
+                        onChange="setShowCategoryCard()" <?= !isset($settings['show_category_card']) || $settings['show_category_card'] ? 'checked' : '' ?>>
+                    <label for="showcategorycard"><?= translate('show_category_card', $i18n) ?></label>
+                </div>
+            </div>
             <h3><?= translate('experience', $i18n) ?></h3>
             <div>
                 <div class="form-group-inline">

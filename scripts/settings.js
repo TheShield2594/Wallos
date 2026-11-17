@@ -1089,6 +1089,11 @@ function setShowSubscriptionProgress() {
   storeSettingsOnDB('subscription_progress', value);
 }
 
+function setShowCategoryCard() {
+  const checkbox = document.querySelector("#showcategorycard");
+  storeSettingsOnDB('category_card', checkbox.checked);
+}
+
 function setRequirePaymentConfirmation() {
   const checkbox = document.querySelector("#requirepaymentconfirmation");
   storeSettingsOnDB('payment_confirmation', checkbox.checked);

@@ -7,6 +7,7 @@ require_once 'includes/upcoming_payments.php';
 require_once 'includes/upcoming_cancellations.php';
 require_once 'includes/ui_helpers.php';
 require_once 'includes/payment_ledger.php';
+require_once 'includes/category_spend.php';
 
 function formatPrice($price, $currencyCode, $currencies)
 {
@@ -118,6 +119,32 @@ $mainCurrencyCode = $currencies[$userData['main_currency']]['code'];
 $money = function ($amount) use ($mainCurrencyCode, $currencies) {
     return formatPrice($amount, $mainCurrencyCode, $currencies);
 };
+
+// "By category" card: the monthly split, and what each category is charged
+// in the current pay period.
+$showCategoryCard = !isset($settings['show_category_card']) || (int) $settings['show_category_card'] === 1;
+$categorySpend = null;
+if ($showCategoryCard && !empty($categoryCost)) {
+    $categoryNames = [];
+    foreach ($categories as $categoryRowId => $categoryRow) {
+        $categoryNames[$categoryRowId] = (int) $categoryRowId === 1 ? translate('no_category', $i18n) : html_entity_decode($categoryRow['name']);
+    }
+    $categorySpendMonthly = wallos_category_spend_monthly($categoryCost, $categoryNames);
+    $categorySpendPeriod = wallos_category_spend_in_period(
+        $subscriptions ?? [],
+        $categoryNames,
+        $budgetPeriodStart,
+        $budgetPeriodEnd,
+        function ($price, $currencyId) use ($db, $userId) {
+            return getPriceConverted($price, $currencyId, $db, $userId);
+        }
+    );
+    // One category says nothing about a split.
+    if ($categorySpendMonthly['categories'] >= 2) {
+        $categorySpend = ['monthly' => $categorySpendMonthly, 'period' => $categorySpendPeriod];
+    }
+}
+$categoryCardLimit = 6;
 
 $todayLabel = (new IntlDateFormatter($lang, IntlDateFormatter::FULL, IntlDateFormatter::NONE, null, null, 'EEEE, MMMM d'))->format(new DateTime());
 $monthLabel = (new IntlDateFormatter($lang, IntlDateFormatter::FULL, IntlDateFormatter::NONE, null, null, 'MMMM yyyy'))->format(new DateTime());
@@ -304,6 +331,50 @@ $dashboardRow = function ($subscription, $subtitle, $tone = '') use ($dashboardP
                             echo $dashboardRow($subscription, translate('cancellation', $i18n) . ' · ' . formatDate($subscription['cancellation_date'], $lang));
                         } ?>
                     </div>
+                </section>
+            <?php } ?>
+
+            <?php if ($categorySpend !== null) { ?>
+                <section class="card category-card" id="category-card">
+                    <header class="card-header">
+                        <h2 class="card-title"><?= translate('by_category', $i18n) ?></h2>
+                        <div class="segmented" role="group" aria-label="<?= translate('by_category', $i18n) ?>">
+                            <button type="button" class="segmented-option is-selected" data-category-view="monthly" aria-pressed="true"><?= translate('Monthly', $i18n) ?></button>
+                            <button type="button" class="segmented-option" data-category-view="period" aria-pressed="false"
+                                title="<?= htmlspecialchars($budgetPeriodLabel ?? '', ENT_QUOTES, 'UTF-8') ?>"><?= translate('this_pay_period', $i18n) ?></button>
+                        </div>
+                    </header>
+                    <?php foreach (['monthly', 'period'] as $view) {
+                        $spend = $categorySpend[$view];
+                        $visibleRows = array_slice($spend['rows'], 0, $categoryCardLimit);
+                        $moreCount = count($spend['rows']) - count($visibleRows);
+                        ?>
+                        <div class="category-spend<?= $view === 'monthly' ? '' : ' hide' ?>" data-category-panel="<?= $view ?>">
+                            <?php if ($view === 'period') { ?>
+                                <p class="category-spend-note"><?= htmlspecialchars($budgetPeriodLabel ?? '', ENT_QUOTES, 'UTF-8') ?></p>
+                            <?php } ?>
+                            <?php if (empty($visibleRows)) { ?>
+                                <p class="card-empty"><?= translate('no_payments_this_period', $i18n) ?></p>
+                            <?php } else { ?>
+                                <ul class="category-spend-list">
+                                    <?php foreach ($visibleRows as $row) { ?>
+                                        <li>
+                                            <a class="category-spend-row" href="subscriptions.php?category=<?= (int) $row['id'] ?>">
+                                                <span class="category-dot" style="--dot-hue: <?= (int) $row['hue'] ?>" aria-hidden="true"></span>
+                                                <span class="category-spend-name"><?= htmlspecialchars($row['name']) ?></span>
+                                                <span class="category-spend-value"><?= $money($row['cost']) ?></span>
+                                                <span class="category-spend-bar" style="--dot-hue: <?= (int) $row['hue'] ?>" role="presentation"><span style="width: <?= number_format($row['share'], 1, '.', '') ?>%"></span></span>
+                                                <span class="visually-hidden"><?= number_format($row['share'], 0) ?>%</span>
+                                            </a>
+                                        </li>
+                                    <?php } ?>
+                                </ul>
+                                <?php if ($moreCount > 0) { ?>
+                                    <a class="category-spend-more link-button" href="stats.php"><?= sprintf(translate('n_more', $i18n), $moreCount) ?></a>
+                                <?php } ?>
+                            <?php } ?>
+                        </div>
+                    <?php } ?>
                 </section>
             <?php } ?>
 
