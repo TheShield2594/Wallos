@@ -140,5 +140,8 @@ wallos_test('the SQL cancellation filter agrees with wallos_cancel_mode(), malfo
     assert_same($expected, notification_filter_names($db, 1, 'cancellation'), 'the SQL filter picks exactly the same rows');
     assert_contains('Legacy garbage', implode(',', notification_filter_names($db, 1, 'none')),
         'a malformed legacy date is "none" in SQL, as in PHP');
+    assert_contains('Legacy Feb 30', implode(',', notification_filter_names($db, 1, 'none')),
+        'Feb 30 too, whichever way the SQLite version treats it');
+    assert_contains("'+0 days'", WALLOS_CANCEL_NOTICE_SQL, "date() normalizes on every SQLite version with a modifier");
     $db->close();
 });

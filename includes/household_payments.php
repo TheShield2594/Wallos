@@ -19,10 +19,15 @@ require_once __DIR__ . '/households.php';
  * Marks the current cycle of a subscription as paid on behalf of $userId.
  *
  * @param float|string|null $amount in the currency the subscription is shown in to $userId
+ * @param int|null $shownCurrencyId the currency the amount was entered in, as the
+ *                 form showed it; a member's amount is refused when the mapping
+ *                 has moved to another currency since (currencies changed in
+ *                 another tab)
  * @return array the outcome of wallos_mark_paid(), or success false with
- *               error 'not_found' (no edit access) or 'no_conversion'
+ *               error 'not_found' (no edit access), 'no_conversion' or
+ *               'currency_changed'
  */
-function wallos_member_mark_paid(SQLite3 $db, $userId, $subscriptionId, $amount, DateTimeInterface $today)
+function wallos_member_mark_paid(SQLite3 $db, $userId, $subscriptionId, $amount, DateTimeInterface $today, $shownCurrencyId = null)
 {
     // The owner, or a household editor of a shared subscription.
     $subscription = wallos_load_accessible_subscription($db, $userId, $subscriptionId, 'edit');
@@ -31,12 +36,15 @@ function wallos_member_mark_paid(SQLite3 $db, $userId, $subscriptionId, $amount,
     }
 
     if ($subscription['access'] !== 'owner') {
-        $factor = wallos_household_display_factor($db, $userId, $subscription['currency_id']);
-        if ($factor === null) {
+        $mapping = wallos_household_currency_mapping($db, $userId, $subscription['currency_id']);
+        if ($mapping === null || $mapping['factor'] <= 0) {
             return ['success' => false, 'error' => 'no_conversion'];
         }
         if ($amount !== null && is_numeric($amount)) {
-            $amount = (float) $amount / $factor;
+            if ($shownCurrencyId === null || (int) $shownCurrencyId !== (int) $mapping['currency_id']) {
+                return ['success' => false, 'error' => 'currency_changed'];
+            }
+            $amount = (float) $amount / $mapping['factor'];
         }
     }
 
@@ -58,14 +66,29 @@ function wallos_member_ledger_list(SQLite3 $db, $userId, $subscriptionId, $limit
 
     $payments = wallos_ledger_list($db, (int) $subscription['user_id'], $subscription['id'], $limit);
     if ($subscription['access'] !== 'owner') {
-        $factor = wallos_household_display_factor($db, $userId, $subscription['currency_id']);
-        if ($factor === null) {
+        // Each payment from the currency it was recorded in (the owner may
+        // have changed the subscription's currency since), labelled with the
+        // member's currency it was converted into.
+        $viewerCurrencies = wallos_household_viewer_currencies($db, $userId);
+        // The subscription itself must be expressible for the member, as for
+        // mark-as-paid, whatever the history holds.
+        if (wallos_household_currency_mapping($db, $userId, $subscription['currency_id'], $viewerCurrencies) === null) {
             return ['success' => false, 'error' => 'no_conversion'];
         }
+        $mappings = [];
         foreach ($payments as &$payment) {
-            if ($payment['amount'] !== null) {
-                $payment['amount'] = (float) $payment['amount'] * $factor;
+            $recorded = (int) ($payment['currency_id'] ?: $subscription['currency_id']);
+            if (!array_key_exists($recorded, $mappings)) {
+                $mappings[$recorded] = wallos_household_currency_mapping($db, $userId, $recorded, $viewerCurrencies);
             }
+            $mapping = $mappings[$recorded];
+            if ($mapping === null || $mapping['factor'] <= 0) {
+                return ['success' => false, 'error' => 'no_conversion'];
+            }
+            if ($payment['amount'] !== null) {
+                $payment['amount'] = (float) $payment['amount'] * $mapping['factor'];
+            }
+            $payment['currency_id'] = $mapping['currency_id'];
         }
         unset($payment);
     }

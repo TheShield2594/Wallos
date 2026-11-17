@@ -211,11 +211,26 @@ wallos_test('only delivered reminders are marked as sent, per reminder and per t
 wallos_test('the cancellation cron counts an HTTP error answer as undelivered', function () {
     $source = file_get_contents(WALLOS_ROOT . '/endpoints/cronjobs/sendcancellationnotifications.php');
 
-    assert_same(6, substr_count($source, '$httpCode < 200 || $httpCode >= 300'),
-        'Discord, Gotify, Telegram, Pushover, ntfy and the webhook accept only a 2xx answer');
+    assert_same(5, substr_count($source, '$httpCode < 200 || $httpCode >= 300'),
+        'Discord, Gotify, Pushover, ntfy and the webhook accept only a 2xx answer');
+    assert_contains('wallos_notification_http_delivered($httpCode, $result, true)', $source,
+        'Telegram also checks the "ok" field of its answer');
     assert_same(6, substr_count($source, 'wallos_notifications_delivered($delivered, $perUser)'),
         'every per-payer channel records the reminders it delivered');
     assert_contains('wallos_notifications_delivered($delivered, [$subscription])', $source,
         'the webhook records each reminder on its own');
     assert_not_contains('deliveredPayers', $source, 'no per-payer shortcut is left');
+});
+
+wallos_test('a Telegram answer counts as delivered only with "ok": true', function () {
+    require_once WALLOS_ROOT . '/includes/cancellation_deadline.php';
+
+    assert_true(wallos_notification_http_delivered(200, '{"ok":true,"result":{}}', true), 'accepted message');
+    assert_true(!wallos_notification_http_delivered(200, '{"ok":false,"error_code":400,"description":"chat not found"}', true),
+        'a failure reported in a 200 answer');
+    assert_true(!wallos_notification_http_delivered(200, 'not json', true), 'an unreadable answer');
+    assert_true(!wallos_notification_http_delivered(403, '{"ok":false}', true), 'a rejected request');
+    assert_true(!wallos_notification_http_delivered(0, false, true), 'no answer at all');
+    assert_true(wallos_notification_http_delivered(204, '', false), 'other services: any 2xx');
+    assert_true(!wallos_notification_http_delivered(500, 'error', false), 'other services: a 5xx');
 });

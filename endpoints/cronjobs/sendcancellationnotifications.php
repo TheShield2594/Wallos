@@ -544,7 +544,7 @@ while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
                         $result = curl_exec($ch);
                         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
                         // A 4xx/5xx answer is not a delivery: the reminder is tried again.
-                        if ($result === false || $httpCode < 200 || $httpCode >= 300) {
+                        if (!wallos_notification_http_delivered($httpCode, $result, true)) {
                             echo "Error sending notifications: " . ($result === false ? curl_error($ch) : "HTTP " . $httpCode) . "<br />";
                         } else {
                             echo "Telegram Notifications sent<br />";

@@ -18,11 +18,12 @@ header('Content-Type: application/json');
 $data = json_decode(file_get_contents("php://input"), true);
 $subscriptionId = is_array($data) ? (int) ($data['id'] ?? 0) : 0;
 $amount = is_array($data) && isset($data['amount']) && $data['amount'] !== '' ? $data['amount'] : null;
+$shownCurrencyId = is_array($data) && isset($data['currency_id']) && $data['currency_id'] !== '' ? (int) $data['currency_id'] : null;
 
 // The owner, or a household editor of a shared subscription; an amount a
 // member entered is converted to the owner's currency, or refused without a
 // conversion path (see includes/household_payments.php).
-$outcome = wallos_member_mark_paid($db, $userId, $subscriptionId, $amount, new DateTime('today'));
+$outcome = wallos_member_mark_paid($db, $userId, $subscriptionId, $amount, new DateTime('today'), $shownCurrencyId);
 if (!$outcome['success']) {
     $message = ($outcome['error'] ?? '') === 'already_paid' ? translate('payment_already_recorded', $i18n) : translate('error', $i18n);
     die(json_encode(["success" => false, "message" => $message]));

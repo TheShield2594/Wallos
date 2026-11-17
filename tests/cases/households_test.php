@@ -197,7 +197,7 @@ wallos_test('households: a member marks a shared payment in their currency and t
     [$db, $id] = households_member_payment_fixture();
 
     // bob is shown 11 USD as 8.50 GBP and enters 17 GBP: 22 USD for alice.
-    $outcome = wallos_member_mark_paid($db, 2, $id, '17', new DateTime('2099-01-15'));
+    $outcome = wallos_member_mark_paid($db, 2, $id, '17', new DateTime('2099-01-15'), 9801);
     assert_true($outcome['success'], 'the payment is recorded');
     assert_equals(22.0, round($db->querySingle("SELECT amount FROM subscription_payments WHERE subscription_id = $id"), 6),
         'stored in the owner currency');
@@ -220,13 +220,47 @@ wallos_test('households: without a conversion path the member requests are refus
 
     $before = $db->querySingle("SELECT COUNT(*) FROM subscription_payments WHERE subscription_id = $id");
     $nextBefore = $db->querySingle("SELECT next_payment FROM subscriptions WHERE id = $id");
-    $outcome = wallos_member_mark_paid($db, 2, $id, '17', new DateTime('2099-01-15'));
+    $outcome = wallos_member_mark_paid($db, 2, $id, '17', new DateTime('2099-01-15'), 9801);
     assert_same(['success' => false, 'error' => 'no_conversion'], $outcome, 'mark-as-paid is refused');
     assert_same($before, $db->querySingle("SELECT COUNT(*) FROM subscription_payments WHERE subscription_id = $id"), 'no ledger row was written');
     assert_same($nextBefore, $db->querySingle("SELECT next_payment FROM subscriptions WHERE id = $id"), 'the schedule did not move');
 
     assert_same(['success' => false, 'error' => 'no_conversion'], wallos_member_ledger_list($db, 2, $id), 'the history is refused');
     assert_true(wallos_member_mark_paid($db, 1, $id, '30', new DateTime('2099-01-15'))['success'], 'the owner is unaffected');
+    $db->close();
+});
+
+wallos_test('households: an amount entered before the currencies changed is refused, not stored in the wrong currency', function () {
+    [$db, $id] = households_member_payment_fixture();
+    // bob was shown 8.50 GBP; meanwhile he adds USD, so the subscription is
+    // now shown to him as 11 USD. The 17 he typed was GBP.
+    $db->exec("INSERT INTO currencies (id, name, symbol, code, rate, user_id) VALUES (9803, 'US Dollar', '$', 'USD', 1.3, 2)");
+
+    $outcome = wallos_member_mark_paid($db, 2, $id, '17', new DateTime('2099-01-15'), 9801);
+    assert_same(['success' => false, 'error' => 'currency_changed'], $outcome, 'the stale amount is refused');
+    assert_same(0, $db->querySingle("SELECT COUNT(*) FROM subscription_payments WHERE subscription_id = $id"), 'nothing was stored');
+    assert_same('currency_changed', wallos_member_mark_paid($db, 2, $id, '17', new DateTime('2099-01-15'))['error'] ?? null,
+        'an amount without the currency it was entered in is refused too');
+
+    assert_true(wallos_member_mark_paid($db, 2, $id, '17', new DateTime('2099-01-15'), 9803)['success'], 'entered again in USD, it is accepted');
+    assert_equals(17.0, round($db->querySingle("SELECT amount FROM subscription_payments WHERE subscription_id = $id"), 6), 'as 17 USD');
+    $db->close();
+});
+
+wallos_test('households: a history recorded in several currencies is converted payment by payment', function () {
+    [$db, $id] = households_member_payment_fixture();
+    // 22 USD paid before alice switched the subscription to EUR, then 20 EUR.
+    $db->exec("INSERT INTO subscription_payments (subscription_id, user_id, due_date, paid_date, amount, currency_id, status, source)
+        VALUES ($id, 1, '2098-12-01', '2098-12-01', 22, " . wallos_test_currency_id(1, 1) . ", 'paid', 'manual'),
+               ($id, 1, '2099-01-01', '2099-01-01', 20, " . wallos_test_currency_id(1, 0) . ", 'paid', 'manual')");
+    $db->exec('UPDATE subscriptions SET currency_id = ' . wallos_test_currency_id(1, 0) . " WHERE id = $id");
+
+    $history = wallos_member_ledger_list($db, 2, $id);
+    assert_true($history['success'], 'bob reads the history');
+    $byDate = array_column($history['payments'], null, 'due_date');
+    assert_equals(17.0, round($byDate['2099-01-01']['amount'], 6), '20 EUR = 17 GBP');
+    assert_equals(17.0, round($byDate['2098-12-01']['amount'], 6), '22 USD = 20 EUR = 17 GBP, from the currency it was recorded in');
+    assert_same(9801, $byDate['2098-12-01']['currency_id'], "labelled with bob's GBP");
     $db->close();
 });
 

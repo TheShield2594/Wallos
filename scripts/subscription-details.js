@@ -562,6 +562,9 @@ function renewSubscription(event, id, subscription) {
     }
     if (amount !== null) {
       body.amount = amount;
+      // The currency the amount was entered in; the server refuses it if a
+      // shared subscription is shown in another currency by now.
+      body.currency_id = subscription.currency_id;
     }
   }
 
@@ -655,9 +658,10 @@ function detailsRenderHistory(subscription, payments) {
     const amount = document.createElement('span');
     amount.className = 'history-amount';
     const isOwner = (subscription.access || 'owner') === 'owner';
-    // A shared subscription's payments are in its owner's currency records.
+    // For a household member the server converted each payment and set its
+    // currency_id to the member's currency it is shown in.
     amount.textContent = payment.amount === null ? '—'
-      : detailsFormatPrice(payment.amount, isOwner ? (payment.currency_id || subscription.currency_id) : subscription.currency_id);
+      : detailsFormatPrice(payment.amount, payment.currency_id || subscription.currency_id);
 
     const edit = document.createElement('button');
     edit.type = 'button';

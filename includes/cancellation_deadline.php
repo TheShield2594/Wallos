@@ -35,14 +35,15 @@ const WALLOS_CANCEL_FIXED_GRACE_DAYS = 7;
 /**
  * SQL condition, true when wallos_cancel_mode() is not 'none': a valid
  * before-renewal notice, or a valid date under any mode but 'none'. A date
- * counts only when it round-trips as Y-m-d, as in wallos_parse_date(), so a
+ * counts only when it round-trips as Y-m-d, as in wallos_parse_date() (the
+ * '+0 days' modifier makes every SQLite version normalize Feb 30), so a
  * malformed legacy date is "none" in SQL filters and in PHP alike. Wrapped in
  * COALESCE so it is never NULL, and NOT of it is the exact complement.
  */
 const WALLOS_CANCEL_NOTICE_SQL = "COALESCE(((cancel_notice_mode = 'before_renewal' AND cancel_notice_unit IN ('days', 'weeks', 'months')
         AND cancel_notice_value IS NOT NULL AND cancel_notice_value BETWEEN 0 AND 3650 AND cancel_notice_value = CAST(cancel_notice_value AS INTEGER))
     OR (COALESCE(cancel_notice_mode, '') != 'none' AND cancellation_date IS NOT NULL
-        AND date(substr(cancellation_date, 1, 10)) = substr(cancellation_date, 1, 10))), 0)";
+        AND date(substr(cancellation_date, 1, 10), '+0 days') = substr(cancellation_date, 1, 10))), 0)";
 
 /**
  * @param array $subscription a subscriptions row
@@ -236,6 +237,28 @@ function wallos_delivered_markers(array $reminded, array $delivered, $type)
     }
 
     return $markers;
+}
+
+/**
+ * Whether a notification service accepted a request: a 2xx answer, and for
+ * Telegram also "ok": true in the body (the Bot API reports failures there).
+ *
+ * @param int         $httpCode
+ * @param string|bool $body     the response, false when the request failed
+ * @param bool        $telegram
+ */
+function wallos_notification_http_delivered($httpCode, $body, $telegram = false)
+{
+    if ($body === false || (int) $httpCode < 200 || (int) $httpCode >= 300) {
+        return false;
+    }
+    if ($telegram) {
+        $decoded = json_decode((string) $body, true);
+
+        return is_array($decoded) && ($decoded['ok'] ?? false) === true;
+    }
+
+    return true;
 }
 
 /**
