@@ -217,7 +217,8 @@ switch ($action) {
         }
 
         // Check if in use
-        $checkUseSql = "SELECT COUNT(*) FROM subscriptions WHERE payer_user_id = :memberId AND user_id = :userId";
+        $checkUseSql = "SELECT (SELECT COUNT(*) FROM subscriptions WHERE payer_user_id = :memberId AND user_id = :userId)
+            + (SELECT COUNT(*) FROM subscription_shares WHERE household_id = :memberId AND user_id = :userId)";
         $checkUseStmt = $db->prepare($checkUseSql);
         $checkUseStmt->bindParam(':memberId', $memberId, SQLITE3_INTEGER);
         $checkUseStmt->bindParam(':userId', $userId, SQLITE3_INTEGER);

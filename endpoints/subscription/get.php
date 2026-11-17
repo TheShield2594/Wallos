@@ -5,6 +5,7 @@ require_once '../../includes/payment_ledger.php';
 require_once '../../includes/cancellation_deadline.php';
 require_once '../../includes/intro_pricing.php';
 require_once '../../includes/households.php';
+require_once '../../includes/cost_sharing.php';
 
 if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
     if (isset($_GET['id']) && $_GET['id'] != "") {
@@ -40,6 +41,10 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
             $subscriptionData['frequency'] = $row['frequency'];
             $subscriptionData['cycle'] = $row['cycle'];
             $subscriptionData['active_months'] = wallos_sanitize_active_months($row['active_months'] ?? WALLOS_ALL_MONTHS);
+            // Sharing & reimbursement: the owner's own split (not shown to other accounts).
+            $subscriptionData['reimbursed_percent'] = (float) ($row['reimbursed_percent'] ?? 0);
+            $subscriptionData['reimbursed_reason'] = $row['reimbursed_reason'] ?? '';
+            $subscriptionData['shares'] = (object) ($isShared ? [] : (wallos_load_subscription_shares($db, $userId)[(int) $row['id']] ?? []));
             $subscriptionData['notes'] = $row['notes'] ?? "";
             $subscriptionData['notes_html'] = render_notes_markdown($row['notes'] ?? "");
             $subscriptionData['payment_method_id'] = $row['payment_method_id'];

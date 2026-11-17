@@ -7,6 +7,7 @@ require_once __DIR__ . '/intro_pricing.php';
 require_once __DIR__ . '/households.php';
 require_once __DIR__ . '/monthly_cost.php';
 require_once __DIR__ . '/price_changes.php';
+require_once __DIR__ . '/cost_sharing.php';
 
 function getPriceConverted($price, $currency, $database, $userId)
 {
@@ -99,7 +100,7 @@ $totalSavingsPerMonth = 0;
 $totalCostsInReplacementsPerMonth = 0;
 
 $statsSubtitleParts = [];
-$query = "SELECT id, name, price, logo, logo_text_color, logo_variant, frequency, cycle, currency_id, next_payment, payer_user_id, category_id, payment_method_id, inactive, replacement_subscription_id, start_date, auto_renew, billing_anchor_day, active_months, end_date, total_payments, payments_made, ended_reason, intro_type, intro_price, intro_end_date, intro_converted_on FROM subscriptions";
+$query = "SELECT id, name, price, logo, logo_text_color, logo_variant, frequency, cycle, currency_id, next_payment, payer_user_id, category_id, payment_method_id, inactive, replacement_subscription_id, start_date, auto_renew, billing_anchor_day, active_months, reimbursed_percent, end_date, total_payments, payments_made, ended_reason, intro_type, intro_price, intro_end_date, intro_converted_on FROM subscriptions";
 $conditions = [];
 $params = [];
 
@@ -169,6 +170,18 @@ if ($result) {
             $subscriptions[] = $sharedRow;
         }
     }
+    // Gross or "My cost" (issue #34): only the statistics page offers the
+    // switch; the dashboard keeps the gross amounts.
+    [$costSharesById, $selfMemberId] = wallos_cost_sharing_context($db, $userId);
+    $statsCostMode = !empty($statsCostModeEnabled)
+        ? wallos_stats_cost_mode($_GET['cost'] ?? null, $settings['stats_net_cost'] ?? 0)
+        : 'gross';
+    if ($statsCostMode === 'net') {
+        $subscriptions = wallos_apply_my_cost($subscriptions, $costSharesById, $selfMemberId);
+    }
+    // What each member owes the payer per month, in the main currency.
+    $memberOwed = [];
+
     if (isset($subscriptions)) {
         $replacementSubscriptions = array();
 
@@ -228,8 +241,23 @@ if ($result) {
                 } elseif ($cycle != 5) {
                     $longCycleCostPerMonth += $price;
                 }
-                if (isset($memberCost[$payerId])) {
-                    $memberCost[$payerId]['cost'] += $price;
+                // The member split follows the shares (the payer owns an
+                // unsplit subscription); "My cost" also takes off reimbursements.
+                $rowShares = empty($subscription['shared_owner_name']) ? ($costSharesById[(int) $subscription['id']] ?? []) : [];
+                $grossMonthly = $price;
+                if (array_key_exists('gross_price', $subscription)) {
+                    $grossMonthly = getPricePerMonth($cycle, $frequency,
+                        getPriceConverted(wallos_current_price(wallos_gross_row($subscription)), $currency, $db, $userId),
+                        wallos_cycle_active_months($subscription));
+                }
+                $memberFactor = $statsCostMode === 'net' ? 1 - wallos_sanitize_reimbursed_percent($subscription['reimbursed_percent'] ?? 0) / 100 : 1;
+                foreach (wallos_member_fractions($subscription, $rowShares) as $shareMemberId => $fraction) {
+                    if (isset($memberCost[$shareMemberId])) {
+                        $memberCost[$shareMemberId]['cost'] += $grossMonthly * $fraction * $memberFactor;
+                    }
+                }
+                foreach (wallos_amounts_owed($subscription, $rowShares, $grossMonthly) as $owingMemberId => $owedAmount) {
+                    $memberOwed[$owingMemberId][(int) $subscription['payer_user_id']] = ($memberOwed[$owingMemberId][(int) $subscription['payer_user_id']] ?? 0) + $owedAmount;
                 }
                 if (isset($categoryCost[$categoryId])) {
                     $categoryCost[$categoryId]['cost'] += $price;

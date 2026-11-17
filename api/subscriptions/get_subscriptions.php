@@ -98,6 +98,7 @@ require_once '../../includes/connect_endpoint.php';
 require_once __DIR__ . '/../../includes/cancellation_deadline.php';
 require_once __DIR__ . '/../../includes/intro_pricing.php';
 require_once '../../includes/currency_rates.php';
+require_once __DIR__ . '/../../includes/cost_sharing.php';
 
 header('Content-Type: application/json; charset=UTF-8');
 
@@ -295,8 +296,15 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" || $_SERVER["REQUEST_METHOD"] === "GET
         }
     }
     $subscriptionsToReturn = array();
+    $apiSharesById = wallos_load_subscription_shares($db, $userId);
+    $apiSelfMemberId = wallos_self_member_id($db, $userId);
     foreach ($subscriptions as $subscription) {
         $subscriptionToReturn = $subscription;
+        // Cost sharing (issue #34): member id => percent, and the account
+        // holder's own part of the price after reimbursements (0-1).
+        $apiShares = (int) ($subscription['user_id'] ?? 0) === (int) $userId ? ($apiSharesById[(int) $subscription['id']] ?? []) : [];
+        $subscriptionToReturn['shares'] = (object) $apiShares;
+        $subscriptionToReturn['my_cost_fraction'] = round(wallos_my_cost_fraction($subscription, $apiShares, $apiSelfMemberId), 6);
         if (isset($_REQUEST['convert_currency']) && $_REQUEST['convert_currency'] === 'true' && $canConvertCurrency && $subscription['currency_id'] != $userCurrencyId) {
             $subscriptionToReturn['price'] = getPriceConverted($subscription['price'], $subscription['currency_id'], $db);
         } else {

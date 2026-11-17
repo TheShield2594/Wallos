@@ -7,6 +7,7 @@ require_once __DIR__ . '/payment_ledger.php';
 require_once __DIR__ . '/cancellation_deadline.php';
 require_once __DIR__ . '/households.php';
 require_once __DIR__ . '/monthly_cost.php';
+require_once __DIR__ . '/cost_sharing.php';
 
 function getBillingCycle($cycle, $frequency, $i18n)
 {
@@ -116,6 +117,15 @@ function addListRowFields(&$printRow, $subscription, $mainCurrencyId, $db)
     $printRow['start_date'] = $subscription['start_date'] ?? '';
     $printRow['cycle'] = (int) $subscription['cycle'];
     $printRow['active_months'] = wallos_cycle_active_months($subscription);
+    // "Your share €2.50" when the cost is split or partly reimbursed.
+    $printRow['my_cost_fraction'] = null;
+    if (empty($subscription['shared_owner_name']) && isset($subscription['user_id'])) {
+        [$sharesById, $selfMemberId] = wallos_cost_sharing_context($db, $subscription['user_id']);
+        $rowShares = $sharesById[(int) $subscription['id']] ?? [];
+        if (wallos_has_cost_adjustment($subscription, $rowShares)) {
+            $printRow['my_cost_fraction'] = wallos_my_cost_fraction($subscription, $rowShares, $selfMemberId);
+        }
+    }
     $printRow['active_months_label'] = wallos_active_months_label($printRow['active_months'], $GLOBALS['lang'] ?? 'en');
     $monthly = getPricePerMonth((int) $subscription['cycle'], (int) $subscription['frequency'], wallos_current_price($subscription), wallos_cycle_active_months($subscription));
     if ($subscription['currency_id'] != $mainCurrencyId) {
@@ -306,6 +316,9 @@ function printSubscriptions($subscriptions, $sort, $categories, $members, $i18n,
                         $trailingStrike = true;
                     } elseif (isset($subscription['original_price']) && $subscription['original_price'] != $subscription['price']) {
                         $trailingSub = formatPrice($subscription['original_price'], $subscription['original_currency_code'], $currencies);
+                    } elseif (isset($subscription['my_cost_fraction']) && $subscription['my_cost_fraction'] !== null) {
+                        $trailingSub = sprintf(translate('your_share_amount', $i18n),
+                            formatPrice((float) $subscription['price'] * $subscription['my_cost_fraction'], $subscription['currency_code'], $currencies));
                     }
                     echo render_list_row([
                         'id' => $subscription['id'],

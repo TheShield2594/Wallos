@@ -54,6 +54,7 @@ function resetForm() {
   toggleIntroFields();
   updatePriceStep();
   setActiveMonths(4095);
+  setSharingFields(null);
   setSharedEditMode(null);
   rememberPriceForChange(null);
   closeLogoSearch();
@@ -101,6 +102,7 @@ function fillEditFormFields(subscription) {
   cycleSelect.value = subscription.cycle;
   toggleOneTimeCycleUI(subscription.cycle == 5);
   setActiveMonths(subscription.active_months);
+  setSharingFields(subscription);
   const paymentSelect = document.querySelector("#payment_method");
   paymentSelect.value = subscription.payment_method_id;
   const categorySelect = document.querySelector("#category");
@@ -1431,6 +1433,7 @@ function updateIntroHint() {
 */
 function setSharedEditMode(subscription) {
   const shared = !!subscription && (subscription.access || 'owner') !== 'owner';
+  document.querySelectorAll('.share-percent').forEach((field) => { field.disabled = shared; });
   ['#currency', '#category', '#payer_user', '#payment_method', '#visibility', '#notifications', '#notify_days_before',
     '#cancel_notice_mode', '#cancellation_date', '#cancel_notice_value', '#cancel_notice_unit', '#min_term_end',
     '#replacement_subscription_id'].forEach((selector) => {
@@ -1637,4 +1640,96 @@ document.addEventListener("DOMContentLoaded", function () {
     cycle.addEventListener("change", toggleActiveMonthsGroup);
     toggleActiveMonthsGroup();
   }
+});
+
+/*
+  Sharing & reimbursement (issue #34): how the cost splits between household
+  members, and what part of it comes back. The hint shows the account
+  holder's own cost ("Your share €2.50").
+*/
+function setSharingFields(subscription) {
+  const shares = (subscription && subscription.shares) || {};
+  document.querySelectorAll('.share-percent').forEach((field) => {
+    const memberId = field.closest('.sharing-member').dataset.memberId;
+    field.value = shares[memberId] !== undefined ? Number(shares[memberId]) : '';
+  });
+  const reimbursed = document.querySelector('#reimbursed_percent');
+  if (reimbursed) {
+    reimbursed.value = subscription && Number(subscription.reimbursed_percent) > 0 ? Number(subscription.reimbursed_percent) : '';
+    document.querySelector('#reimbursed_reason').value = (subscription && subscription.reimbursed_reason) || '';
+  }
+  const group = document.querySelector('#sharing-group');
+  if (group) {
+    group.open = Object.keys(shares).length > 0 || (subscription && Number(subscription.reimbursed_percent) > 0);
+  }
+  updateSharingHint();
+}
+
+function splitSharesEqually() {
+  const fields = Array.from(document.querySelectorAll('.share-percent')).filter((field) => !field.disabled);
+  let chosen = fields.filter((field) => field.value !== '' && Number(field.value) > 0);
+  if (chosen.length < 2) {
+    chosen = fields;
+  }
+  fields.forEach((field) => { if (!chosen.includes(field)) field.value = ''; });
+  const each = Math.floor(10000 / chosen.length) / 100;
+  chosen.forEach((field, index) => {
+    // The last share takes the rounding remainder so the total is exactly 100.
+    field.value = index === chosen.length - 1 ? (100 - each * (chosen.length - 1)).toFixed(2) : each.toFixed(2);
+  });
+  updateSharingHint();
+}
+
+function updateSharingHint() {
+  const hint = document.querySelector('#sharing-hint');
+  if (!hint) {
+    return;
+  }
+  if (!hint.dataset.info) {
+    hint.dataset.info = hint.textContent;
+  }
+  const fields = Array.from(document.querySelectorAll('.share-percent'));
+  const price = Number(document.querySelector('#price').value) || 0;
+  const option = document.querySelector('#currency').selectedOptions[0];
+  const money = (amount) => tallyFormatMoney(amount, option ? option.dataset.code : '', option ? option.dataset.decimalsSetting : '', option ? option.dataset.symbol : '');
+  const used = fields.filter((field) => field.value !== '' && Number(field.value) > 0);
+  const total = used.reduce((sum, field) => sum + Number(field.value), 0);
+  fields.forEach((field) => {
+    const amount = field.parentElement.querySelector('.share-amount');
+    if (amount) {
+      amount.textContent = field.value !== '' && Number(field.value) > 0 ? money(price * Number(field.value) / 100) : '';
+    }
+  });
+  const invalid = used.length > 0 && Math.abs(total - 100) > 0.05;
+  fields.forEach((field, index) => field.setCustomValidity(invalid && index === 0 ? hint.dataset.mustTotal : ''));
+  hint.classList.toggle('is-danger', invalid);
+  if (invalid) {
+    hint.textContent = hint.dataset.mustTotal;
+    return;
+  }
+
+  const reimbursed = Math.min(100, Math.max(0, Number(document.querySelector('#reimbursed_percent').value) || 0));
+  const selfField = document.querySelector(`#share_${hint.dataset.selfMember}`);
+  const payer = document.querySelector('#payer_user');
+  let mine;
+  if (used.length > 0) {
+    mine = selfField && selfField.value !== '' ? Number(selfField.value) / 100 : 0;
+  } else {
+    mine = !payer || payer.value === hint.dataset.selfMember ? 1 : 0;
+  }
+  if (used.length === 0 && reimbursed === 0) {
+    hint.textContent = hint.dataset.info;
+    return;
+  }
+  hint.textContent = hint.dataset.yourShare.replace('%s', money(price * mine * (1 - reimbursed / 100)));
+}
+
+document.addEventListener("DOMContentLoaded", function () {
+  ['#price', '#currency', '#payer_user'].forEach((selector) => {
+    const field = document.querySelector(selector);
+    if (field) {
+      field.addEventListener('input', updateSharingHint);
+      field.addEventListener('change', updateSharingHint);
+    }
+  });
 });

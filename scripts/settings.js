@@ -1102,6 +1102,10 @@ function setMonthlyCostMode() {
   storeSettingsOnDB('monthly_cost_mode', document.querySelector("#monthlycostmode").value);
 }
 
+function setStatsCostView() {
+  storeSettingsOnDB('stats_cost_view', document.querySelector("#statscostview").value);
+}
+
 function setDateFormat() {
   storeSettingsOnDB('date_format', document.querySelector("#dateformat").value);
 }

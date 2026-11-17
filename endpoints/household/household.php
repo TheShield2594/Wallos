@@ -86,7 +86,8 @@ function handleDeleteMember($db, $userId, $i18n)
 {
     if (isset($_POST['memberId']) && $_POST['memberId'] != "" && $_POST['memberId'] != 1) {
         $memberId = $_POST['memberId'];
-        $checkMember = "SELECT COUNT(*) FROM subscriptions WHERE payer_user_id = :memberId AND user_id = :userId";
+        $checkMember = "SELECT (SELECT COUNT(*) FROM subscriptions WHERE payer_user_id = :memberId AND user_id = :userId)
+            + (SELECT COUNT(*) FROM subscription_shares WHERE household_id = :memberId AND user_id = :userId)";
         $checkStmt = $db->prepare($checkMember);
         $checkStmt->bindParam(':memberId', $memberId, SQLITE3_INTEGER);
         $checkStmt->bindParam(':userId', $userId, SQLITE3_INTEGER);

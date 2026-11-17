@@ -1832,6 +1832,16 @@ $upcomingPaymentsLimit = normalize_upcoming_payments_limit($settings['upcoming_p
             </div>
             <div>
                 <div class="form-group">
+                    <label for="statscostview"><?= translate('stats_cost_view', $i18n) ?></label>
+                    <select id="statscostview" name="statscostview" onChange="setStatsCostView()">
+                        <option value="gross" <?= empty($settings['stats_net_cost']) ? 'selected' : '' ?>><?= translate('cost_gross', $i18n) ?></option>
+                        <option value="net" <?= !empty($settings['stats_net_cost']) ? 'selected' : '' ?>><?= translate('cost_mine', $i18n) ?></option>
+                    </select>
+                    <p class="form-hint"><?= translate('stats_cost_view_info', $i18n) ?></p>
+                </div>
+            </div>
+            <div>
+                <div class="form-group">
                     <label for="monthlycostmode"><?= translate('monthly_cost_counts', $i18n) ?></label>
                     <?php $monthlyCostModeSetting = wallos_sanitize_monthly_cost_mode($settings['monthly_cost_mode'] ?? null); ?>
                     <select id="monthlycostmode" name="monthlycostmode" onChange="setMonthlyCostMode()">

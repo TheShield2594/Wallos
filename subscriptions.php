@@ -633,6 +633,43 @@ if ($db->querySingle("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND 
       </div>
     </div>
 
+    <details class="form-group form-disclosure" id="sharing-group">
+      <summary><?= translate('sharing_and_reimbursement', $i18n) ?></summary>
+      <div class="sharing-fields">
+        <?php if (count($members) > 1) { ?>
+          <fieldset class="sharing-members">
+            <legend><?= translate('split_with', $i18n) ?></legend>
+            <?php foreach ($members as $member) { ?>
+              <div class="sharing-member" data-member-id="<?= (int) $member['id'] ?>">
+                <label for="share_<?= (int) $member['id'] ?>"><?= htmlspecialchars($member['name']) ?></label>
+                <div class="inline">
+                  <input type="number" id="share_<?= (int) $member['id'] ?>" name="shares[<?= (int) $member['id'] ?>]" class="share-percent"
+                    min="0" max="100" step="0.01" inputmode="decimal" placeholder="%" aria-describedby="sharing-hint" oninput="updateSharingHint()">
+                  <span class="share-amount" aria-live="off"></span>
+                </div>
+              </div>
+            <?php } ?>
+            <button type="button" class="button secondary-button thin" onclick="splitSharesEqually()"><?= translate('split_equally', $i18n) ?></button>
+          </fieldset>
+        <?php } ?>
+        <div class="inline sharing-reimbursed">
+          <div class="split33">
+            <label for="reimbursed_percent"><?= translate('reimbursed_percent', $i18n) ?></label>
+            <input type="number" id="reimbursed_percent" name="reimbursed_percent" min="0" max="100" step="0.01" inputmode="decimal"
+              placeholder="0" oninput="updateSharingHint()">
+          </div>
+          <div class="split66">
+            <label for="reimbursed_reason"><?= translate('reimbursed_reason', $i18n) ?></label>
+            <input type="text" id="reimbursed_reason" name="reimbursed_reason" maxlength="80" autocomplete="off"
+              placeholder="<?= translate('reimbursed_reason_placeholder', $i18n) ?>">
+          </div>
+        </div>
+        <p class="form-hint" id="sharing-hint" data-your-share="<?= translate('your_share_amount', $i18n) ?>"
+          data-must-total="<?= translate('shares_must_total', $i18n) ?>"
+          data-self-member="<?= (int) array_key_first($members) ?>"><?= translate('sharing_info', $i18n) ?></p>
+      </div>
+    </details>
+
     <div class="form-group">
       <label for="category"><?= translate('category', $i18n) ?></label>
       <select id="category" name="category_id">

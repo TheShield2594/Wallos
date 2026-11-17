@@ -1206,6 +1206,7 @@ switch ($action) {
             "DELETE FROM subscriptions WHERE id = :subId AND user_id = :userId",
             "DELETE FROM subscription_payments WHERE subscription_id = :subId AND user_id = :userId",
             "DELETE FROM subscription_price_changes WHERE subscription_id = :subId AND user_id = :userId",
+            "DELETE FROM subscription_shares WHERE subscription_id = :subId AND user_id = :userId",
             "UPDATE subscriptions SET replacement_subscription_id = NULL WHERE replacement_subscription_id = :subId AND user_id = :userId",
         ];
         $deleted = api_save_atomically($db, function () use ($db, $deleteStatements, $subscriptionId, $userId) {

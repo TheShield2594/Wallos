@@ -63,6 +63,13 @@ if ($userIdToDelete == 1 || $userIdToDelete != $userId) {
         $result = $stmt->execute();
     }
 
+    // Delete how subscriptions were split between members (migration 000072).
+    $stmt = @$db->prepare('DELETE FROM subscription_shares WHERE user_id = :id');
+    if ($stmt !== false) {
+        $stmt->bindValue(':id', $userIdToDelete, SQLITE3_INTEGER);
+        $result = $stmt->execute();
+    }
+
     // Delete settings
     $stmt = $db->prepare('DELETE FROM settings WHERE user_id = :id');
     $stmt->bindValue(':id', $userIdToDelete, SQLITE3_INTEGER);

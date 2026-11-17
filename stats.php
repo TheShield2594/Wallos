@@ -23,6 +23,7 @@ $code = $row['code'];
 $mainCurrencySymbol = $row['symbol'] ?? '';
 $mainCurrencyDecimals = CurrencyFormatter::sanitizeDecimals($row['decimals'] ?? null);
 
+$statsCostModeEnabled = true;
 require_once 'includes/stats_calculations.php';
 require_once 'includes/stats_extra_calculations.php';
 require_once 'includes/upcoming_cancellations.php';
@@ -100,6 +101,27 @@ $actualYearOverYear = $actualLastYear > 0 ? ($actualThisYear - $actualLastYear) 
           ?>
           <a class="segmented-option<?= $statsScope === $scopeValue ? ' is-selected' : '' ?>" aria-current="<?= $statsScope === $scopeValue ? 'true' : 'false' ?>"
             href="stats.php?<?= htmlspecialchars(http_build_query($scopeQuery)) ?>"><?= htmlspecialchars($scopeLabel) ?></a>
+        <?php } ?>
+      </div>
+    <?php } ?>
+    <?php
+    // Gross / My cost (issue #34), offered once something is split or reimbursed.
+    $hasCostAdjustments = $costSharesById !== [] || $statsCostMode === 'net';
+    foreach ($subscriptions as $costRow) {
+      if ((float) ($costRow['reimbursed_percent'] ?? 0) > 0) {
+        $hasCostAdjustments = true;
+        break;
+      }
+    }
+    if ($hasCostAdjustments) {
+      $costQuery = $_GET;
+      ?>
+      <div class="segmented" role="group" aria-label="<?= translate('cost_view', $i18n) ?>">
+        <?php foreach (['gross' => translate('cost_gross', $i18n), 'net' => translate('cost_mine', $i18n)] as $costValue => $costLabel) {
+          $costQuery['cost'] = $costValue;
+          ?>
+          <a class="segmented-option<?= $statsCostMode === $costValue ? ' is-selected' : '' ?>" aria-current="<?= $statsCostMode === $costValue ? 'true' : 'false' ?>"
+            href="stats.php?<?= htmlspecialchars(http_build_query($costQuery)) ?>"><?= htmlspecialchars($costLabel) ?></a>
         <?php } ?>
       </div>
     <?php } ?>
@@ -389,6 +411,11 @@ $actualYearOverYear = $actualLastYear > 0 ? ($actualThisYear - $actualLastYear) 
 
   <section class="stats-section">
     <h2><?= translate('overview', $i18n) ?></h2>
+    <?php if ($statsCostMode === 'net') { ?>
+      <p class="stats-note"><?= translate('cost_mine_note', $i18n) ?></p>
+    <?php } elseif ($hasCostAdjustments) { ?>
+      <p class="stats-note"><?= translate('cost_gross_note', $i18n) ?></p>
+    <?php } ?>
     <div class="statistics">
       <div class="statistic">
         <span><?= $activeSubscriptions ?></span>
@@ -647,6 +674,37 @@ $actualYearOverYear = $actualLastYear > 0 ? ($actualThisYear - $actualLastYear) 
         <?php
       }
       ?>
+    </section>
+    <?php
+  }
+
+  // Who owes what: each member's monthly share of what someone else pays.
+  if (!empty($memberOwed)) {
+    ?>
+    <section class="stats-section">
+      <h2><?= translate('who_owes_what', $i18n) ?></h2>
+      <div class="card">
+        <div class="card-list">
+          <?php foreach ($memberOwed as $owingMemberId => $owedByPayer) {
+            foreach ($owedByPayer as $owedPayerId => $owedAmount) {
+              $owingName = $members[$owingMemberId]['name'] ?? '';
+              $owedPayerName = $members[$owedPayerId]['name'] ?? '';
+              ?>
+              <div class="list-row">
+                <?= render_tile($owingName, '', null, null) ?>
+                <span class="list-row-text">
+                  <span class="list-row-title"><?= htmlspecialchars($owingName) ?></span>
+                  <span class="list-row-subtitle"><?= htmlspecialchars(sprintf(translate('owes_payer', $i18n), $owedPayerName)) ?></span>
+                </span>
+                <span class="list-row-trailing">
+                  <span class="list-row-value"><?= htmlspecialchars(CurrencyFormatter::format($owedAmount, $code)) ?><?= translate('per_month_short', $i18n) ?></span>
+                </span>
+              </div>
+            <?php }
+          } ?>
+        </div>
+      </div>
+      <p class="stats-note"><?= translate('who_owes_what_info', $i18n) ?></p>
     </section>
     <?php
   }
