@@ -108,3 +108,133 @@ wallos_test('the credentials of a deleted account do not survive it', function (
             $path . ' removes the outstanding password reset tokens');
     }
 });
+
+/*
+  The deletes run in one transaction, so a failure part way leaves the account
+  as it was rather than a user row gone and, say, stored Apprise credentials
+  left behind while the endpoint reports success.
+*/
+
+require_once WALLOS_ROOT . '/includes/account_deletion.php';
+
+/**
+ * The full statements a deletion path hands to wallos_delete_account().
+ *
+ * @param string $path
+ * @return string[]
+ */
+function account_deletion_statements($path)
+{
+    $source = file_get_contents(WALLOS_ROOT . '/' . $path);
+    preg_match_all("/'(DELETE FROM \\w+ WHERE (?:user_)?id = :id)'/", $source, $matches);
+
+    return $matches[1];
+}
+
+/**
+ * Two users; user 2 owns a household with user 3 in it, a subscription shared
+ * there, and Apprise credentials.
+ *
+ * @return SQLite3
+ */
+function account_deletion_fixture()
+{
+    $db = wallos_test_open_database();
+    foreach ([2 => 'erin', 3 => 'frank'] as $id => $name) {
+        wallos_test_create_user($db, $id, $name);
+    }
+    assert_true(wallos_household_create($db, 2, 'Flat')['success'], 'erin creates a household');
+    assert_true(wallos_household_invite($db, 2, 'frank', 'viewer')['success'], 'erin invites frank');
+    $householdId = wallos_household_membership($db, 2)['id'];
+    assert_true(wallos_household_respond($db, 3, $householdId, true)['success'], 'frank accepts');
+
+    $db->exec("INSERT INTO subscriptions (user_id, name, price, currency_id, next_payment, cycle, frequency, inactive, category_id, payer_user_id, payment_method_id, shared_household_id)
+        VALUES (2, 'Netflix', 10, " . wallos_test_currency_id(2, 0) . ", '2099-01-01', 3, 1, 0, 1, 2, 1, $householdId)");
+    $db->exec("INSERT INTO apprise_notifications (user_id, enabled, url, config_key) VALUES (2, 1, 'https://apprise.example', 'secret-key')");
+    $db->exec("INSERT INTO login_tokens (user_id, token) VALUES (2, 'tok')");
+
+    return $db;
+}
+
+function account_deletion_count($db, $sql)
+{
+    return (int) $db->querySingle($sql);
+}
+
+foreach ([
+    'endpoints/settings/deleteaccount.php',
+    'endpoints/admin/deleteuser.php',
+] as $accountDeletionPath) {
+    wallos_test('a failing delete leaves the account intact (' . $accountDeletionPath . ')', function () use ($accountDeletionPath) {
+        $statements = account_deletion_statements($accountDeletionPath);
+        assert_true(count($statements) >= 25, 'the endpoint statements were read (' . count($statements) . ')');
+
+        $db = account_deletion_fixture();
+        // Stand-in for a busy timeout or any other error late in the list,
+        // after the user row and the household have already been deleted.
+        $db->exec("CREATE TRIGGER fail_apprise_delete BEFORE DELETE ON apprise_notifications
+                   BEGIN SELECT RAISE(ABORT, 'database is locked'); END");
+
+        assert_same(false, wallos_delete_account($db, 2, $statements), 'the deletion reports failure');
+
+        assert_same(1, account_deletion_count($db, 'SELECT COUNT(*) FROM user WHERE id = 2'), 'the user row is still there');
+        assert_same(1, account_deletion_count($db, 'SELECT COUNT(*) FROM apprise_notifications WHERE user_id = 2'), 'the Apprise credentials are still there (and still owned)');
+        assert_same(1, account_deletion_count($db, 'SELECT COUNT(*) FROM subscriptions WHERE user_id = 2'), 'the subscription is still there');
+        assert_same(1, account_deletion_count($db, 'SELECT COUNT(*) FROM login_tokens WHERE user_id = 2'), 'the login token is still there');
+        assert_same(2, account_deletion_count($db, 'SELECT COUNT(*) FROM currencies WHERE user_id = 2'), 'the currencies are still there');
+        assert_same(1, account_deletion_count($db, 'SELECT COUNT(*) FROM households WHERE owner_user_id = 2'), 'the household is still there');
+        assert_same(1, account_deletion_count($db, 'SELECT COUNT(*) FROM household_members WHERE user_id = 3'), 'its member is still in it');
+        assert_same(1, account_deletion_count($db, 'SELECT COUNT(*) FROM subscriptions WHERE shared_household_id IS NOT NULL'), 'the subscription is still shared');
+
+        // Nothing is left open: the retry, once the cause is gone, succeeds.
+        $db->exec('DROP TRIGGER fail_apprise_delete');
+        assert_true(wallos_delete_account($db, 2, $statements), 'the retry deletes the account');
+        assert_same(0, account_deletion_count($db, 'SELECT COUNT(*) FROM user WHERE id = 2'), 'the user row is gone');
+        assert_same(0, account_deletion_count($db, 'SELECT COUNT(*) FROM apprise_notifications WHERE user_id = 2'), 'the Apprise credentials are gone');
+        assert_same(0, account_deletion_count($db, 'SELECT COUNT(*) FROM households'), 'the household is gone');
+        assert_same(1, account_deletion_count($db, 'SELECT COUNT(*) FROM user WHERE id = 3'), 'the other account is untouched');
+
+        $db->close();
+    });
+}
+
+wallos_test('every user_id table is empty for a deleted account', function () {
+    $db = account_deletion_fixture();
+    $statements = account_deletion_statements('endpoints/settings/deleteaccount.php');
+
+    assert_true(wallos_delete_account($db, 2, $statements), 'the deletion succeeds');
+    foreach (account_deletion_user_tables($db) as $table) {
+        assert_same(0, account_deletion_count($db, "SELECT COUNT(*) FROM \"$table\" WHERE user_id = 2"), "$table holds nothing of the deleted account");
+    }
+
+    $db->close();
+});
+
+wallos_test('a table a migration has not created yet does not block deletion', function () {
+    $db = account_deletion_fixture();
+    $db->exec('DROP TABLE subscription_shares');
+
+    assert_true(wallos_delete_account($db, 2, account_deletion_statements('endpoints/admin/deleteuser.php')),
+        'the deletion succeeds without the table');
+    assert_same(0, account_deletion_count($db, 'SELECT COUNT(*) FROM user WHERE id = 2'), 'the user row is gone');
+
+    $db->close();
+});
+
+wallos_test('deletion gives up without changing anything while another writer holds the database', function () {
+    $db = account_deletion_fixture();
+    $path = $db->querySingle('PRAGMA database_list', true)['file'];
+    $db->busyTimeout(50);
+
+    $other = new SQLite3($path);
+    $other->exec('BEGIN IMMEDIATE');
+
+    assert_same(false, wallos_delete_account($db, 2, account_deletion_statements('endpoints/settings/deleteaccount.php')),
+        'the deletion reports failure');
+
+    $other->exec('ROLLBACK');
+    $other->close();
+    assert_same(1, account_deletion_count($db, 'SELECT COUNT(*) FROM user WHERE id = 2'), 'the user row is still there');
+
+    $db->close();
+});
