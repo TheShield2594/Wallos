@@ -9,6 +9,7 @@ require_once '../../includes/logo_theme_variant.php';
 require_once '../../includes/logo_cleanup.php';
 require_once '../../includes/payment_ledger.php';
 require_once '../../includes/cancellation_deadline.php';
+require_once '../../includes/notifications/schedule.php';
 require_once '../../includes/intro_pricing.php';
 require_once '../../includes/households.php';
 require_once '../../includes/price_changes.php';
@@ -257,7 +258,10 @@ $logoUrl = validate($_POST['logo-url']);
 $logo = "";
 $logoError = "";
 $notify = isset($_POST['notifications']) ? true : false;
-$notifyDaysBefore = $_POST['notify_days_before'];
+// Reminders (issues #39, #40): several offsets, a cancellation lead time and
+// the mute switch. Stored after the row, in the same transaction.
+$reminderFields = wallos_reminder_fields_from_input($_POST);
+$notifyDaysBefore = $reminderFields['notify_days_before'];
 $inactive = isset($_POST['inactive']) ? true : false;
 $replacementSubscriptionId = $_POST['replacement_subscription_id'];
 // Optional plan/tier label, and why the price changed (see includes/price_changes.php).
@@ -276,6 +280,9 @@ if ($isEdit) {
         echo json_encode(['status' => 'Error', 'message' => translate('error', $i18n)]);
         exit();
     }
+    // Fields the form left out (reminders switched off) keep their stored values.
+    $reminderFields = wallos_reminder_fields_from_input($_POST, $editable);
+    $notifyDaysBefore = $reminderFields['notify_days_before'];
     if ($editable['access'] !== 'owner') {
         $sharedEdit = true;
         $viewerCurrencies = wallos_household_viewer_currencies($db, $userId);
@@ -696,7 +703,9 @@ if ($saved) {
     if ($saved) {
         $savedId = $isEdit ? $id : $db->lastInsertRowID();
         $saved = wallos_store_cancel_fields($db, $savedId, $userId, $cancelNotice['fields'])
-            && wallos_store_intro_fields($db, $savedId, $userId, $intro['fields']);
+            && wallos_store_intro_fields($db, $savedId, $userId, $intro['fields'])
+            // A shared edit keeps the owner's reminders.
+            && ($sharedEdit || wallos_store_reminder_fields($db, $savedId, $userId, $reminderFields));
         // An edit that changed the price, currency, cycle or frequency keeps
         // the old value in the price history.
         if ($saved && $priceBefore !== null) {

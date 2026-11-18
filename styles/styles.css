@@ -4835,3 +4835,183 @@ a.segmented-option {
 #categoryTemplates select[name="parent"] {
   max-width: 11rem;
 }
+
+/* Reminder chips: default reminders in Settings -> Notifications and the
+   "Notify me" choices on the subscription form (issue #39). */
+.chip-fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.chip-fieldset legend {
+  padding: 0;
+  margin-bottom: 8px;
+}
+
+.chip-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip-group input[type="checkbox"]+label.chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  margin: 0;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text2);
+  font-size: 14px;
+  user-select: none;
+  white-space: nowrap;
+  transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.chip-group input[type="checkbox"]+label.chip::before,
+.chip-group input[type="checkbox"]+label.chip::after {
+  content: none;
+}
+
+.chip-group input[type="checkbox"]:checked+label.chip {
+  background-color: var(--tint);
+  border-color: var(--tint);
+  color: #FFFFFF;
+}
+
+.chip-group input[type="checkbox"]:focus-visible+label.chip {
+  outline: 2px solid var(--tint);
+  outline-offset: 2px;
+}
+
+.chip-group input[type="checkbox"]:disabled+label.chip {
+  opacity: 0.5;
+}
+
+.notification-schedule {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.notification-schedule .form-hint {
+  margin: 0;
+}
+
+.notification-schedule-row {
+  gap: 12px;
+}
+
+.notification-schedule-row label {
+  display: block;
+  margin-bottom: 6px;
+}
+
+/* Message templates (issue #37) */
+.template-body {
+  min-height: 160px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+}
+
+.template-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0 12px;
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  min-width: 0;
+}
+
+.template-preview-label {
+  font-size: 12px;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.template-preview pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: inherit;
+  font-size: 14px;
+}
+
+.template-preview pre.is-danger {
+  color: var(--danger);
+}
+
+/* Lists of variables and filters: inline text that wraps between codes. */
+.settings-notes>p.template-reference {
+  display: block;
+  padding-left: 22px;
+}
+
+.settings-notes code {
+  font-size: 12px;
+  overflow-wrap: break-word;
+}
+
+/* Subscription form: the two reminder groups (issue #40) */
+.reminder-group {
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  padding: 12px;
+  margin: 0 0 12px;
+  min-width: 0;
+}
+
+.reminder-group>legend {
+  padding: 0 6px;
+  font-weight: 600;
+}
+
+/* Due soon (issue #40): the progress bar takes the row's warning or
+   overdue colour. */
+.list-row-progress.is-warning {
+  background-color: rgba(var(--warning-rgb), 0.25);
+}
+
+.list-row-progress.is-warning>span {
+  background-color: var(--warning);
+}
+
+.list-row-progress.is-danger {
+  background-color: rgba(var(--danger-rgb), 0.25);
+}
+
+.list-row-progress.is-danger>span {
+  background-color: var(--danger);
+}
+
+.custom-reminder-row {
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.custom-reminder-row input[type="number"] {
+  max-width: 180px;
+}
+
+/* A collapsed notification panel keeps its controls out of the tab order. */
+.account-notification-section-settings {
+  visibility: hidden;
+  transition: height 0.3s cubic-bezier(0.32, 0.72, 0, 1), max-height 0.3s ease-in-out, visibility 0s linear 0.3s;
+}
+
+.account-notification-section-settings.is-open {
+  visibility: visible;
+  transition: height 0.3s cubic-bezier(0.32, 0.72, 0, 1), max-height 0.3s ease-in-out, visibility 0s;
+}
+
+.account-notification-section-header:focus-visible {
+  outline: 2px solid var(--tint);
+  outline-offset: 2px;
+}

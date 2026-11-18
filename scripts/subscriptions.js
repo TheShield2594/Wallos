@@ -16,6 +16,134 @@ function toggleNotificationDays() {
   const notifyCheckbox = document.querySelector("#notifications");
   const notifyDaysBefore = document.querySelector("#notify_days_before");
   notifyDaysBefore.disabled = !notifyCheckbox.checked;
+  toggleReminderChips();
+}
+
+/*
+  Payment reminders (issue #39): "use my default reminders", or a chip per
+  reminder (7, 3 and 0 days before, ...). The hidden notify_days_before
+  carries -1 for the default, or the largest chosen offset for clients and
+  the API that only know one value.
+*/
+function toggleReminderChips() {
+  const notify = document.querySelector("#notifications");
+  const useDefault = document.querySelector("#reminder_use_default");
+  if (!notify || !useDefault) {
+    return;
+  }
+  const locked = notify.disabled || !notify.checked || useDefault.dataset.locked === '1';
+  useDefault.disabled = locked;
+  document.querySelectorAll('#subscription-reminder-days input').forEach((chip) => {
+    chip.disabled = locked || useDefault.checked;
+  });
+  document.querySelector('#subscription-reminder-chips').classList.toggle('hide', useDefault.checked);
+  const custom = document.querySelector('#custom_reminder_days');
+  if (custom) {
+    custom.disabled = locked || useDefault.checked;
+  }
+}
+
+function ensureReminderChip(days) {
+  const group = document.querySelector('#subscription-reminder-days');
+  if (!group || group.querySelector(`input[value="${days}"]`)) {
+    return;
+  }
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.className = 'chip-input';
+  input.id = `subscription_reminder_${days}`;
+  input.name = 'reminder_days[]';
+  input.value = days;
+  const label = document.createElement('label');
+  label.className = 'chip';
+  label.htmlFor = input.id;
+  label.textContent = `${days} ${days === 1 ? group.dataset.dayBefore : group.dataset.daysBefore}`;
+  // Keep the chips in ascending order.
+  const after = Array.from(group.querySelectorAll('input')).find((existing) => Number(existing.value) > days);
+  if (after) {
+    group.insertBefore(input, after);
+    group.insertBefore(label, after);
+  } else {
+    group.appendChild(input);
+    group.appendChild(label);
+  }
+}
+
+// Any offset the server keeps (0-365), not only the preset chips.
+function addCustomReminderChip() {
+  const field = document.querySelector('#custom_reminder_days');
+  const days = parseInt(field.value, 10);
+  if (isNaN(days) || days < 0 || days > 365) {
+    field.focus();
+    return;
+  }
+  ensureReminderChip(days);
+  const chip = document.querySelector(`#subscription-reminder-days input[value="${days}"]`);
+  chip.checked = true;
+  toggleReminderChips();
+  field.value = '';
+}
+
+function setReminderFields(subscription) {
+  let days = [];
+  if (subscription && subscription.reminder_days) {
+    days = String(subscription.reminder_days).split(',').map((value) => parseInt(value, 10)).filter((value) => !isNaN(value));
+  } else if (subscription && subscription.notify_days_before !== null && subscription.notify_days_before !== undefined
+    && Number(subscription.notify_days_before) >= 0) {
+    days = [Number(subscription.notify_days_before)];
+  }
+  days.forEach(ensureReminderChip);
+  document.querySelectorAll('#subscription-reminder-days input').forEach((chip) => {
+    chip.checked = days.includes(Number(chip.value));
+  });
+  document.querySelector("#reminder_use_default").checked = days.length === 0;
+  document.querySelector("#notify_days_before").value = days.length ? Math.max(...days) : -1;
+  document.querySelector("#mute_payment_until_cancellation").checked = !!subscription && Number(subscription.mute_payment_until_cancellation) === 1;
+  const lead = document.querySelector("#cancellation_notify_days_before");
+  const leadDays = subscription ? Number(subscription.cancellation_notify_days_before || 0) : 0;
+  if (![...lead.options].some((option) => Number(option.value) === leadDays)) {
+    // A lead time set through the API: keep it selectable, so saving the
+    // form does not drop it.
+    const option = document.createElement('option');
+    option.value = String(leadDays);
+    option.textContent = `${leadDays} ${document.querySelector('#subscription-reminder-days').dataset.daysBefore}`;
+    lead.appendChild(option);
+  }
+  lead.value = String(leadDays);
+  toggleReminderChips();
+}
+
+/*
+  Checks the chosen reminders before saving; the problem to show, or null.
+  Custom reminders need at least one chip and at most as many as the server
+  keeps (it would drop the smallest ones silently).
+*/
+function reminderFieldsError() {
+  const notify = document.querySelector("#notifications");
+  const useDefault = document.querySelector("#reminder_use_default");
+  if (!notify || notify.disabled || !notify.checked || useDefault.checked || useDefault.disabled) {
+    return null;
+  }
+  const group = document.querySelector('#subscription-reminder-days');
+  const chosen = group.querySelectorAll('input:checked').length;
+  if (chosen === 0) {
+    return group.dataset.none;
+  }
+  if (chosen > Number(group.dataset.max)) {
+    return group.dataset.tooMany;
+  }
+  return null;
+}
+
+function syncReminderFields() {
+  const useDefault = document.querySelector("#reminder_use_default");
+  const chosen = Array.from(document.querySelectorAll('#subscription-reminder-days input:checked')).map((chip) => Number(chip.value));
+  if (useDefault.checked || chosen.length === 0) {
+    document.querySelectorAll('#subscription-reminder-days input').forEach((chip) => { chip.checked = false; });
+    document.querySelector("#notify_days_before").value = -1;
+  } else {
+    document.querySelector("#notify_days_before").value = Math.max(...chosen);
+  }
 }
 
 function resetForm() {
@@ -45,6 +173,7 @@ function resetForm() {
   const form = document.querySelector("#subs-form");
   form.reset();
   delete form.dataset.anchorDay;
+  setReminderFields(null);
   toggleOneTimeCycleUI(false);
   toggleEndsFields();
   toggleVariableAmount();
@@ -160,10 +289,8 @@ function fillEditFormFields(subscription) {
     visibility.value = subscription.shared ? 'household' : 'private';
   }
   const notifyDaysBefore = document.querySelector("#notify_days_before");
-  notifyDaysBefore.value = subscription.notify_days_before ?? 0;
-  if (subscription.notify === 1) {
-    notifyDaysBefore.disabled = false;
-  }
+  notifyDaysBefore.disabled = subscription.notify !== 1;
+  setReminderFields(subscription);
 
   const replacementSubscriptionIdSelect = document.querySelector("#replacement_subscription_id");
   replacementSubscriptionIdSelect.value = subscription.replacement_subscription_id ?? 0;
@@ -635,9 +762,15 @@ document.addEventListener('DOMContentLoaded', function () {
       if (cancelNoticeMode) cancelNoticeMode.value = "none";
       const introType = document.querySelector("#intro_type");
       if (introType) introType.value = "none";
-      const notifyDays = document.querySelector("#notify_days_before");
-      if (notifyDays) notifyDays.value = -1;
+      setReminderFields(null);
     }
+    const reminderError = reminderFieldsError();
+    if (reminderError) {
+      showErrorMessage(reminderError);
+      submitButton.disabled = false;
+      return;
+    }
+    syncReminderFields();
 
     const formData = new FormData(subscriptionForm);
 
@@ -964,6 +1097,8 @@ function toggleOneTimeCycleUI(isOneTime) {
   if (!isOneTime && document.querySelector("#ends_mode")) toggleEndsFields();
   if (renewFromActionGroup && isOneTime) renewFromActionGroup.classList.add('hide');
 
+  const mutePaymentGroup = document.querySelector("#mute-payment-group");
+  if (mutePaymentGroup) mutePaymentGroup.classList.toggle('hide', isOneTime);
   if (isOneTime) {
     if (frequencySelect) frequencySelect.style.display = 'none';
     if (autoRenewGroup) autoRenewGroup.style.display = 'none';
@@ -974,6 +1109,7 @@ function toggleOneTimeCycleUI(isOneTime) {
     if (notificationsGroup) notificationsGroup.style.display = 'none';
     if (notifyDaysCancellationGroup) notifyDaysCancellationGroup.style.display = 'none';
     if (notificationsCheckbox) { notificationsCheckbox.checked = false; notificationsCheckbox.disabled = true; }
+    toggleReminderChips();
   } else {
     if (frequencySelect) frequencySelect.style.display = '';
     if (autoRenewGroup) autoRenewGroup.style.display = '';
@@ -984,6 +1120,7 @@ function toggleOneTimeCycleUI(isOneTime) {
     if (notificationsGroup) notificationsGroup.style.display = '';
     if (notifyDaysCancellationGroup) notifyDaysCancellationGroup.style.display = '';
     if (notificationsCheckbox) notificationsCheckbox.disabled = false;
+    toggleReminderChips();
     toggleRenewFromAction();
   }
 }
@@ -1289,6 +1426,8 @@ function toggleCancelNoticeFields(fromUser) {
   document.querySelector("#cancellation-date-field").classList.toggle('hide', mode !== 'fixed');
   document.querySelector("#cancel-notice-field").classList.toggle('hide', mode !== 'before_renewal');
   document.querySelector("#min-term-field").classList.toggle('hide', mode !== 'before_renewal');
+  // A reminder ahead of the cancel-by date (issue #40), whenever there is one.
+  document.querySelector("#cancel-lead-field").classList.toggle('hide', mode === 'none');
   document.querySelector("#cancellation_date").required = mode === 'fixed';
   const value = document.querySelector("#cancel_notice_value");
   value.required = mode === 'before_renewal';
@@ -1436,12 +1575,14 @@ function setSharedEditMode(subscription) {
   document.querySelectorAll('.share-percent').forEach((field) => { field.disabled = shared; });
   ['#currency', '#category', '#payer_user', '#payment_method', '#visibility', '#notifications', '#notify_days_before',
     '#cancel_notice_mode', '#cancellation_date', '#cancel_notice_value', '#cancel_notice_unit', '#min_term_end',
-    '#replacement_subscription_id'].forEach((selector) => {
+    '#replacement_subscription_id', '#mute_payment_until_cancellation', '#cancellation_notify_days_before'].forEach((selector) => {
     const field = document.querySelector(selector);
     if (field) {
       field.disabled = shared || (selector === '#notify_days_before' && !document.querySelector('#notifications').checked);
     }
   });
+  document.querySelector("#reminder_use_default").dataset.locked = shared ? '1' : '';
+  toggleReminderChips();
   // Without the owner's currency the prices were converted for display:
   // they are shown but kept as stored (readOnly, so they are still sent).
   const lockPrices = shared && subscription.price_editable === false;

@@ -686,33 +686,56 @@ if ($db->querySingle("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND 
       </select>
     </div>
 
-    <div class="form-group-inline grow" id="notifications-group">
-      <input type="checkbox" id="notifications" name="notifications" onchange="toggleNotificationDays()">
-      <label for="notifications" class="grow"><?= translate('enable_notifications', $i18n) ?></label>
-    </div>
+    <fieldset class="reminder-group" id="payment-reminder-group">
+      <legend><?= translate('payment_reminder', $i18n) ?></legend>
+      <div class="form-group-inline grow" id="notifications-group">
+        <input type="checkbox" id="notifications" name="notifications" onchange="toggleNotificationDays()">
+        <label for="notifications" class="grow"><?= translate('remind_me_before_payments', $i18n) ?></label>
+      </div>
 
-    <div class="form-group" id="notify-days-cancellation-group">
-      <label for="notify_days_before"><?= translate('notify_me', $i18n) ?></label>
-      <select id="notify_days_before" name="notify_days_before" disabled>
-        <option value="-1"><?= translate('default_value_from_settings', $i18n) ?></option>
-        <option value="0"><?= translate('on_due_date', $i18n) ?></option>
-        <option value="1">1 <?= translate('day_before', $i18n) ?></option>
-        <?php
-        for ($i = 2; $i <= 180; $i++) {
-          ?>
-          <option value="<?= $i ?>"><?= $i ?>   <?= translate('days_before', $i18n) ?></option>
-          <?php
-        }
-        ?>
-      </select>
-    </div>
+      <div class="form-group" id="notify-days-cancellation-group">
+        <input type="hidden" id="notify_days_before" name="notify_days_before" value="-1">
+        <div class="form-group-inline grow">
+          <input type="checkbox" id="reminder_use_default" checked disabled onchange="toggleReminderChips()">
+          <label for="reminder_use_default" class="grow"><?= translate('use_default_reminders', $i18n) ?></label>
+        </div>
+        <fieldset class="chip-fieldset" id="subscription-reminder-chips">
+          <legend class="visually-hidden"><?= translate('notify_me', $i18n) ?></legend>
+          <div class="chip-group" id="subscription-reminder-days"
+            data-day-before="<?= htmlspecialchars(translate('day_before', $i18n), ENT_QUOTES) ?>"
+            data-days-before="<?= htmlspecialchars(translate('days_before', $i18n), ENT_QUOTES) ?>"
+            data-none="<?= htmlspecialchars(translate('pick_at_least_one_reminder', $i18n), ENT_QUOTES) ?>"
+            data-max="10"
+            data-too-many="<?= htmlspecialchars(sprintf(translate('too_many_reminders', $i18n), 10), ENT_QUOTES) ?>">
+            <?php foreach ([0, 1, 2, 3, 5, 7, 14, 30, 60, 90] as $reminderChoice) { ?>
+              <input type="checkbox" class="chip-input" id="subscription_reminder_<?= $reminderChoice ?>" name="reminder_days[]"
+                value="<?= $reminderChoice ?>" disabled>
+              <label class="chip" for="subscription_reminder_<?= $reminderChoice ?>">
+                <?= $reminderChoice === 0 ? translate('on_due_date', $i18n) : $reminderChoice . ' ' . translate($reminderChoice === 1 ? 'day_before' : 'days_before', $i18n) ?>
+              </label>
+            <?php } ?>
+          </div>
+          <div class="inline custom-reminder-row">
+            <input type="number" id="custom_reminder_days" min="0" max="365" step="1" autocomplete="off"
+              aria-label="<?= translate('custom_reminder_days', $i18n) ?>" placeholder="<?= translate('custom_reminder_days', $i18n) ?>">
+            <button type="button" class="button secondary-button thin" onclick="addCustomReminderChip()"><?= translate('add', $i18n) ?></button>
+          </div>
+        </fieldset>
+      </div>
 
-    <div class="form-group" id="cancel-notice-group"
+      <div class="form-group-inline grow" id="mute-payment-group">
+        <input type="checkbox" id="mute_payment_until_cancellation" name="mute_payment_until_cancellation" value="1">
+        <label for="mute_payment_until_cancellation" class="grow"><?= translate('mute_payment_until_cancellation', $i18n) ?></label>
+      </div>
+    </fieldset>
+
+    <fieldset class="reminder-group" id="cancel-notice-group"
       data-default-value="<?= isset($settings['default_cancel_notice_value']) && $settings['default_cancel_notice_value'] !== null ? (int) $settings['default_cancel_notice_value'] : '' ?>"
       data-default-unit="<?= htmlspecialchars($settings['default_cancel_notice_unit'] ?? 'months') ?>">
+      <legend><?= translate('cancellation_reminder', $i18n) ?></legend>
       <div class="inline">
         <div class="split50">
-          <label for="cancel_notice_mode"><?= translate('cancellation_notification', $i18n) ?></label>
+          <label for="cancel_notice_mode"><?= translate('cancel_by_deadline', $i18n) ?></label>
           <select id="cancel_notice_mode" name="cancel_notice_mode" onchange="toggleCancelNoticeFields(true)">
             <option value="none"><?= translate('cancel_notice_none', $i18n) ?></option>
             <option value="fixed"><?= translate('cancel_notice_fixed', $i18n) ?></option>
@@ -720,7 +743,7 @@ if ($db->querySingle("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND 
           </select>
         </div>
         <div class="split50 hide" id="cancellation-date-field">
-          <label for="cancellation_date"><?= translate('remind_me_on', $i18n) ?></label>
+          <label for="cancellation_date"><?= translate('cancel_by_date', $i18n) ?></label>
           <div class="date-wrapper">
             <input type="date" id="cancellation_date" name="cancellation_date" autocomplete="off">
           </div>
@@ -745,10 +768,19 @@ if ($db->querySingle("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND 
           <input type="date" id="min_term_end" name="min_term_end" autocomplete="off" onchange="updateCancelNoticeHint()">
         </div>
       </div>
+      <div class="hide" id="cancel-lead-field">
+        <label for="cancellation_notify_days_before"><?= translate('remind_me_before_deadline', $i18n) ?></label>
+        <select id="cancellation_notify_days_before" name="cancellation_notify_days_before">
+          <option value="0"><?= translate('on_the_deadline_only', $i18n) ?></option>
+          <?php foreach ([1, 3, 7, 14, 30, 60] as $leadChoice) { ?>
+            <option value="<?= $leadChoice ?>"><?= $leadChoice ?> <?= translate($leadChoice === 1 ? 'day_before' : 'days_before', $i18n) ?></option>
+          <?php } ?>
+        </select>
+      </div>
       <p class="form-hint" id="cancel-notice-hint" aria-live="polite"
         data-cancel-by="<?= htmlspecialchars(translate('cancel_by_to_avoid_renewal', $i18n), ENT_QUOTES) ?>"
         data-locked="<?= htmlspecialchars(translate('locked_in_until_cancel_by', $i18n), ENT_QUOTES) ?>"></p>
-    </div>
+    </fieldset>
 
     <?php if ($householdMembership !== null) { ?>
       <div class="form-group" id="visibility-group">

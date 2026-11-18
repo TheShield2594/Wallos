@@ -8,6 +8,7 @@ require_once __DIR__ . '/cancellation_deadline.php';
 require_once __DIR__ . '/households.php';
 require_once __DIR__ . '/monthly_cost.php';
 require_once __DIR__ . '/cost_sharing.php';
+require_once __DIR__ . '/notifications/schedule.php';
 
 function getBillingCycle($cycle, $frequency, $i18n)
 {
@@ -152,6 +153,29 @@ function addListRowFields(&$printRow, $subscription, $mainCurrencyId, $db)
     $printRow['locked_until'] = wallos_cancel_locked_until($subscription);
     $printRow['intro_type'] = wallos_intro_active($subscription) ? $subscription['intro_type'] : null;
     $printRow['intro_end_date'] = $printRow['intro_type'] !== null ? $subscription['intro_end_date'] : null;
+
+    // Due soon (issue #40): the next payment is inside the reminder window -
+    // the largest of the subscription's reminder offsets.
+    // Counted on the account's own calendar, as its reminders are.
+    static $reminderSettings = [];
+    $ownerId = (int) ($subscription['user_id'] ?? 0);
+    if (!isset($reminderSettings[$mapKey])) {
+        $settingsStmt = $db->prepare('SELECT * FROM notification_settings WHERE user_id = :userId');
+        $settingsStmt->bindValue(':userId', $ownerId, SQLITE3_INTEGER);
+        $settingsResult = $settingsStmt->execute();
+        $settingsRow = $settingsResult ? ($settingsResult->fetchArray(SQLITE3_ASSOC) ?: null) : null;
+        $reminderSettings[$mapKey] = [
+            'days' => wallos_default_reminder_days($settingsRow),
+            'today' => (new DateTime('now', wallos_notification_timezone($settingsRow ?? [])))->format('Y-m-d'),
+        ];
+    }
+    $printRow['due_in_days'] = null;
+    if (!(int) $subscription['inactive'] && (int) $subscription['cycle'] !== WALLOS_CYCLE_ONE_TIME && wallos_parse_date($subscription['next_payment']) !== null) {
+        $daysUntil = wallos_days_between($reminderSettings[$mapKey]['today'], $subscription['next_payment']);
+        if (wallos_is_due_soon($daysUntil, wallos_subscription_reminder_days($subscription, $reminderSettings[$mapKey]['days']))) {
+            $printRow['due_in_days'] = $daysUntil;
+        }
+    }
     if ($printRow['plan_total']) {
         $printRow['progress'] = (int) floor(min($printRow['plan_made'], $printRow['plan_total']) / $printRow['plan_total'] * 100);
     } else {
@@ -204,10 +228,18 @@ function listRowSubtitle($subscription, $i18n, $lang)
     if ($isOverdue) {
         return [translate('overdue', $i18n) . ' · ' . sprintf(translate('was_due', $i18n), formatDate($subscription['next_payment_raw'], $lang)), 'danger'];
     }
+    $dueSoonPrefix = '';
+    if (isset($subscription['due_in_days']) && $subscription['due_in_days'] !== null && empty($subscription['paid_badge'])) {
+        $days = (int) $subscription['due_in_days'];
+        $dueSoonPrefix = $days === 0 ? translate('due_today', $i18n)
+            : ($days === 1 ? translate('due_tomorrow', $i18n) : sprintf(translate('due_in_days', $i18n), $days));
+    }
     if (!empty($subscription['intro_type'])) {
-        // "Free trial · ends Nov 4" while the intro period runs.
+        // "Free trial · ends Nov 4" while the intro period runs, and due soon
+        // when its first payment is inside the reminder window.
         $label = translate($subscription['intro_type'] === 'trial' ? 'free_trial' : 'intro_price', $i18n);
-        return [$label . ' · ' . sprintf(translate('ends_on', $i18n), formatDate($subscription['intro_end_date'], $lang)), 'accent'];
+        $text = $label . ' · ' . sprintf(translate('ends_on', $i18n), formatDate($subscription['intro_end_date'], $lang));
+        return $dueSoonPrefix !== '' ? [$dueSoonPrefix . ' · ' . $text, 'warning'] : [$text, 'accent'];
     }
     $planText = listRowPlanText($subscription, $i18n, $lang);
     $schedule = $planText !== '' ? formatDate($subscription['next_payment_raw'], $lang) . ' · ' . $planText
@@ -219,11 +251,14 @@ function listRowSubtitle($subscription, $i18n, $lang)
         $schedule .= ' · ' . sprintf(translate('cancel_by', $i18n), formatDate($subscription['cancel_by'], $lang));
         $daysLeft = (int) (new DateTime('today'))->diff(new DateTime($subscription['cancel_by']))->format('%r%a');
         if ($daysLeft <= 14 && empty($subscription['paid_badge'])) {
-            return [$schedule, 'warning'];
+            return [($dueSoonPrefix !== '' ? $dueSoonPrefix . ' · ' : '') . $schedule, 'warning'];
         }
     }
     if (!empty($subscription['paid_badge'])) {
         return [sprintf(translate('paid_badge', $i18n), formatDate($subscription['paid_badge'], $lang)) . ' · ' . $schedule, 'success'];
+    }
+    if ($dueSoonPrefix !== '') {
+        return [$dueSoonPrefix . ' · ' . $schedule, 'warning'];
     }
     return [$schedule, ''];
 }
@@ -309,6 +344,8 @@ function printSubscriptions($subscriptions, $sort, $categories, $members, $i18n,
                 <?php
                 foreach ($group['rows'] as $subscription) {
                     [$subtitle, $tone] = listRowSubtitle($subscription, $i18n, $lang);
+                    // The progress bar takes the row's state: due soon, or overdue.
+                    $progressTone = in_array($tone, ['warning', 'danger'], true) && ($tone === 'danger' || (isset($subscription['due_in_days']) && $subscription['due_in_days'] !== null)) ? $tone : '';
                     $trailingSub = '';
                     $trailingStrike = false;
                     if (!empty($subscription['intro_type']) && isset($subscription['regular_price']) && $subscription['regular_price'] != $subscription['price']) {
@@ -333,6 +370,7 @@ function printSubscriptions($subscriptions, $sort, $categories, $members, $i18n,
                         'trailing_sub_strike' => $trailingStrike,
                         'dim' => (bool) $subscription['inactive'],
                         'progress' => ($showProgress && !$subscription['inactive'] && !$subscription['one_time']) ? min(100, $subscription['progress']) : null,
+                        'progress_tone' => $progressTone,
                     ]);
                 }
                 ?>

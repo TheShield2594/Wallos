@@ -17,6 +17,7 @@ function openNotificationsSettings(type) {
     } else {
       targetSection.classList.remove('is-open');
     }
+    syncNotificationHeaders();
 }
 
 function makeFetchCall(url, data, button) {
@@ -46,18 +47,234 @@ function makeFetchCall(url, data, button) {
 
 function saveNotifications() {
     const button = document.getElementById("saveNotifications");
+    const reminderDays = Array.from(document.querySelectorAll('#default-reminder-days input:checked'))
+        .map((input) => parseInt(input.value, 10));
+    const reminderGroup = document.getElementById('default-reminder-days');
+    if (reminderDays.length === 0) {
+        showErrorMessage(reminderGroup.dataset.none);
+        return;
+    }
+    if (reminderDays.length > Number(reminderGroup.dataset.max)) {
+        showErrorMessage(reminderGroup.dataset.tooMany);
+        return;
+    }
     button.disabled = true;
-    const days = document.querySelector('#days').value;
-    const periodSummaryAtPeriodStart = document.getElementById("period_summary_at_period_start").checked ? 1 : 0;
 
-    const url = 'endpoints/notifications/savenotificationsettings.php';
     const data = {
-        days: days,
-        period_summary_at_period_start: periodSummaryAtPeriodStart,
+        reminder_days: reminderDays,
+        send_time: document.getElementById("send_time").value,
+        timezone: document.getElementById("notification_timezone").value,
+        repeat_every: parseInt(document.getElementById("repeat_every").value, 10) || 0,
+        repeat_max: parseInt(document.getElementById("repeat_max").value, 10) || 0,
+        period_summary_at_period_start: document.getElementById("period_summary_at_period_start").checked ? 1 : 0,
     };
 
-    makeFetchCall(url, data, button);
+    makeFetchCall('endpoints/notifications/savenotificationsettings.php', data, button);
 }
+
+/*
+  Message templates (issue #37). The saved templates and the built-in
+  defaults are embedded in the section's data attributes; the preview is
+  rendered on the server with the account's own subscriptions.
+*/
+const notificationTemplateState = { saved: null, defaults: null, timer: null, request: 0 };
+
+function notificationTemplateData() {
+    if (notificationTemplateState.saved === null) {
+        const section = document.getElementById('notification-templates');
+        if (!section) {
+            return null;
+        }
+        notificationTemplateState.saved = JSON.parse(section.dataset.saved || '{}');
+        notificationTemplateState.defaults = JSON.parse(section.dataset.defaults || '{}');
+    }
+    return notificationTemplateState;
+}
+
+function loadNotificationTemplate() {
+    const state = notificationTemplateData();
+    if (!state) {
+        return;
+    }
+    const kind = document.getElementById('template_kind').value;
+    const channel = document.getElementById('template_channel').value;
+    const forKind = state.saved[kind] || {};
+    const own = forKind[channel];
+    const inherited = channel !== '' ? forKind[''] : undefined;
+    const defaults = state.defaults[kind];
+    const titleField = document.getElementById('template_title');
+    const bodyField = document.getElementById('template_body');
+
+    if (channel === '') {
+        titleField.value = (own && own.title) || defaults.title;
+        bodyField.value = (own && own.body) || defaults.body;
+        titleField.placeholder = '';
+        bodyField.placeholder = '';
+    } else {
+        // A channel override keeps its blank fields blank: delivery fills
+        // them from the template for all channels, then the built-in one,
+        // which the placeholders show.
+        titleField.value = own ? own.title : '';
+        bodyField.value = own ? own.body : '';
+        titleField.placeholder = (inherited && inherited.title) || defaults.title;
+        bodyField.placeholder = (inherited && inherited.body) || defaults.body;
+    }
+
+    const status = document.getElementById('template-status');
+    status.textContent = own ? (channel === '' ? status.dataset.customAll : status.dataset.custom) : (inherited ? status.dataset.inherited : status.dataset.default);
+    document.getElementById('resetNotificationTemplate').disabled = !own;
+    previewNotificationTemplate();
+}
+
+function scheduleTemplatePreview() {
+    clearTimeout(notificationTemplateState.timer);
+    notificationTemplateState.timer = setTimeout(previewNotificationTemplate, 400);
+}
+
+function previewNotificationTemplate() {
+    const request = ++notificationTemplateState.request;
+    const data = {
+        kind: document.getElementById('template_kind').value,
+        channel: document.getElementById('template_channel').value,
+        title: document.getElementById('template_title').value,
+        body: document.getElementById('template_body').value,
+    };
+    const titleOut = document.getElementById('template-preview-title');
+    const bodyOut = document.getElementById('template-preview-body');
+
+    fetch('endpoints/notifications/previewnotificationtemplate.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.csrfToken },
+        body: JSON.stringify(data),
+    })
+        .then((response) => response.json())
+        .then((result) => {
+            if (request !== notificationTemplateState.request) {
+                return;
+            }
+            bodyOut.classList.toggle('is-danger', !result.success);
+            titleOut.textContent = result.success ? result.title : '';
+            bodyOut.textContent = result.success ? result.body : result.message;
+        })
+        .catch(() => {});
+}
+
+function saveNotificationTemplate(reset = false) {
+    const button = document.getElementById(reset ? 'resetNotificationTemplate' : 'saveNotificationTemplate');
+    button.disabled = true;
+    const state = notificationTemplateData();
+    const kind = document.getElementById('template_kind').value;
+    const channel = document.getElementById('template_channel').value;
+    let title = document.getElementById('template_title').value;
+    let body = document.getElementById('template_body').value;
+    // Saving the default text unchanged stores nothing, so later changes to
+    // the defaults still reach this account.
+    if (channel === '' && title === state.defaults[kind].title && body === state.defaults[kind].body) {
+        reset = true;
+    }
+
+    fetch('endpoints/notifications/savenotificationtemplate.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.csrfToken },
+        body: JSON.stringify({ kind, channel, title, body, reset }),
+    })
+        .then((response) => response.json())
+        .then((result) => {
+            button.disabled = false;
+            if (!result.success) {
+                showErrorMessage(result.message);
+                return;
+            }
+            showSuccessMessage(result.message);
+            state.saved[kind] = state.saved[kind] || {};
+            // The server says whether it stored or removed the template (a
+            // save with both fields empty is a reset too).
+            if (result.action === 'reset') {
+                delete state.saved[kind][channel];
+            } else {
+                state.saved[kind][channel] = { title, body };
+            }
+            // Reload the editor only if it still shows what was saved: a
+            // newer edit, or another template picked meanwhile, stays.
+            const unchanged = document.getElementById('template_kind').value === kind
+                && document.getElementById('template_channel').value === channel
+                && document.getElementById('template_title').value === title
+                && document.getElementById('template_body').value === body;
+            if (unchanged) {
+                loadNotificationTemplate();
+            }
+        })
+        .catch((error) => {
+            button.disabled = false;
+            showErrorMessage(error);
+        });
+}
+
+function resetNotificationTemplate() {
+    saveNotificationTemplate(true);
+}
+
+function appriseFormData() {
+    return {
+        enabled: document.getElementById("appriseenabled").checked ? 1 : 0,
+        url: document.getElementById("appriseurl").value,
+        mode: document.querySelector('input[name="apprisemode"]:checked').value,
+        config_key: document.getElementById("apprisekey").value,
+        urls: document.getElementById("appriseurls").value,
+        tags: document.getElementById("apprisetags").value,
+        ignore_ssl: document.getElementById("apprisesignoressl").checked ? 1 : 0,
+    };
+}
+
+function toggleAppriseMode() {
+    const checked = document.querySelector('input[name="apprisemode"]:checked');
+    if (!checked) {
+        return;
+    }
+    document.getElementById('apprise-key-field').classList.toggle('hide', checked.value !== 'key');
+    document.getElementById('apprise-urls-field').classList.toggle('hide', checked.value !== 'urls');
+}
+
+function saveNotificationsAppriseButton() {
+    const button = document.getElementById("saveNotificationsApprise");
+    button.disabled = true;
+    makeFetchCall('endpoints/notifications/saveapprisenotifications.php', appriseFormData(), button);
+}
+
+function testNotificationsAppriseButton() {
+    const button = document.getElementById("testNotificationsApprise");
+    button.disabled = true;
+    makeFetchCall('endpoints/notifications/testapprisenotifications.php', appriseFormData(), button);
+}
+
+// Section headers open with the keyboard too, and say whether they are open.
+function makeNotificationHeadersAccessible() {
+    document.querySelectorAll('.account-notification-section-header').forEach((header) => {
+        const panel = header.nextElementSibling;
+        header.setAttribute('role', 'button');
+        header.setAttribute('tabindex', '0');
+        header.setAttribute('aria-expanded', panel && panel.classList.contains('is-open') ? 'true' : 'false');
+        header.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                header.click();
+            }
+        });
+    });
+}
+
+function syncNotificationHeaders() {
+    document.querySelectorAll('.account-notification-section-header').forEach((header) => {
+        const panel = header.nextElementSibling;
+        header.setAttribute('aria-expanded', panel && panel.classList.contains('is-open') ? 'true' : 'false');
+    });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    makeNotificationHeadersAccessible();
+    toggleAppriseMode();
+    loadNotificationTemplate();
+});
 
 function saveNotificationsEmailButton() {
     const button = document.getElementById("saveNotificationsEmail");

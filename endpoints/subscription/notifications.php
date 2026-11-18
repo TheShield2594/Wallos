@@ -3,7 +3,7 @@
   Updates just the reminder settings of one subscription, so the details
   panel can toggle them in place without going through the full edit form.
 
-  POST JSON: { id: int, notify: bool, notify_days_before: int }
+  POST JSON: { id: int, notify: bool, notify_days_before?: int }
   notify_days_before: -1 = default from settings, 0 = on the due date,
   1..180 = days before.
 */
@@ -19,16 +19,23 @@ if (!is_array($data) || !isset($data['id'])) {
 
 $subscriptionId = (int) $data['id'];
 $notify = !empty($data['notify']) ? 1 : 0;
-$notifyDaysBefore = isset($data['notify_days_before']) ? (int) $data['notify_days_before'] : -1;
-if ($notifyDaysBefore < -1 || $notifyDaysBefore > 180) {
+// The switch sends only `notify`; the lead select also sends
+// notify_days_before, which replaces a list of reminders with that one.
+$hasSchedule = array_key_exists('notify_days_before', $data);
+$notifyDaysBefore = $hasSchedule ? (int) $data['notify_days_before'] : null;
+if ($hasSchedule && ($notifyDaysBefore < -1 || $notifyDaysBefore > 365)) {
     die(json_encode(["success" => false, "message" => translate('error', $i18n)]));
 }
 
 // One-time purchases never notify, matching the add/edit form.
-$stmt = $db->prepare("UPDATE subscriptions SET notify = :notify, notify_days_before = :days
-    WHERE id = :id AND user_id = :userId AND cycle != 5");
+$stmt = $db->prepare($hasSchedule
+    ? "UPDATE subscriptions SET notify = :notify, notify_days_before = :days, reminder_days = NULL
+        WHERE id = :id AND user_id = :userId AND cycle != 5"
+    : "UPDATE subscriptions SET notify = :notify WHERE id = :id AND user_id = :userId AND cycle != 5");
 $stmt->bindValue(':notify', $notify, SQLITE3_INTEGER);
-$stmt->bindValue(':days', $notifyDaysBefore, SQLITE3_INTEGER);
+if ($hasSchedule) {
+    $stmt->bindValue(':days', $notifyDaysBefore, SQLITE3_INTEGER);
+}
 $stmt->bindValue(':id', $subscriptionId, SQLITE3_INTEGER);
 $stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
 $stmt->execute();

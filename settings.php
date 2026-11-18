@@ -330,6 +330,33 @@ $upcomingPaymentsLimit = normalize_upcoming_payments_limit($settings['upcoming_p
         $notifications['period_summary_at_period_start'] = 0;
     }
 
+    // Reminder schedule (issues #39, #40) and message templates (#37)
+    require_once 'includes/notifications/schedule.php';
+    require_once 'includes/notifications/messages.php';
+    $notificationReminderDays = wallos_default_reminder_days($notifications);
+    $notificationReminderChoices = array_values(array_unique(array_merge([0, 1, 2, 3, 4, 5, 6, 7, 14, 30], $notificationReminderDays)));
+    sort($notificationReminderChoices);
+    $notificationSendTime = wallos_normalize_send_time((string) ($notifications['send_time'] ?? '09:00')) ?? '09:00';
+    $notificationTimezone = $notifications['timezone'] ?? '';
+    $notificationRepeatEvery = (int) ($notifications['repeat_every'] ?? 0);
+    $notificationRepeatMax = (int) ($notifications['repeat_max'] ?? 0);
+    $notificationServerTimezone = date_default_timezone_get();
+
+    $notificationTemplates = wallos_notification_templates_load($db, $userId);
+    $notificationTemplateDefaults = [
+        'payment' => wallos_default_notification_template('payment'),
+        'cancellation' => wallos_default_notification_template('cancellation'),
+    ];
+
+    // Apprise notifications
+    $notificationsApprise = ['enabled' => 0, 'url' => '', 'mode' => 'key', 'config_key' => '', 'urls' => '', 'tags' => '', 'ignore_ssl' => 0];
+    $stmt = $db->prepare("SELECT * FROM apprise_notifications WHERE user_id = :userId LIMIT 1");
+    $stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
+    $result = $stmt->execute();
+    if ($result && ($row = $result->fetchArray(SQLITE3_ASSOC))) {
+        $notificationsApprise = array_merge($notificationsApprise, $row);
+    }
+
     // Email notifications
     $sql = "SELECT * FROM email_notifications WHERE user_id = :userId LIMIT 1";
     $stmt = $db->prepare($sql);
@@ -606,36 +633,148 @@ $upcomingPaymentsLimit = normalize_upcoming_payments_limit($settings['upcoming_p
             <h2><?= translate('notifications', $i18n) ?></h2>
         </header>
         <div class="account-notifications">
-            <section>
-                <label for="days"><?= translate('notify_me', $i18n) ?>:</label>
-                <div class="form-group-inline">
-                    <select name="days" id="days">
-                        <option value="0" <?= $notifications['days'] == 0 ? "selected" : "" ?>>
-                            <?= translate('on_due_date', $i18n) ?>
-                        </option>
-                        <option value="1" <?= $notifications['days'] == 1 ? "selected" : "" ?>>
-                            1 <?= translate('day_before', $i18n) ?>
-                        </option>
-                        <?php
-                        for ($i = 2; $i <= 7; $i++) {
-                            $selected = $i == $notifications['days'] ? "selected" : "";
-                            ?>
-                            <option value="<?= $i ?>" <?= $selected ?>>
-                                <?= $i ?>     <?= translate('day_before', $i18n) ?>
-                            </option>
-                            <?php
-                        }
-                        ?>
-                    </select>
-                    <input type="submit" class="thin" value="<?= translate('save', $i18n) ?>" id="saveNotifications"
-                        onClick="saveNotifications()" />
+            <section class="notification-schedule">
+                <fieldset class="chip-fieldset">
+                    <legend><?= translate('default_reminders', $i18n) ?></legend>
+                    <div class="chip-group" id="default-reminder-days"
+                        data-none="<?= htmlspecialchars(translate('pick_at_least_one_reminder', $i18n), ENT_QUOTES) ?>"
+                        data-max="<?= WALLOS_REMINDER_MAX_OFFSETS ?>"
+                        data-too-many="<?= htmlspecialchars(sprintf(translate('too_many_reminders', $i18n), WALLOS_REMINDER_MAX_OFFSETS), ENT_QUOTES) ?>">
+                        <?php foreach ($notificationReminderChoices as $choice) { ?>
+                            <input type="checkbox" class="chip-input" id="reminder_day_<?= $choice ?>" name="reminder_days[]"
+                                value="<?= $choice ?>" <?= in_array($choice, $notificationReminderDays, true) ? 'checked' : '' ?>>
+                            <label class="chip" for="reminder_day_<?= $choice ?>">
+                                <?= $choice === 0 ? translate('on_due_date', $i18n) : $choice . ' ' . translate($choice === 1 ? 'day_before' : 'days_before', $i18n) ?>
+                            </label>
+                        <?php } ?>
+                    </div>
+                </fieldset>
+                <p class="form-hint"><?= translate('default_reminders_info', $i18n) ?></p>
+                <div class="inline notification-schedule-row">
+                    <div class="split50">
+                        <label for="send_time"><?= translate('send_at', $i18n) ?></label>
+                        <select id="send_time" name="send_time">
+                            <?php for ($minutes = 0; $minutes < 24 * 60; $minutes += 15) {
+                                $slot = sprintf('%02d:%02d', intdiv($minutes, 60), $minutes % 60); ?>
+                                <option value="<?= $slot ?>" <?= $slot === $notificationSendTime ? 'selected' : '' ?>><?= $slot ?></option>
+                            <?php } ?>
+                        </select>
+                    </div>
+                    <div class="split50">
+                        <label for="notification_timezone"><?= translate('time_zone', $i18n) ?></label>
+                        <select id="notification_timezone" name="notification_timezone">
+                            <option value=""><?= sprintf(translate('server_time_zone', $i18n), htmlspecialchars($notificationServerTimezone)) ?></option>
+                            <?php foreach (DateTimeZone::listIdentifiers() as $zone) { ?>
+                                <option value="<?= htmlspecialchars($zone) ?>" <?= $zone === $notificationTimezone ? 'selected' : '' ?>><?= htmlspecialchars($zone) ?></option>
+                            <?php } ?>
+                        </select>
+                    </div>
                 </div>
+                <div class="inline notification-schedule-row">
+                    <div class="split50">
+                        <label for="repeat_every"><?= translate('overdue_repeat_every', $i18n) ?></label>
+                        <select id="repeat_every" name="repeat_every">
+                            <option value="0" <?= $notificationRepeatEvery === 0 ? 'selected' : '' ?>><?= translate('overdue_repeat_off', $i18n) ?></option>
+                            <?php
+                            // A saved interval that is not a preset stays selectable.
+                            $repeatChoices = array_unique(array_merge([1, 2, 3, 5, 7, 14, 30], $notificationRepeatEvery > 0 ? [$notificationRepeatEvery] : []));
+                            sort($repeatChoices);
+                            foreach ($repeatChoices as $every) { ?>
+                                <option value="<?= $every ?>" <?= $notificationRepeatEvery === $every ? 'selected' : '' ?>>
+                                    <?= $every ?> <?= translate($every === 1 ? 'day' : 'days', $i18n) ?>
+                                </option>
+                            <?php } ?>
+                        </select>
+                    </div>
+                    <div class="split50">
+                        <label for="repeat_max"><?= translate('overdue_repeat_max', $i18n) ?></label>
+                        <input type="number" id="repeat_max" name="repeat_max" min="0" max="52" step="1"
+                            value="<?= $notificationRepeatMax > 0 ? $notificationRepeatMax : 3 ?>">
+                    </div>
+                </div>
+                <p class="form-hint"><?= translate('overdue_repeat_info', $i18n) ?></p>
                 <div class="form-group-inline">
                     <input type="checkbox" id="period_summary_at_period_start" name="period_summary_at_period_start"
                         <?= !empty($notifications['period_summary_at_period_start']) ? "checked" : "" ?>>
                     <label for="period_summary_at_period_start">
                         <?= translate('send_period_summary_at_period_start', $i18n) ?>
                     </label>
+                </div>
+                <div class="buttons">
+                    <input type="submit" class="thin mobile-grow" value="<?= translate('save', $i18n) ?>" id="saveNotifications"
+                        onClick="saveNotifications()" />
+                </div>
+            </section>
+            <section class="account-notifications-section notification-templates" id="notification-templates"
+                data-defaults="<?= htmlspecialchars(json_encode($notificationTemplateDefaults), ENT_QUOTES) ?>"
+                data-saved="<?= htmlspecialchars(json_encode((object) $notificationTemplates), ENT_QUOTES) ?>">
+                <header class="account-notification-section-header" onclick="openNotificationsSettings('templates')">
+                    <h3>
+                        <i class="fa-solid fa-pen-to-square"></i>
+                        <?= translate('message_templates', $i18n) ?>
+                    </h3>
+                </header>
+                <div class="account-notification-section-settings" data-type="templates">
+                    <div class="inline notification-schedule-row">
+                        <div class="split50">
+                            <label for="template_kind"><?= translate('template_for', $i18n) ?></label>
+                            <select id="template_kind" onchange="loadNotificationTemplate()">
+                                <option value="payment"><?= translate('payment_reminders', $i18n) ?></option>
+                                <option value="cancellation"><?= translate('cancellation_reminders', $i18n) ?></option>
+                            </select>
+                        </div>
+                        <div class="split50">
+                            <label for="template_channel"><?= translate('template_channel', $i18n) ?></label>
+                            <select id="template_channel" onchange="loadNotificationTemplate()">
+                                <option value=""><?= translate('all_channels', $i18n) ?></option>
+                                <?php foreach (['email', 'discord', 'gotify', 'telegram', 'pushplus', 'mattermost', 'pushover', 'ntfy', 'serverchan', 'apprise', 'push'] as $templateChannel) { ?>
+                                    <option value="<?= $templateChannel ?>"><?= translate($templateChannel === 'push' ? 'push_notifications' : $templateChannel, $i18n) ?></option>
+                                <?php } ?>
+                            </select>
+                        </div>
+                    </div>
+                    <label for="template_title"><?= translate('template_title', $i18n) ?></label>
+                    <div class="form-group-inline">
+                        <input type="text" id="template_title" autocomplete="off" maxlength="500" oninput="scheduleTemplatePreview()">
+                    </div>
+                    <label for="template_body"><?= translate('template_body', $i18n) ?></label>
+                    <div class="form-group-inline">
+                        <textarea id="template_body" class="template-body" rows="8" maxlength="10000" spellcheck="false"
+                            oninput="scheduleTemplatePreview()"></textarea>
+                    </div>
+                    <p class="form-hint" id="template-status" aria-live="polite"
+                        data-default="<?= htmlspecialchars(translate('template_using_default', $i18n), ENT_QUOTES) ?>"
+                        data-inherited="<?= htmlspecialchars(translate('template_using_all_channels', $i18n), ENT_QUOTES) ?>"
+                        data-custom="<?= htmlspecialchars(translate('template_using_custom', $i18n), ENT_QUOTES) ?>"
+                        data-custom-all="<?= htmlspecialchars(translate('template_using_custom_all', $i18n), ENT_QUOTES) ?>"></p>
+                    <div class="template-preview">
+                        <span class="template-preview-label"><?= translate('preview', $i18n) ?></span>
+                        <strong id="template-preview-title"></strong>
+                        <pre id="template-preview-body"></pre>
+                    </div>
+                    <div class="buttons">
+                        <input type="button" class="secondary-button thin mobile-grow" value="<?= translate('reset_to_default', $i18n) ?>"
+                            id="resetNotificationTemplate" onClick="resetNotificationTemplate()" />
+                        <input type="submit" class="thin mobile-grow" value="<?= translate('save', $i18n) ?>"
+                            id="saveNotificationTemplate" onClick="saveNotificationTemplate()" />
+                    </div>
+                    <div class="settings-notes">
+                        <p>
+                            <i class="fa-solid fa-circle-info"></i> <?= translate('template_syntax_info', $i18n) ?>
+                        </p>
+                        <p class="template-reference">
+                            <code>{{ payer }}</code> <code>{{ user }}</code> <code>{{ period_summary }}</code>
+                            <code>{% for s in subscriptions %}…{% endfor %}</code>:
+                            <code>s.name</code> <code>s.price</code> <code>s.formatted_price</code> <code>s.currency</code>
+                            <code>s.date</code> <code>s.days</code> <code>s.days_text</code> <code>s.category</code>
+                            <code>s.url</code> <code>s.notes</code> <code>s.cancel_by</code> <code>s.deadline_note</code>
+                        </p>
+                        <p class="template-reference">
+                            <?= translate('template_filters_info', $i18n) ?>
+                            <code>upper</code> <code>lower</code> <code>capitalize</code> <code>trim</code>
+                            <code>default("…")</code> <code>json</code> <code>html</code> <code>url</code>
+                        </p>
+                    </div>
                 </div>
             </section>
             <section class="account-notifications-section">
@@ -1025,6 +1164,70 @@ $upcomingPaymentsLimit = normalize_upcoming_payments_limit($settings['upcoming_p
                             onClick="testNotificationsServerchanButton()" />
                         <input type="submit" class="thin mobile-grow" value="<?= translate('save', $i18n) ?>"
                             id="saveNotificationsServerchan" onClick="saveNotificationsServerchanButton()" />
+                    </div>
+                </div>
+            </section>
+
+            <section class="account-notifications-section">
+                <header class="account-notification-section-header" onclick="openNotificationsSettings('apprise');">
+                    <h3>
+                        <i class="fa-solid fa-tower-broadcast"></i>
+                        <?= translate('apprise', $i18n) ?>
+                    </h3>
+                </header>
+                <div class="account-notification-section-settings" data-type="apprise">
+                    <div class="form-group-inline">
+                        <input type="checkbox" id="appriseenabled" name="appriseenabled"
+                            <?= $notificationsApprise['enabled'] ? "checked" : "" ?>>
+                        <label for="appriseenabled" class="capitalize"><?= translate('enabled', $i18n) ?></label>
+                    </div>
+                    <div class="form-group-inline">
+                        <input type="text" name="appriseurl" id="appriseurl" autocomplete="off"
+                            placeholder="<?= translate('apprise_server_url', $i18n) ?>"
+                            value="<?= htmlspecialchars($notificationsApprise['url']) ?>" />
+                    </div>
+                    <div class="form-group-inline">
+                        <div>
+                            <input type="radio" name="apprisemode" id="apprisemodekey" value="key"
+                                onchange="toggleAppriseMode()" <?= $notificationsApprise['mode'] !== 'urls' ? 'checked' : '' ?> />
+                            <label for="apprisemodekey"><?= translate('apprise_mode_key', $i18n) ?></label>
+                        </div>
+                        <div>
+                            <input type="radio" name="apprisemode" id="apprisemodeurls" value="urls"
+                                onchange="toggleAppriseMode()" <?= $notificationsApprise['mode'] === 'urls' ? 'checked' : '' ?> />
+                            <label for="apprisemodeurls"><?= translate('apprise_mode_urls', $i18n) ?></label>
+                        </div>
+                    </div>
+                    <div class="form-group-inline" id="apprise-key-field">
+                        <input type="text" name="apprisekey" id="apprisekey" autocomplete="off"
+                            placeholder="<?= translate('apprise_config_key', $i18n) ?>"
+                            value="<?= htmlspecialchars($notificationsApprise['config_key']) ?>" />
+                    </div>
+                    <div class="form-group-inline" id="apprise-urls-field">
+                        <textarea name="appriseurls" id="appriseurls" class="thin" autocomplete="off" spellcheck="false"
+                            placeholder="<?= translate($notificationsApprise['urls'] !== '' ? 'apprise_urls_saved_placeholder' : 'apprise_urls_placeholder', $i18n) ?>"></textarea>
+                    </div>
+                    <div class="form-group-inline">
+                        <input type="text" name="apprisetags" id="apprisetags" autocomplete="off"
+                            placeholder="<?= translate('apprise_tags', $i18n) ?>"
+                            value="<?= htmlspecialchars($notificationsApprise['tags']) ?>" />
+                    </div>
+                    <div class="form-group-inline">
+                        <input type="checkbox" id="apprisesignoressl" name="appriseignoressl"
+                            <?= $notificationsApprise['ignore_ssl'] ? "checked" : "" ?>>
+                        <label for="apprisesignoressl"><?= translate('ignore_ssl_errors', $i18n) ?></label>
+                    </div>
+                    <div class="buttons">
+                        <input type="button" class="secondary-button thin mobile-grow"
+                            value="<?= translate('test', $i18n) ?>" id="testNotificationsApprise"
+                            onClick="testNotificationsAppriseButton()" />
+                        <input type="submit" class="thin mobile-grow" value="<?= translate('save', $i18n) ?>"
+                            id="saveNotificationsApprise" onClick="saveNotificationsAppriseButton()" />
+                    </div>
+                    <div class="settings-notes">
+                        <p>
+                            <i class="fa-solid fa-circle-info"></i> <?= translate('apprise_info', $i18n) ?>
+                        </p>
                     </div>
                 </div>
             </section>

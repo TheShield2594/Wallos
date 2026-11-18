@@ -359,7 +359,7 @@ function detailsRenderNotify(subscription) {
   const notify = Number(subscription.notify) === 1;
   const toggle = document.querySelector('#details-notify-switch');
   toggle.setAttribute('aria-checked', notify ? 'true' : 'false');
-  toggle.onclick = () => detailsSaveNotify(!notify, subscription.notify_days_before);
+  toggle.onclick = () => detailsSaveNotify(!notify);
 
   const lead = document.querySelector('#details-lead-select');
   const days = subscription.notify_days_before === null || subscription.notify_days_before === "" ? -1 : Number(subscription.notify_days_before);
@@ -380,15 +380,22 @@ function detailsSaveNotify(notify, daysBefore) {
     return;
   }
   const subscription = currentDetails;
-  const previous = { notify: subscription.notify, notify_days_before: subscription.notify_days_before };
+  const previous = { notify: subscription.notify, notify_days_before: subscription.notify_days_before, reminder_days: subscription.reminder_days };
+  // The switch alone sends only the flag, so it never replaces a schedule
+  // saved elsewhere; the lead select sends its one value.
+  const payload = { id: subscription.id, notify: notify };
   subscription.notify = notify ? 1 : 0;
-  subscription.notify_days_before = daysBefore === null || daysBefore === undefined ? -1 : daysBefore;
+  if (daysBefore !== undefined) {
+    subscription.notify_days_before = daysBefore === null ? -1 : daysBefore;
+    subscription.reminder_days = null;
+    payload.notify_days_before = subscription.notify_days_before;
+  }
   detailsRenderNotify(subscription);
 
   fetch('endpoints/subscription/notifications.php', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.csrfToken },
-    body: JSON.stringify({ id: subscription.id, notify: notify, notify_days_before: subscription.notify_days_before }),
+    body: JSON.stringify(payload),
   })
     .then((response) => response.json())
     .then((data) => {

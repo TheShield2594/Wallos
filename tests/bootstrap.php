@@ -110,6 +110,21 @@ function wallos_test_database()
     if ($template === null) {
         $sandbox = WALLOS_TEST_TMP . '/sandbox';
 
+        // Rebuild the cached schema when the files that make it change (a
+        // new migration, say), not only when the sandbox is missing.
+        $inputs = array_merge(glob(WALLOS_ROOT . '/migrations/*.php') ?: [], [
+            WALLOS_ROOT . '/endpoints/cronjobs/createdatabase.php',
+            WALLOS_ROOT . '/includes/run_migrations.php',
+        ]);
+        $stamp = md5(implode('|', array_map(fn($file) => basename($file) . ':' . md5_file($file), $inputs)));
+        if (is_dir($sandbox) && @file_get_contents($sandbox . '/.stamp') !== $stamp) {
+            $files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($sandbox, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
+            foreach ($files as $file) {
+                $file->isDir() ? rmdir($file->getPathname()) : unlink($file->getPathname());
+            }
+            rmdir($sandbox);
+        }
+
         if (!is_dir($sandbox)) {
             mkdir($sandbox, 0700, true);
             foreach (['endpoints/cronjobs', 'includes', 'migrations', 'db'] as $directory) {
@@ -121,6 +136,7 @@ function wallos_test_database()
             }
             copy(WALLOS_ROOT . '/endpoints/cronjobs/createdatabase.php', $sandbox . '/endpoints/cronjobs/createdatabase.php');
             copy(WALLOS_ROOT . '/includes/run_migrations.php', $sandbox . '/includes/run_migrations.php');
+            file_put_contents($sandbox . '/.stamp', $stamp);
         }
 
         $databaseFile = $sandbox . '/db/wallos.db';
