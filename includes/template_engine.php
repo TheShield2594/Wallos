@@ -50,6 +50,13 @@ function wallos_template_parse($template)
     }
 
     $tokens = preg_split('/(\{\{.*?\}\}|\{%.*?%\}|\{#.*?#\})/s', $template, -1, PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_NO_EMPTY);
+    // An opening "{{", "{%" or "{#" left in plain text was never closed.
+    foreach ($tokens as $token) {
+        $isTag = preg_match('/^(\{\{.*\}\}|\{%.*%\}|\{#.*#\})$/s', $token) === 1;
+        if (!$isTag && preg_match('/\{\{|\{%|\{#/', $token, $open)) {
+            throw new WallosTemplateException('Unclosed ' . $open[0] . '.');
+        }
+    }
     $position = 0;
     $nodes = wallos_template_parse_nodes($tokens, $position, [], 0);
     if ($position < count($tokens)) {
@@ -170,6 +177,9 @@ function wallos_template_parse_output($expression)
         if (!in_array($match[1], WALLOS_TEMPLATE_FILTERS, true)) {
             throw new WallosTemplateException('Unknown filter: ' . $match[1] . '.');
         }
+        if ($filters !== [] && end($filters)['name'] === 'raw') {
+            throw new WallosTemplateException('"raw" must be the last filter.');
+        }
         $argument = isset($match[2]) && $match[2] !== '' ? wallos_template_parse_operand($match[2]) : null;
         $filters[] = ['name' => $match[1], 'arg' => $argument];
     }
@@ -245,21 +255,22 @@ function wallos_template_parse_condition($condition)
         throw new WallosTemplateException('Empty condition.');
     }
     $any = [];
-    foreach (preg_split('/\s+or\s+/i', $condition) as $orPart) {
+    foreach (wallos_template_split_keyword($condition, 'or') as $orPart) {
         $all = [];
-        foreach (preg_split('/\s+and\s+/i', $orPart) as $andPart) {
+        foreach (wallos_template_split_keyword($orPart, 'and') as $andPart) {
             $andPart = trim($andPart);
             $negate = false;
             if (preg_match('/^not\s+(.*)$/is', $andPart, $match)) {
                 $negate = true;
                 $andPart = trim($match[1]);
             }
-            if (preg_match('/^(.+?)\s*(==|!=|<=|>=|<|>)\s*(.+)$/s', $andPart, $match)) {
+            $comparison = wallos_template_find_operator($andPart);
+            if ($comparison !== null) {
                 $all[] = [
                     'negate' => $negate,
-                    'left' => wallos_template_parse_operand($match[1]),
-                    'op' => $match[2],
-                    'right' => wallos_template_parse_operand($match[3]),
+                    'left' => wallos_template_parse_operand(substr($andPart, 0, $comparison[1])),
+                    'op' => $comparison[0],
+                    'right' => wallos_template_parse_operand(substr($andPart, $comparison[1] + strlen($comparison[0]))),
                 ];
             } else {
                 $all[] = ['negate' => $negate, 'left' => wallos_template_parse_operand($andPart), 'op' => null, 'right' => null];
@@ -269,6 +280,76 @@ function wallos_template_parse_condition($condition)
     }
 
     return $any;
+}
+
+/**
+ * Splits on a keyword (" and " / " or ") outside quoted strings.
+ *
+ * @return string[]
+ */
+function wallos_template_split_keyword($expression, $keyword)
+{
+    $parts = [];
+    $current = '';
+    $quote = null;
+    $length = strlen($expression);
+    $pattern = '/^\s+' . $keyword . '\s+/i';
+    for ($i = 0; $i < $length; $i++) {
+        $char = $expression[$i];
+        if ($quote !== null) {
+            $current .= $char;
+            if ($char === $quote) {
+                $quote = null;
+            }
+            continue;
+        }
+        if ($char === '"' || $char === "'") {
+            $quote = $char;
+            $current .= $char;
+            continue;
+        }
+        if (ctype_space($char) && preg_match($pattern, substr($expression, $i), $match)) {
+            $parts[] = $current;
+            $current = '';
+            $i += strlen($match[0]) - 1;
+            continue;
+        }
+        $current .= $char;
+    }
+    $parts[] = $current;
+
+    return $parts;
+}
+
+/**
+ * The first comparison operator outside quoted strings.
+ *
+ * @return array|null [operator, offset]
+ */
+function wallos_template_find_operator($expression)
+{
+    $quote = null;
+    $length = strlen($expression);
+    for ($i = 0; $i < $length; $i++) {
+        $char = $expression[$i];
+        if ($quote !== null) {
+            if ($char === $quote) {
+                $quote = null;
+            }
+            continue;
+        }
+        if ($char === '"' || $char === "'") {
+            $quote = $char;
+            continue;
+        }
+        foreach (['==', '!=', '<=', '>=', '<', '>'] as $operator) {
+            if (substr($expression, $i, strlen($operator)) === $operator) {
+                return [$operator, $i];
+            }
+        }
+    }
+
+    return null;
 }
 
 /**
@@ -325,15 +406,15 @@ function wallos_template_render_nodes(array $nodes, array $scopes, array &$state
                 $piece = '';
         }
 
-        $state['length'] += strlen($piece);
-        if ($state['length'] > WALLOS_TEMPLATE_MAX_OUTPUT * 4) {
-            throw new WallosTemplateException('The message is too long.');
+        // Count what text and {{ }} nodes emit, once; block nodes only pass
+        // on what their children already counted.
+        if ($node['type'] === 'text' || $node['type'] === 'output') {
+            $state['length'] += strlen($piece);
+            if ($state['length'] > WALLOS_TEMPLATE_MAX_OUTPUT) {
+                throw new WallosTemplateException('The message is too long.');
+            }
         }
         $output .= $piece;
-    }
-
-    if (strlen($output) > WALLOS_TEMPLATE_MAX_OUTPUT) {
-        throw new WallosTemplateException('The message is too long.');
     }
 
     return $output;

@@ -2,6 +2,15 @@
 
 class WallosNtfyChannel extends WallosNotificationChannel
 {
+    /**
+     * host + "/" + topic, whether or not the topic starts with a slash (the
+     * test endpoint posts to the same URL).
+     */
+    public static function topicUrl($host, $topic)
+    {
+        return rtrim((string) $host, '/') . '/' . ltrim((string) $topic, '/');
+    }
+
     const NAME = 'ntfy';
     const LABEL = 'Ntfy';
     const TABLE = 'ntfy_notifications';
@@ -15,10 +24,10 @@ class WallosNtfyChannel extends WallosNotificationChannel
         }
 
         $headers = array_merge(['Content-Type: text/plain; charset=utf-8'], webhookParseHeaders($this->settings['headers'] ?? ''));
-        $url = $host . '/' . ($this->settings['topic'] ?? '');
+        $url = self::topicUrl($host, $this->settings['topic'] ?? '');
         if (!empty($message['custom_title'])) {
             // A query parameter rather than a header: headers are Latin-1.
-            $url .= '?title=' . rawurlencode(str_replace(["\r", "\n"], ' ', $message['title']));
+            $url = self::withQuery($url, 'title', str_replace(["\r", "\n"], ' ', $message['title']));
         }
 
         return $this->report($this->env->http([

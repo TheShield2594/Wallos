@@ -156,18 +156,23 @@ function addListRowFields(&$printRow, $subscription, $mainCurrencyId, $db)
 
     // Due soon (issue #40): the next payment is inside the reminder window -
     // the largest of the subscription's reminder offsets.
-    static $defaultReminderDays = [];
+    // Counted on the account's own calendar, as its reminders are.
+    static $reminderSettings = [];
     $ownerId = (int) ($subscription['user_id'] ?? 0);
-    if (!isset($defaultReminderDays[$mapKey])) {
+    if (!isset($reminderSettings[$mapKey])) {
         $settingsStmt = $db->prepare('SELECT * FROM notification_settings WHERE user_id = :userId');
         $settingsStmt->bindValue(':userId', $ownerId, SQLITE3_INTEGER);
         $settingsResult = $settingsStmt->execute();
-        $defaultReminderDays[$mapKey] = wallos_default_reminder_days($settingsResult ? ($settingsResult->fetchArray(SQLITE3_ASSOC) ?: null) : null);
+        $settingsRow = $settingsResult ? ($settingsResult->fetchArray(SQLITE3_ASSOC) ?: null) : null;
+        $reminderSettings[$mapKey] = [
+            'days' => wallos_default_reminder_days($settingsRow),
+            'today' => (new DateTime('now', wallos_notification_timezone($settingsRow ?? [])))->format('Y-m-d'),
+        ];
     }
     $printRow['due_in_days'] = null;
     if (!(int) $subscription['inactive'] && (int) $subscription['cycle'] !== WALLOS_CYCLE_ONE_TIME && wallos_parse_date($subscription['next_payment']) !== null) {
-        $daysUntil = wallos_days_between(date('Y-m-d'), $subscription['next_payment']);
-        if (wallos_is_due_soon($daysUntil, wallos_subscription_reminder_days($subscription, $defaultReminderDays[$mapKey]))) {
+        $daysUntil = wallos_days_between($reminderSettings[$mapKey]['today'], $subscription['next_payment']);
+        if (wallos_is_due_soon($daysUntil, wallos_subscription_reminder_days($subscription, $reminderSettings[$mapKey]['days']))) {
             $printRow['due_in_days'] = $daysUntil;
         }
     }

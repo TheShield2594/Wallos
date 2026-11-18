@@ -14,7 +14,8 @@ class WallosPushoverChannel extends WallosNotificationChannel
             'message' => $message['body'],
         ];
         if (!empty($message['custom_title'])) {
-            $fields['title'] = $message['title'];
+            // Pushover allows 250 characters.
+            $fields['title'] = mb_substr($message['title'], 0, 250, 'UTF-8');
         }
 
         return $this->report($this->env->http([

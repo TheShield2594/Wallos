@@ -334,7 +334,7 @@ $upcomingPaymentsLimit = normalize_upcoming_payments_limit($settings['upcoming_p
     require_once 'includes/notifications/schedule.php';
     require_once 'includes/notifications/messages.php';
     $notificationReminderDays = wallos_default_reminder_days($notifications);
-    $notificationReminderChoices = array_values(array_unique(array_merge([0, 1, 2, 3, 5, 7, 14, 30], $notificationReminderDays)));
+    $notificationReminderChoices = array_values(array_unique(array_merge([0, 1, 2, 3, 4, 5, 6, 7, 14, 30], $notificationReminderDays)));
     sort($notificationReminderChoices);
     $notificationSendTime = wallos_normalize_send_time((string) ($notifications['send_time'] ?? '09:00')) ?? '09:00';
     $notificationTimezone = $notifications['timezone'] ?? '';
@@ -675,7 +675,11 @@ $upcomingPaymentsLimit = normalize_upcoming_payments_limit($settings['upcoming_p
                         <label for="repeat_every"><?= translate('overdue_repeat_every', $i18n) ?></label>
                         <select id="repeat_every" name="repeat_every">
                             <option value="0" <?= $notificationRepeatEvery === 0 ? 'selected' : '' ?>><?= translate('overdue_repeat_off', $i18n) ?></option>
-                            <?php foreach ([1, 2, 3, 5, 7, 14, 30] as $every) { ?>
+                            <?php
+                            // A saved interval that is not a preset stays selectable.
+                            $repeatChoices = array_unique(array_merge([1, 2, 3, 5, 7, 14, 30], $notificationRepeatEvery > 0 ? [$notificationRepeatEvery] : []));
+                            sort($repeatChoices);
+                            foreach ($repeatChoices as $every) { ?>
                                 <option value="<?= $every ?>" <?= $notificationRepeatEvery === $every ? 'selected' : '' ?>>
                                     <?= $every ?> <?= translate($every === 1 ? 'day' : 'days', $i18n) ?>
                                 </option>
@@ -1201,7 +1205,7 @@ $upcomingPaymentsLimit = normalize_upcoming_payments_limit($settings['upcoming_p
                     </div>
                     <div class="form-group-inline" id="apprise-urls-field">
                         <textarea name="appriseurls" id="appriseurls" class="thin" autocomplete="off" spellcheck="false"
-                            placeholder="<?= translate('apprise_urls_placeholder', $i18n) ?>"><?= htmlspecialchars($notificationsApprise['urls']) ?></textarea>
+                            placeholder="<?= translate($notificationsApprise['urls'] !== '' ? 'apprise_urls_saved_placeholder' : 'apprise_urls_placeholder', $i18n) ?>"></textarea>
                     </div>
                     <div class="form-group-inline">
                         <input type="text" name="apprisetags" id="apprisetags" autocomplete="off"

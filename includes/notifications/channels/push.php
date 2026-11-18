@@ -54,7 +54,7 @@ class WallosPushChannel extends WallosNotificationChannel
 
         $payload = json_encode(['title' => $message['title'], 'body' => $message['body']]);
         $sent = false;
-        foreach ($this->devices() as $device) {
+        foreach ($this->devices() as $index => $device) {
             $pin = $this->env->ssrf($device['endpoint']);
             if (!$pin) {
                 $this->env->log('SSRF attempt detected for a push subscription endpoint. Notification not sent.');
@@ -63,12 +63,21 @@ class WallosPushChannel extends WallosNotificationChannel
             $result = webpush_send($device, $payload, $this->vapid, $this->subject, 2419200, $pin);
             if ($result['prune']) {
                 // The push service discarded this subscription (unsubscribed,
-                // uninstalled, cleared site data); see webpush_send().
-                $prune = $this->env->db->prepare('DELETE FROM push_subscriptions WHERE id = :id AND user_id = :userId');
-                $prune->bindValue(':id', $device['id'], SQLITE3_INTEGER);
-                $prune->bindValue(':userId', $this->env->userId, SQLITE3_INTEGER);
-                $prune->execute();
-                $this->env->log('Push subscription gone, removed.');
+                // uninstalled, cleared site data); see webpush_send(). Not sent
+                // to again in this run, even if removing the row fails.
+                unset($this->devices[$index]);
+                try {
+                    $prune = $this->env->db->prepare('DELETE FROM push_subscriptions WHERE id = :id AND user_id = :userId');
+                    $removed = $prune !== false;
+                    if ($removed) {
+                        $prune->bindValue(':id', $device['id'], SQLITE3_INTEGER);
+                        $prune->bindValue(':userId', $this->env->userId, SQLITE3_INTEGER);
+                        $removed = $prune->execute() !== false;
+                    }
+                } catch (\Throwable $e) {
+                    $removed = false;
+                }
+                $this->env->log($removed ? 'Push subscription gone, removed.' : 'Push subscription gone; removing it failed.');
             } elseif ($result['success']) {
                 $this->env->log('Push notification sent');
                 $sent = true;

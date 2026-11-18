@@ -16,11 +16,23 @@ class WallosServerchanChannel extends WallosNotificationChannel
             $url = 'https://sctapi.ftqq.com/' . $sendkey . '.send';
         }
 
-        return $this->report($this->env->http([
+        $response = $this->env->http([
             'method' => 'POST',
             'url' => $url,
             'headers' => ['Content-Type: application/x-www-form-urlencoded'],
             'body' => http_build_query(['text' => $message['title'], 'desp' => $message['body']]),
-        ]));
+        ]);
+
+        // Serverchan reports errors (an expired SendKey) in a 2xx answer's
+        // "code"; only 0 is a delivery.
+        if ($response['ok']) {
+            $decoded = json_decode((string) $response['body'], true);
+            if (!is_array($decoded) || !array_key_exists('code', $decoded) || (string) $decoded['code'] !== '0') {
+                $response['ok'] = false;
+                $response['error'] = is_array($decoded) && !empty($decoded['message']) ? (string) $decoded['message'] : 'invalid Serverchan response';
+            }
+        }
+
+        return $this->report($response);
     }
 }

@@ -3,6 +3,9 @@
   Validation of the Apprise settings form (issue #38).
 */
 
+require_once __DIR__ . '/channel.php';
+require_once __DIR__ . '/channels/apprise.php';
+
 /**
  * @param array $input  enabled, url, mode ('key'|'urls'), config_key, urls, tags, ignore_ssl
  * @param bool  $forTest the test button needs a destination even when disabled
@@ -37,7 +40,8 @@ function wallos_apprise_settings_from_input(array $input, $forTest = false)
         if ($fields['config_key'] !== '' && !preg_match('/^[A-Za-z0-9_-]{1,128}$/', $fields['config_key'])) {
             return ['error' => 'apprise_invalid_key', 'fields' => []];
         }
-    } elseif ($fields['urls'] === '' && $needed) {
+    } elseif ($needed && WallosAppriseChannel::parseUrls($fields['urls']) === []) {
+        // The same parser the sender uses: "," alone is no destination.
         return ['error' => 'fill_mandatory_fields', 'fields' => []];
     }
     if ($fields['mode'] === 'urls' && strlen($fields['urls']) > 8000) {
@@ -52,4 +56,34 @@ function wallos_apprise_settings_from_input(array $input, $forTest = false)
     }
 
     return ['error' => null, 'fields' => $fields];
+}
+
+/**
+ * The account's saved Apprise row, or null.
+ */
+function wallos_apprise_load(SQLite3 $db, $userId)
+{
+    $stmt = $db->prepare('SELECT * FROM apprise_notifications WHERE user_id = :userId');
+    if ($stmt === false) {
+        return null;
+    }
+    $stmt->bindValue(':userId', (int) $userId, SQLITE3_INTEGER);
+    $result = $stmt->execute();
+
+    return $result ? ($result->fetchArray(SQLITE3_ASSOC) ?: null) : null;
+}
+
+/**
+ * The saved stateless URLs carry third-party secrets and are never sent to
+ * the page. A save or test with the field left blank uses the saved ones;
+ * `clear_urls` removes them.
+ */
+function wallos_apprise_with_stored_urls(array $input, ?array $stored)
+{
+    $posted = trim((string) ($input['urls'] ?? ''));
+    if ($posted === '' && empty($input['clear_urls']) && $stored !== null) {
+        $input['urls'] = (string) ($stored['urls'] ?? '');
+    }
+
+    return $input;
 }

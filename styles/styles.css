@@ -4990,3 +4990,28 @@ a.segmented-option {
 .list-row-progress.is-danger>span {
   background-color: var(--danger);
 }
+
+.custom-reminder-row {
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.custom-reminder-row input[type="number"] {
+  max-width: 180px;
+}
+
+/* A collapsed notification panel keeps its controls out of the tab order. */
+.account-notification-section-settings {
+  visibility: hidden;
+  transition: height 0.3s cubic-bezier(0.32, 0.72, 0, 1), max-height 0.3s ease-in-out, visibility 0s linear 0.3s;
+}
+
+.account-notification-section-settings.is-open {
+  visibility: visible;
+  transition: height 0.3s cubic-bezier(0.32, 0.72, 0, 1), max-height 0.3s ease-in-out, visibility 0s;
+}
+
+.account-notification-section-header:focus-visible {
+  outline: 2px solid var(--tint);
+  outline-offset: 2px;
+}

@@ -230,16 +230,17 @@ wallos_test('the preview renders the account\'s own subscriptions', function () 
     $db = wallos_test_open_database();
     wallos_test_create_user($db, 1, 'alice');
     notification_test_household($db, 1, 1, 'Alice');
-    notification_test_subscription($db, 1, ['name' => 'Netflix', 'price' => 12.5, 'next_payment' => notification_test_date(2)]);
+    $today = '2026-06-01';
+    notification_test_subscription($db, 1, ['name' => 'Netflix', 'price' => 12.5, 'next_payment' => notification_test_date(2, $today)]);
 
-    $context = wallos_notification_preview_context($db, 1, 'payment');
+    $context = wallos_notification_preview_context($db, 1, 'payment', $today);
     $message = wallos_render_notification_message('payment', 'discord', $context, []);
     assert_contains('Alice, the following subscriptions are up for renewal:', $message['body'], 'greets the payer');
     assert_contains('Netflix for', $message['body'], 'lists the real subscription');
     assert_contains('(In 2 days)', $message['body'], 'with its days left');
 
     $db->exec('DELETE FROM subscriptions');
-    $context = wallos_notification_preview_context($db, 1, 'cancellation');
+    $context = wallos_notification_preview_context($db, 1, 'cancellation', $today);
     assert_same(['Streaming', 'Cloud storage'], array_column($context['subscriptions'], 'name'), 'an empty account gets sample rows');
     $db->close();
 });

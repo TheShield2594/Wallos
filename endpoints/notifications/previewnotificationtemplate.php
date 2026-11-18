@@ -26,13 +26,21 @@ if ($error !== null) {
     die(json_encode(["success" => false, "message" => translate('template_error', $i18n) . ': ' . $error]));
 }
 
-$templates = [$kind => [$channel => ['title' => $title, 'body' => $body]]];
+// The saved templates with the draft on top, so a channel draft inherits
+// blank fields from the saved account-wide template exactly as delivery does.
+$templates = wallos_notification_templates_load($db, $userId);
+$templates[$kind][$channel] = ['title' => $title, 'body' => $body];
 $context = wallos_notification_preview_context($db, $userId, $kind);
 $message = wallos_render_notification_message($kind, $channel === '' ? 'discord' : $channel, $context, $templates);
+
+if ($message['error'] !== null || $message['body'] === null) {
+    // A draft that hits a limit with the preview data: say so, rather than
+    // showing the built-in text as if it were the draft.
+    die(json_encode(["success" => false, "message" => translate('template_error', $i18n) . ': ' . ($message['error'] ?? 'The message is too long.')]));
+}
 
 echo json_encode([
     "success" => true,
     "title" => $message['title'],
     "body" => $message['body'],
-    "error" => $message['error'],
 ]);

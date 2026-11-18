@@ -37,6 +37,10 @@ function toggleReminderChips() {
     chip.disabled = locked || useDefault.checked;
   });
   document.querySelector('#subscription-reminder-chips').classList.toggle('hide', useDefault.checked);
+  const custom = document.querySelector('#custom_reminder_days');
+  if (custom) {
+    custom.disabled = locked || useDefault.checked;
+  }
 }
 
 function ensureReminderChip(days) {
@@ -63,6 +67,21 @@ function ensureReminderChip(days) {
     group.appendChild(input);
     group.appendChild(label);
   }
+}
+
+// Any offset the server keeps (0-365), not only the preset chips.
+function addCustomReminderChip() {
+  const field = document.querySelector('#custom_reminder_days');
+  const days = parseInt(field.value, 10);
+  if (isNaN(days) || days < 0 || days > 365) {
+    field.focus();
+    return;
+  }
+  ensureReminderChip(days);
+  const chip = document.querySelector(`#subscription-reminder-days input[value="${days}"]`);
+  chip.checked = true;
+  toggleReminderChips();
+  field.value = '';
 }
 
 function setReminderFields(subscription) {

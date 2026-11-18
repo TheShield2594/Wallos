@@ -118,11 +118,45 @@ function wallos_render_notification_message($kind, $channel, array $context, arr
         $error = $exception->getMessage();
         $default = wallos_default_notification_template($kind);
         $title = $default['title'];
-        $body = wallos_template_render($default['body'], $context, $escape);
         $template['custom_title'] = false;
+        try {
+            $body = wallos_template_render($default['body'], $context, $escape);
+        } catch (WallosTemplateException $tooLarge) {
+            // Even the built-in message is over a limit: the caller splits
+            // the digest (wallos_notification_messages()).
+            $body = null;
+        }
     }
 
     return ['title' => $title, 'body' => $body, 'custom_title' => $template['custom_title'], 'error' => $error];
+}
+
+/**
+ * The messages one channel sends for one payer: normally one, or the digest
+ * split into parts when it is too large to render as one message. Each part
+ * carries the context (and so the reminder keys) it covers.
+ *
+ * @return array list of [message, context]
+ */
+function wallos_notification_messages($kind, $channel, array $context, array $templates, $escape = 'none')
+{
+    $message = wallos_render_notification_message($kind, $channel, $context, $templates, $escape);
+    if ($message['body'] !== null) {
+        return [[$message, $context]];
+    }
+    $subscriptions = $context['subscriptions'] ?? [];
+    if (count($subscriptions) < 2) {
+        return [];
+    }
+    $half = (int) ceil(count($subscriptions) / 2);
+    $parts = [];
+    foreach (array_chunk($subscriptions, $half) as $chunk) {
+        foreach (wallos_notification_messages($kind, $channel, array_merge($context, ['subscriptions' => $chunk]), $templates, $escape) as $part) {
+            $parts[] = $part;
+        }
+    }
+
+    return $parts;
 }
 
 /**

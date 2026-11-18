@@ -163,14 +163,23 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" || $_SERVER["REQUEST_METHOD"] === "GET
     $result = $stmt->execute();
     $apprise_notifications = $result ? $result->fetchArray(SQLITE3_ASSOC) : false;
     if ($apprise_notifications) {
-        unset($apprise_notifications['user_id']);
-        // Stateless Apprise URLs carry third-party tokens.
-        foreach (['urls', 'config_key'] as $secret) {
-            if (!empty($apprise_notifications[$secret])) {
-                $apprise_notifications[$secret] = "********";
-            }
+        // Only safe fields: stateless URLs and the key carry third-party
+        // secrets, and the server URL can hold credentials.
+        $mask = fn($value) => ($value === null || $value === '') ? '' : '********';
+        $serverUrl = '';
+        $parts = parse_url((string) $apprise_notifications['url']);
+        if ($parts !== false && !empty($parts['host'])) {
+            $serverUrl = ($parts['scheme'] ?? 'http') . '://' . $parts['host'] . (isset($parts['port']) ? ':' . $parts['port'] : '') . ($parts['path'] ?? '');
         }
-        $notification_settings['apprise_notifications'] = $apprise_notifications;
+        $notification_settings['apprise_notifications'] = [
+            'enabled' => (int) $apprise_notifications['enabled'],
+            'url' => $serverUrl,
+            'mode' => $apprise_notifications['mode'],
+            'config_key' => $mask($apprise_notifications['config_key']),
+            'urls' => $mask($apprise_notifications['urls']),
+            'tags' => $apprise_notifications['tags'],
+            'ignore_ssl' => (int) $apprise_notifications['ignore_ssl'],
+        ];
     }
 
     $query = "SELECT * FROM ntfy_notifications WHERE user_id = :userId";

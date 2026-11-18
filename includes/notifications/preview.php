@@ -15,14 +15,23 @@ require_once __DIR__ . '/../cancellation_deadline.php';
  */
 function wallos_notification_preview_context(SQLite3 $db, $userId, $kind, $today = null)
 {
-    $today = $today ?? date('Y-m-d');
+    if ($today === null) {
+        // The account's own calendar, as the crons use.
+        $stmt = $db->prepare('SELECT timezone FROM notification_settings WHERE user_id = :userId');
+        $stmt->bindValue(':userId', (int) $userId, SQLITE3_INTEGER);
+        $settingsRow = $stmt->execute()->fetchArray(SQLITE3_ASSOC) ?: [];
+        $today = (new DateTime('now', wallos_notification_timezone($settingsRow)))->format('Y-m-d');
+    }
     $lookups = wallos_notification_lookups($db, $userId);
     if (!class_exists('CurrencyFormatter')) {
         require_once __DIR__ . '/../currency_formatter.php';
     }
     CurrencyFormatter::useCurrencies($lookups['currencies']);
 
-    $stmt = $db->prepare('SELECT * FROM subscriptions WHERE user_id = :userId AND inactive = 0 ORDER BY next_payment ASC, id ASC LIMIT 3');
+    // One payer's digest, as the cron sends it: the payer of the next payment.
+    $stmt = $db->prepare('SELECT * FROM subscriptions WHERE user_id = :userId AND inactive = 0
+        AND payer_user_id = (SELECT payer_user_id FROM subscriptions WHERE user_id = :userId AND inactive = 0 ORDER BY next_payment ASC, id ASC LIMIT 1)
+        ORDER BY next_payment ASC, id ASC LIMIT 3');
     $stmt->bindValue(':userId', (int) $userId, SQLITE3_INTEGER);
     $result = $stmt->execute();
 
@@ -34,6 +43,10 @@ function wallos_notification_preview_context(SQLite3 $db, $userId, $kind, $today
         if ($kind === 'cancellation') {
             $deadline = wallos_cancel_deadline($row);
             $cancelBy = $deadline['cancel_by'] ?? $row['next_payment'];
+            // Cancellation reminders count down to the cancel-by date.
+            if ($deadline !== null) {
+                $days = wallos_days_between($today, $cancelBy);
+            }
             $extra = [
                 'cancel_by' => $cancelBy,
                 'deadline_note' => ' (cancel by ' . $cancelBy . ')',

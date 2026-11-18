@@ -144,6 +144,8 @@ You need NGINX or Apache and PHP 8.3 with these modules: `curl`, `dom`, `gd`, `i
 0 4 1 * * php /var/www/html/endpoints/cronjobs/generaterecommendations.php monthly >> /var/log/cron/generaterecommendations.log 2>&1
 ```
 
+Upgrading an existing install: replace the old `0 8 * * *` cancellation and `0 9 * * *` payment reminder entries with the two `*/15` lines above (do not add them alongside the old ones). Each account's reminders now go out at the "Send at" time in Settings → Notifications.
+
 If your web root isn't `/var/www/html/`, adjust the paths.
 
 ### Updating

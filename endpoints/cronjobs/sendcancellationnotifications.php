@@ -40,15 +40,10 @@ while ($result && ($row = $result->fetchArray(SQLITE3_ASSOC))) {
     $users[] = $row;
 }
 
-$settingsByUser = [];
-$result = $db->query('SELECT * FROM notification_settings');
-while ($result && ($row = $result->fetchArray(SQLITE3_ASSOC))) {
-    $settingsByUser[(int) $row['user_id']] = $row;
-}
 
 foreach ($users as $owner) {
     $userId = (int) $owner['id'];
-    $settings = $settingsByUser[$userId] ?? ['days' => 1, 'send_time' => '09:00'];
+    $settings = wallos_notification_settings_row($db, $userId);
 
     date_default_timezone_set(wallos_notification_timezone($settings)->getName());
     $now = new DateTime('now');
@@ -63,6 +58,7 @@ foreach ($users as $owner) {
         echo "For user: " . htmlspecialchars($owner['username']) . "<br />";
     }
 
+    $complete = true;
     try {
         $env = new WallosNotifyEnv($db, $userId);
         $channels = wallos_load_notification_channels($env, 'cancellation');
@@ -80,6 +76,15 @@ foreach ($users as $owner) {
                 // Mark what at least one channel delivered; the others are
                 // tried again on the next day's run.
                 wallos_record_cancellation_reminders($db, $userId, $markers, $delivered);
+                // Anything undelivered keeps the day open for a retry on the
+                // next run (the last day of a notice included).
+                foreach (['cancel', 'intro'] as $type) {
+                    foreach (array_keys($markers[$type]) as $subscriptionId) {
+                        if (empty($delivered[wallos_notification_key($type, $subscriptionId)])) {
+                            $complete = false;
+                        }
+                    }
+                }
             } elseif (php_sapi_name() !== 'cli') {
                 echo "Nothing to notify.<br />";
             }
@@ -88,9 +93,10 @@ foreach ($users as $owner) {
         }
     } catch (\Throwable $e) {
         // One account failing must not stop the others.
+        $complete = false;
         echo "Error processing cancellation reminders for user " . $userId . ": " . $e->getMessage() . "<br />\n";
     }
 
-    wallos_mark_notification_run($db, $userId, 'last_cancellation_run', $today);
+    wallos_mark_notification_run($db, $userId, 'last_cancellation_run', $today, $complete);
     date_default_timezone_set($containerTimezone);
 }

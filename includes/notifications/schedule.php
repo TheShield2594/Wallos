@@ -23,6 +23,21 @@
 const WALLOS_REMINDER_MAX_OFFSET = 365;
 const WALLOS_REMINDER_MAX_OFFSETS = 10;
 const WALLOS_CANCEL_LEAD_CHOICES = [0, 1, 3, 7, 14, 30, 60];
+const WALLOS_NOTIFICATION_MAX_ATTEMPTS = 4;
+
+/**
+ * The account's notification_settings row, read when its turn comes (a
+ * change saved while the cron works on other accounts is honoured).
+ */
+function wallos_notification_settings_row(SQLite3 $db, $userId)
+{
+    $stmt = $db->prepare('SELECT * FROM notification_settings WHERE user_id = :userId');
+    $stmt->bindValue(':userId', (int) $userId, SQLITE3_INTEGER);
+    $result = $stmt->execute();
+    $row = $result ? $result->fetchArray(SQLITE3_ASSOC) : false;
+
+    return $row ?: ['days' => 1, 'send_time' => '09:00'];
+}
 
 /**
  * Parses a list of reminder offsets ("7,3,0", [7, 3, 0]) into unique,
@@ -360,10 +375,39 @@ function wallos_days_between($today, $date)
  *
  * @param string $column 'last_payment_run' or 'last_cancellation_run'
  */
-function wallos_mark_notification_run(SQLite3 $db, $userId, $column, $today)
+function wallos_mark_notification_run(SQLite3 $db, $userId, $column, $today, $complete = true)
 {
     if (!in_array($column, ['last_payment_run', 'last_cancellation_run'], true)) {
         return;
+    }
+    // The account may not have a settings row yet.
+    $ensure = $db->prepare('INSERT INTO notification_settings (user_id, days) SELECT :userId, 1
+        WHERE NOT EXISTS (SELECT 1 FROM notification_settings WHERE user_id = :userId)');
+    $ensure->bindValue(':userId', (int) $userId, SQLITE3_INTEGER);
+    $ensure->execute();
+    if (!$complete) {
+        // Some reminder was not delivered: leave the day open so the next
+        // 15-minute run tries again, at most WALLOS_NOTIFICATION_MAX_ATTEMPTS
+        // times a day; after that the day is closed (tomorrow's windows
+        // still cover what remains due).
+        $attemptsColumn = $column === 'last_payment_run' ? 'payment_run_attempts' : 'cancellation_run_attempts';
+        $stmt = $db->prepare('SELECT ' . $attemptsColumn . ' FROM notification_settings WHERE user_id = :userId');
+        $stmt->bindValue(':userId', (int) $userId, SQLITE3_INTEGER);
+        $row = $stmt->execute()->fetchArray(SQLITE3_NUM);
+        $attempts = 0;
+        if ($row && is_string($row[0]) && strpos($row[0], $today . ':') === 0) {
+            $attempts = (int) substr($row[0], strlen($today) + 1);
+        }
+        $attempts++;
+        if ($attempts < WALLOS_NOTIFICATION_MAX_ATTEMPTS) {
+            $stmt = $db->prepare('UPDATE notification_settings SET ' . $attemptsColumn . ' = :attempts WHERE user_id = :userId');
+            $stmt->bindValue(':attempts', $today . ':' . $attempts, SQLITE3_TEXT);
+            $stmt->bindValue(':userId', (int) $userId, SQLITE3_INTEGER);
+            $stmt->execute();
+            if ($db->changes() > 0) {
+                return;
+            }
+        }
     }
     $stmt = $db->prepare('UPDATE notification_settings SET ' . $column . ' = :today WHERE user_id = :userId');
     $stmt->bindValue(':today', $today, SQLITE3_TEXT);

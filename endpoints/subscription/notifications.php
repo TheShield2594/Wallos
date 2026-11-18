@@ -23,7 +23,7 @@ $notify = !empty($data['notify']) ? 1 : 0;
 // notify_days_before, which replaces a list of reminders with that one.
 $hasSchedule = array_key_exists('notify_days_before', $data);
 $notifyDaysBefore = $hasSchedule ? (int) $data['notify_days_before'] : null;
-if ($hasSchedule && ($notifyDaysBefore < -1 || $notifyDaysBefore > 180)) {
+if ($hasSchedule && ($notifyDaysBefore < -1 || $notifyDaysBefore > 365)) {
     die(json_encode(["success" => false, "message" => translate('error', $i18n)]));
 }
 

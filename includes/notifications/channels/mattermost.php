@@ -14,7 +14,7 @@ class WallosMattermostChannel extends WallosNotificationChannel
             return false;
         }
 
-        $data = ['text' => $message['body']];
+        $data = ['text' => self::titledBody($message)];
         if (!empty($this->settings['bot_username'])) {
             $data['username'] = $this->settings['bot_username'];
         }

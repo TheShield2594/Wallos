@@ -28,7 +28,9 @@ $delete->bindValue(':kind', $kind, SQLITE3_TEXT);
 $delete->bindValue(':channel', $channel, SQLITE3_TEXT);
 
 if (!empty($data['reset']) || (trim($title) === '' && trim($body) === '')) {
-    $delete->execute();
+    if ($delete->execute() === false) {
+        die(json_encode(["success" => false, "message" => translate('error_saving_notifications', $i18n)]));
+    }
     die(json_encode(["success" => true, "action" => "reset", "message" => translate('template_reset', $i18n)]));
 }
 
@@ -37,16 +39,26 @@ if ($error !== null) {
     die(json_encode(["success" => false, "message" => translate('template_error', $i18n) . ': ' . $error]));
 }
 
-$db->exec('BEGIN IMMEDIATE');
-$delete->execute();
-$stmt = $db->prepare('INSERT INTO notification_templates (user_id, kind, channel, title, body) VALUES (:userId, :kind, :channel, :title, :body)');
-$stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
-$stmt->bindValue(':kind', $kind, SQLITE3_TEXT);
-$stmt->bindValue(':channel', $channel === '' ? null : $channel, $channel === '' ? SQLITE3_NULL : SQLITE3_TEXT);
-$stmt->bindValue(':title', $title, SQLITE3_TEXT);
-$stmt->bindValue(':body', $body, SQLITE3_TEXT);
-$saved = $stmt->execute() !== false;
-$db->exec($saved ? 'COMMIT' : 'ROLLBACK');
+// Replace the old template only inside a transaction that started: a
+// failure anywhere keeps the stored one.
+$saved = @$db->exec('BEGIN IMMEDIATE') !== false;
+if ($saved) {
+    $saved = $delete->execute() !== false;
+    $stmt = $saved ? $db->prepare('INSERT INTO notification_templates (user_id, kind, channel, title, body) VALUES (:userId, :kind, :channel, :title, :body)') : false;
+    $saved = $stmt !== false;
+    if ($saved) {
+        $stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
+        $stmt->bindValue(':kind', $kind, SQLITE3_TEXT);
+        $stmt->bindValue(':channel', $channel === '' ? null : $channel, $channel === '' ? SQLITE3_NULL : SQLITE3_TEXT);
+        $stmt->bindValue(':title', $title, SQLITE3_TEXT);
+        $stmt->bindValue(':body', $body, SQLITE3_TEXT);
+        $saved = $stmt->execute() !== false;
+    }
+    $saved = $saved && $db->exec('COMMIT') !== false;
+    if (!$saved) {
+        @$db->exec('ROLLBACK');
+    }
+}
 
 echo json_encode($saved
     ? ["success" => true, "action" => "saved", "message" => translate('notifications_settings_saved', $i18n)]

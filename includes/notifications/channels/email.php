@@ -68,6 +68,15 @@ class WallosEmailChannel extends WallosNotificationChannel
             }
             $this->env->log('Error sending email notification to ' . $address . ': ' . $mail->ErrorInfo);
         } catch (\Throwable $e) {
+            // PHPMailer sends to the accepted recipients, then throws for the
+            // rejected ones. A rejected CC is not a failed reminder when the
+            // payer's own address was accepted (it is not in the failed list).
+            $recipientsFailed = $e instanceof PHPMailer\PHPMailer\Exception
+                && $e->getCode() === PHPMailer\PHPMailer\PHPMailer::STOP_CONTINUE;
+            if ($recipientsFailed && $address !== '' && stripos($e->getMessage(), $address) === false) {
+                $this->env->log('Email notification sent; some CC addresses were rejected: ' . $e->getMessage());
+                return true;
+            }
             // Keep going: the next recipient may well be deliverable.
             $this->env->log('Error sending email notification to ' . $address . ': ' . $e->getMessage());
         }

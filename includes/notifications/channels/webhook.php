@@ -11,6 +11,7 @@ class WallosWebhookChannel extends WallosNotificationChannel
     const LABEL = 'Webhook';
     const TABLE = 'webhook_notifications';
     const ESCAPE = 'json';
+    const USES_MESSAGE = false;
 
     public function isEnabled($kind)
     {
@@ -84,7 +85,7 @@ class WallosWebhookChannel extends WallosNotificationChannel
                 'ssrf' => $pin,
                 'ignore_ssl' => !empty($this->settings['ignore_ssl']),
             ]);
-            if ($this->report($response, 'Webhook (' . ($subscription['name'] ?? '') . ')') && isset($subscription['key'])) {
+            if ($this->report($response, 'Webhook (subscription ' . (int) ($subscription['id'] ?? 0) . ')') && isset($subscription['key'])) {
                 $delivered[] = $subscription['key'];
             }
         }

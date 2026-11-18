@@ -17,6 +17,7 @@ function openNotificationsSettings(type) {
     } else {
       targetSection.classList.remove('is-open');
     }
+    syncNotificationHeaders();
 }
 
 function makeFetchCall(url, data, button) {
@@ -100,10 +101,24 @@ function loadNotificationTemplate() {
     const forKind = state.saved[kind] || {};
     const own = forKind[channel];
     const inherited = channel !== '' ? forKind[''] : undefined;
-    const source = own || inherited || state.defaults[kind];
+    const defaults = state.defaults[kind];
+    const titleField = document.getElementById('template_title');
+    const bodyField = document.getElementById('template_body');
 
-    document.getElementById('template_title').value = source.title || state.defaults[kind].title;
-    document.getElementById('template_body').value = source.body || state.defaults[kind].body;
+    if (channel === '') {
+        titleField.value = (own && own.title) || defaults.title;
+        bodyField.value = (own && own.body) || defaults.body;
+        titleField.placeholder = '';
+        bodyField.placeholder = '';
+    } else {
+        // A channel override keeps its blank fields blank: delivery fills
+        // them from the template for all channels, then the built-in one,
+        // which the placeholders show.
+        titleField.value = own ? own.title : '';
+        bodyField.value = own ? own.body : '';
+        titleField.placeholder = (inherited && inherited.title) || defaults.title;
+        bodyField.placeholder = (inherited && inherited.body) || defaults.body;
+    }
 
     const status = document.getElementById('template-status');
     status.textContent = own ? (channel === '' ? status.dataset.customAll : status.dataset.custom) : (inherited ? status.dataset.inherited : status.dataset.default);
@@ -232,7 +247,31 @@ function testNotificationsAppriseButton() {
     makeFetchCall('endpoints/notifications/testapprisenotifications.php', appriseFormData(), button);
 }
 
+// Section headers open with the keyboard too, and say whether they are open.
+function makeNotificationHeadersAccessible() {
+    document.querySelectorAll('.account-notification-section-header').forEach((header) => {
+        const panel = header.nextElementSibling;
+        header.setAttribute('role', 'button');
+        header.setAttribute('tabindex', '0');
+        header.setAttribute('aria-expanded', panel && panel.classList.contains('is-open') ? 'true' : 'false');
+        header.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                header.click();
+            }
+        });
+    });
+}
+
+function syncNotificationHeaders() {
+    document.querySelectorAll('.account-notification-section-header').forEach((header) => {
+        const panel = header.nextElementSibling;
+        header.setAttribute('aria-expanded', panel && panel.classList.contains('is-open') ? 'true' : 'false');
+    });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+    makeNotificationHeadersAccessible();
     toggleAppriseMode();
     loadNotificationTemplate();
 });

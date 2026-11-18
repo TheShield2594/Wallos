@@ -13,6 +13,8 @@
     last_payment_run       the local date payment reminders last ran for this user,
     last_cancellation_run  and cancellation reminders: the cron runs every 15
                            minutes and processes each user once a day.
+    payment_run_attempts,  "Y-m-d:n": runs today that left a reminder
+    cancellation_run_attempts  undelivered; the next runs retry it, up to a limit.
 
   subscriptions
     reminder_days                    per-subscription reminder offsets (NULL = use
@@ -54,6 +56,8 @@ $columns = [
         'repeat_max' => "INTEGER DEFAULT 0",
         'last_payment_run' => "TEXT DEFAULT NULL",
         'last_cancellation_run' => "TEXT DEFAULT NULL",
+        'payment_run_attempts' => "TEXT DEFAULT NULL",
+        'cancellation_run_attempts' => "TEXT DEFAULT NULL",
     ],
     'subscriptions' => [
         'reminder_days' => "TEXT DEFAULT NULL",

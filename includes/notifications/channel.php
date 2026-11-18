@@ -31,6 +31,8 @@ class WallosNotifyEnv
     public $mailerFactory;
     /** @var callable|null fn(string $line) */
     public $logger;
+    /** @var callable|null fn(string $host): string|null, resolves Apprise destination hosts (tests) */
+    public $destinationResolver;
     /** @var bool pause between per-subscription webhook calls */
     public $throttle = true;
 
@@ -120,7 +122,9 @@ class WallosNotifyEnv
             call_user_func($this->logger, $line);
             return;
         }
-        echo $line . "<br />\n";
+        // Run from the admin page the log is HTML: subscription and account
+        // names in it are data, not markup.
+        echo php_sapi_name() === 'cli' ? $line . "\n" : htmlspecialchars($line, ENT_QUOTES, 'UTF-8') . "<br />\n";
     }
 
     public function pause()
@@ -141,6 +145,8 @@ abstract class WallosNotificationChannel
     const TABLE = '';
     /** how {{ }} output is escaped in this channel's messages */
     const ESCAPE = 'none';
+    /** whether the channel sends the rendered message (the webhook sends its own payload) */
+    const USES_MESSAGE = true;
 
     /** @var array the channel's settings row */
     public $settings;
@@ -190,6 +196,62 @@ abstract class WallosNotificationChannel
      * @return bool whether the service accepted it
      */
     abstract protected function send(array $message, array $context);
+
+    /**
+     * The body with a custom title on top, for services without a title
+     * field; the default message (no custom title) is sent as before.
+     */
+    protected static function titledBody(array $message)
+    {
+        if (empty($message['custom_title']) || trim((string) $message['title']) === '') {
+            return $message['body'];
+        }
+
+        return $message['title'] . "\n\n" . $message['body'];
+    }
+
+    /**
+     * Splits text into parts of at most $limit characters, at line breaks
+     * where possible, so a long digest is sent whole as several messages.
+     *
+     * @return string[]
+     */
+    protected static function splitText($text, $limit)
+    {
+        if (mb_strlen($text, 'UTF-8') <= $limit) {
+            return [$text];
+        }
+        $parts = [];
+        $current = '';
+        foreach (preg_split('/(?<=\n)/', $text) as $line) {
+            while (mb_strlen($line, 'UTF-8') > $limit) {
+                if ($current !== '') {
+                    $parts[] = $current;
+                    $current = '';
+                }
+                $parts[] = mb_substr($line, 0, $limit, 'UTF-8');
+                $line = mb_substr($line, $limit, null, 'UTF-8');
+            }
+            if (mb_strlen($current . $line, 'UTF-8') > $limit) {
+                $parts[] = $current;
+                $current = '';
+            }
+            $current .= $line;
+        }
+        if ($current !== '') {
+            $parts[] = $current;
+        }
+
+        return $parts;
+    }
+
+    /**
+     * Adds a query parameter to a URL that may already have a query.
+     */
+    protected static function withQuery($url, $name, $value)
+    {
+        return $url . (strpos($url, '?') === false ? '?' : '&') . $name . '=' . rawurlencode($value);
+    }
 
     /**
      * Logs the outcome of an HTTP call and answers whether it was delivered.

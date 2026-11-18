@@ -84,23 +84,32 @@ function wallos_dispatch_notifications(WallosNotifyEnv $env, array $channels, $k
 {
     $delivered = [];
     foreach ($channels as $channel) {
-        try {
-            foreach ($contexts as $context) {
-                $message = wallos_render_notification_message($kind, $channel::NAME, $context, $templates, $channel::ESCAPE);
-                if ($message['error'] !== null) {
-                    $env->log('Template error (' . $channel::NAME . '), the default message was used: ' . $message['error']);
+        foreach ($contexts as $context) {
+            $context['kind'] = $kind;
+            // One payer failing must not stop the next payer, the channels
+            // after this one, or every account after this one.
+            try {
+                if (!$channel::USES_MESSAGE) {
+                    // The webhook sends its own payload, whatever the message
+                    // template renders to.
+                    $parts = [[['title' => '', 'body' => '', 'custom_title' => false, 'error' => null], $context]];
+                } else {
+                    $parts = wallos_notification_messages($kind, $channel::NAME, $context, $templates, $channel::ESCAPE);
                 }
-                if (trim($message['body']) === '') {
-                    continue;
+                foreach ($parts as [$message, $partContext]) {
+                    if ($message['error'] !== null) {
+                        $env->log('Template error (' . $channel::NAME . '), the default message was used: ' . $message['error']);
+                    }
+                    if ($channel::USES_MESSAGE && trim($message['body']) === '') {
+                        continue;
+                    }
+                    foreach ($channel->sendForPayer($message, $partContext) as $key) {
+                        $delivered[$key] = true;
+                    }
                 }
-                foreach ($channel->sendForPayer($message, $context) as $key) {
-                    $delivered[$key] = true;
-                }
+            } catch (\Throwable $e) {
+                $env->log('Error sending ' . $channel::LABEL . ' notifications: ' . $e->getMessage());
             }
-        } catch (\Throwable $e) {
-            // One channel failing must not stop the channels after it, or
-            // every account after this one.
-            $env->log('Error sending ' . $channel::LABEL . ' notifications: ' . $e->getMessage());
         }
     }
 

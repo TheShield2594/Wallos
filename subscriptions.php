@@ -715,6 +715,11 @@ if ($db->querySingle("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND 
               </label>
             <?php } ?>
           </div>
+          <div class="inline custom-reminder-row">
+            <input type="number" id="custom_reminder_days" min="0" max="365" step="1" autocomplete="off"
+              aria-label="<?= translate('custom_reminder_days', $i18n) ?>" placeholder="<?= translate('custom_reminder_days', $i18n) ?>">
+            <button type="button" class="button secondary-button thin" onclick="addCustomReminderChip()"><?= translate('add', $i18n) ?></button>
+          </div>
         </fieldset>
       </div>
 
