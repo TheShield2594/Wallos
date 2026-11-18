@@ -1,13 +1,17 @@
-# Exclude .vscode directory
-.vscode/
-
-# Exclude .git directory
+# The Dockerfile copies an allowlist of runtime paths into the image; this
+# file only keeps the build context small.
 .git/
 .github/
-
+.claude/
+.vscode/
+.idea/
+tests/
+dev/
+screenshots/
 *.md
 .gitignore
 .dockerignore
-
-# README screenshots and capture script; not used at runtime
-/screenshots/
+db/*
+!db/wallos.empty.db
+images/uploads/logos/*
+!images/uploads/logos/wallos.png

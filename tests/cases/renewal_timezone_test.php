@@ -146,7 +146,7 @@ wallos_test('intro periods end on the account calendar', function () {
 });
 
 wallos_test('the renewal cron runs often enough to follow local midnights', function () {
-    assert_contains('*/15 * * * * /usr/local/bin/php /var/www/html/endpoints/cronjobs/updatenextpayment.php', file_get_contents(WALLOS_ROOT . '/cronjobs'),
+    assert_contains('*/15 * * * * /usr/local/bin/php /var/www/html/endpoints/cronjobs/updatenextpayment.php', file_get_contents(WALLOS_ROOT . '/docker/crontab'),
         'the container runs the renewal cron every 15 minutes');
     assert_contains('wallos_run_renewals(', file_get_contents(WALLOS_ROOT . '/endpoints/cronjobs/updatenextpayment.php'),
         'the cron script uses the per-account renewal pass');

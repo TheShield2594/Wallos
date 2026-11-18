@@ -2,6 +2,14 @@ services:
   tally:
     container_name: tally
     image: ghcr.io/theshield2594/tally:main
+    # Optional hardening (see "Hardened containers" in the README): run
+    # without root and with a read-only root filesystem. The db and logos
+    # folders must belong to this user, and nginx then listens on 8080, so
+    # change the port mapping below to "8282:8080/tcp".
+    # user: "1000:1000"
+    # read_only: true
+    # tmpfs:
+    #   - /tmp
     ports:
       - "8282:80/tcp"
     environment:
