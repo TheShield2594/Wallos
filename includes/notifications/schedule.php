@@ -592,17 +592,22 @@ function wallos_collect_cancellation_reminders(SQLite3 $db, $userId, $today, arr
             $note = ($row['intro_type'] === 'trial' ? " (free trial ends " : " (intro price ends ")
                 . $row['intro_end_date'] . ", then " . $row['price'] . $symbol . ")";
             $cancelBy = $row['intro_end_date'];
-            $price = wallos_intro_price($row) . $symbol;
+            $amount = wallos_intro_price($row);
         } elseif (wallos_intro_converted_due($row, $today)) {
             $markers['intro'][(int) $row['id']] = 'converted:' . $row['intro_converted_on'];
             $note = " (intro period ended " . $row['intro_converted_on'] . "; the regular price now applies)";
             $cancelBy = $row['intro_converted_on'];
-            $price = $row['price'] . $symbol;
+            $amount = $row['price'];
         } else {
             continue;
         }
+        // The same amount in both fields: templates and the webhook read
+        // formatted_price, which otherwise shows the regular price during a
+        // free trial or promo.
         $entries[(int) $row['payer_user_id']][] = wallos_notification_entry($row, $lookups, wallos_days_between($today, $cancelBy), [
-            'price' => $price,
+            'price' => $amount . $symbol,
+            'formatted_price' => wallos_notification_format_price($amount,
+                (string) ($lookups['currencies'][$row['currency_id']]['code'] ?? ''), $symbol),
             'cancel_by' => $cancelBy,
             'deadline_note' => $note,
             'key' => wallos_notification_key('intro', $row['id']),
