@@ -52,7 +52,10 @@ if (
     $smtpAddress = $data["smtpaddress"];
     $smtpPort = (int) $data["smtpport"];
 
-    if (!validate_smtp_host($smtpAddress, $smtpPort, $db)) {
+    // The approved IP: the mailer connects to it directly (see
+    // wallos_pin_mailer_to_ip()) so the host is not resolved a second time.
+    $smtpIp = validate_smtp_host($smtpAddress, $smtpPort, $db);
+    if ($smtpIp === false) {
         die(json_encode([
             "success" => false,
             "message" => "Security Error: SMTP host must not target link-local or loopback addresses."
@@ -74,7 +77,7 @@ if (
     $mail->isSMTP();
     $mail->Timeout = 15;
 
-    $mail->Host = $smtpAddress;
+    wallos_pin_mailer_to_ip($mail, $smtpAddress, $smtpIp);
     $mail->SMTPAuth = $smtpAuth;
     if ($smtpAuth) {
         $mail->Username = $smtpUsername;

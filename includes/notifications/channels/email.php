@@ -6,7 +6,8 @@ class WallosEmailChannel extends WallosNotificationChannel
     const LABEL = 'Email';
     const TABLE = 'email_notifications';
 
-    private $allowed = null;
+    /** @var string|false|null the approved SMTP IP; null until checked */
+    private $smtpIp = null;
 
     protected function send(array $message, array $context)
     {
@@ -14,13 +15,15 @@ class WallosEmailChannel extends WallosNotificationChannel
 
         // Re-validate at send time: a save-time check alone is bypassable via
         // DNS rebinding between when the host was saved and when the cron fires.
-        if ($this->allowed === null) {
-            $this->allowed = $this->env->smtpAllowed($settings['smtp_address'] ?? '', (int) ($settings['smtp_port'] ?? 0));
-            if (!$this->allowed) {
+        // The mailer is then pinned to the approved IP so it cannot resolve
+        // the host to somewhere else between this check and the connection.
+        if ($this->smtpIp === null) {
+            $this->smtpIp = $this->env->smtpValidatedIp($settings['smtp_address'] ?? '', (int) ($settings['smtp_port'] ?? 0));
+            if ($this->smtpIp === false) {
                 $this->env->log('SSRF attempt detected for SMTP host. Email notifications not sent.');
             }
         }
-        if (!$this->allowed) {
+        if ($this->smtpIp === false) {
             return false;
         }
 
@@ -32,7 +35,7 @@ class WallosEmailChannel extends WallosNotificationChannel
             $mail->CharSet = 'UTF-8';
             $mail->isSMTP();
             $mail->Timeout = 15;
-            $mail->Host = $settings['smtp_address'];
+            wallos_pin_mailer_to_ip($mail, $settings['smtp_address'], $this->smtpIp);
             $smtpAuth = ($settings['smtp_username'] ?? '') !== '' || ($settings['smtp_password'] ?? '') !== '';
             $mail->SMTPAuth = $smtpAuth;
             if ($smtpAuth) {

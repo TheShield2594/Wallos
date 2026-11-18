@@ -30,7 +30,7 @@ function notification_test_env(SQLite3 $db, $userId, array &$requests, $answer =
 
             return ['host' => $host, 'ip' => '203.0.113.10', 'port' => 443];
         },
-        'smtpCheck' => fn() => true,
+        'smtpCheck' => fn($host) => $host === 'blocked.example' ? false : '203.0.113.25',
         'logger' => function ($line) use (&$log) {
             if (is_array($log)) {
                 $log[] = $line;

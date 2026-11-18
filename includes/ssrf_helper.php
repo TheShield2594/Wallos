@@ -216,16 +216,25 @@ function validate_webhook_url_for_ssrf($url, $db, $i18n, $userId = null) {
  * Private/reserved IPs (RFC-1918, link-local, loopback, CGNAT) are only
  * allowed if the host or IP appears in the admin Security Settings allowlist
  *
+ * Returns the IP address that was resolved and approved, so the caller can
+ * connect to exactly that address (see wallos_pin_mailer_to_ip()) instead of
+ * letting PHPMailer resolve the hostname a second time — a second lookup is a
+ * DNS-rebinding window between this check and the connection.
+ *
  * @param string  $host Hostname or IP
  * @param int     $port SMTP port (used for allowlist host:port matching)
  * @param SQLite3 $db
- * @return bool
+ * @return string|false The approved IP, or false when the host must not be used
  */
 function validate_smtp_host($host, $port, $db) {
+    $host = trim((string) $host);
+    if ($host === '') return false;
+
     $ip = gethostbyname($host);
 
     // DNS failure — gethostbyname returns the input unchanged on failure
     if ($ip === $host && filter_var($host, FILTER_VALIDATE_IP) === false) return false;
+    if (filter_var($ip, FILTER_VALIDATE_IP) === false) return false;
 
     $is_private = wallos_ip_is_private_or_reserved($ip);
 
@@ -245,7 +254,40 @@ function validate_smtp_host($host, $port, $db) {
         }
     }
 
-    return true;
+    return $ip;
+}
+
+/**
+ * Points a PHPMailer instance at an already-validated IP while keeping the
+ * configured hostname for TLS.
+ *
+ * The socket goes to $ip (no second DNS lookup), and the stream context's
+ * ssl.peer_name is set to $host, so the server certificate is still verified
+ * against — and SNI still names — the hostname the admin configured. This
+ * covers both implicit TLS (ssl://) and STARTTLS, since PHPMailer passes
+ * SMTPOptions to the stream context the socket is created with.
+ *
+ * @param PHPMailer\PHPMailer\PHPMailer $mail
+ * @param string $host The configured SMTP hostname (or IP)
+ * @param string $ip   The IP returned by validate_smtp_host()
+ */
+function wallos_pin_mailer_to_ip($mail, $host, $ip) {
+    $host = trim((string) $host);
+    // PHPMailer's Host takes a bracketed IPv6 literal (see isValidHost()).
+    $mail->Host = filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false ? '[' . $ip . ']' : $ip;
+
+    // Certificates name the host without brackets or a terminal DNS dot;
+    // an explicit peer_name is compared as given, so normalise it here.
+    $peerName = rtrim(trim($host, '[]'), '.');
+    $options = is_array($mail->SMTPOptions) ? $mail->SMTPOptions : [];
+    $options['ssl'] = array_merge($options['ssl'] ?? [], ['peer_name' => $peerName]);
+    $mail->SMTPOptions = $options;
+
+    // PHPMailer skips opportunistic STARTTLS when Host is literally
+    // 'localhost'; keep that behaviour now that Host holds the IP instead.
+    if (strtolower($peerName) === 'localhost') {
+        $mail->SMTPAutoTLS = false;
+    }
 }
 
 /**

@@ -25,7 +25,7 @@ class WallosNotifyEnv
     public $httpTransport;
     /** @var callable|null fn(string $url): array|false */
     public $ssrfCheck;
-    /** @var callable|null fn(string $host, int $port): bool */
+    /** @var callable|null fn(string $host, int $port): string|false, the approved IP */
     public $smtpCheck;
     /** @var callable|null fn(): object a PHPMailer-like mailer */
     public $mailerFactory;
@@ -107,13 +107,20 @@ class WallosNotifyEnv
         return is_url_safe_for_ssrf($url, $this->db, $this->userId);
     }
 
-    public function smtpAllowed($host, $port)
+    /**
+     * The IP an SMTP host was resolved to and approved for, or false when it
+     * must not be used. The mailer must connect to this IP (see
+     * wallos_pin_mailer_to_ip()) rather than resolving the host again.
+     *
+     * @return string|false
+     */
+    public function smtpValidatedIp($host, $port)
     {
-        if ($this->smtpCheck !== null) {
-            return (bool) call_user_func($this->smtpCheck, $host, $port);
-        }
+        $ip = $this->smtpCheck !== null
+            ? call_user_func($this->smtpCheck, $host, $port)
+            : validate_smtp_host($host, (int) $port, $this->db);
 
-        return validate_smtp_host($host, (int) $port, $this->db);
+        return is_string($ip) && filter_var($ip, FILTER_VALIDATE_IP) !== false ? $ip : false;
     }
 
     public function log($line)
