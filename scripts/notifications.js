@@ -48,8 +48,13 @@ function saveNotifications() {
     const button = document.getElementById("saveNotifications");
     const reminderDays = Array.from(document.querySelectorAll('#default-reminder-days input:checked'))
         .map((input) => parseInt(input.value, 10));
+    const reminderGroup = document.getElementById('default-reminder-days');
     if (reminderDays.length === 0) {
-        showErrorMessage(document.getElementById('default-reminder-days').dataset.none);
+        showErrorMessage(reminderGroup.dataset.none);
+        return;
+    }
+    if (reminderDays.length > Number(reminderGroup.dataset.max)) {
+        showErrorMessage(reminderGroup.dataset.tooMany);
         return;
     }
     button.disabled = true;
@@ -167,12 +172,22 @@ function saveNotificationTemplate(reset = false) {
             }
             showSuccessMessage(result.message);
             state.saved[kind] = state.saved[kind] || {};
-            if (reset) {
+            // The server says whether it stored or removed the template (a
+            // save with both fields empty is a reset too).
+            if (result.action === 'reset') {
                 delete state.saved[kind][channel];
             } else {
                 state.saved[kind][channel] = { title, body };
             }
-            loadNotificationTemplate();
+            // Reload the editor only if it still shows what was saved: a
+            // newer edit, or another template picked meanwhile, stays.
+            const unchanged = document.getElementById('template_kind').value === kind
+                && document.getElementById('template_channel').value === channel
+                && document.getElementById('template_title').value === title
+                && document.getElementById('template_body').value === body;
+            if (unchanged) {
+                loadNotificationTemplate();
+            }
         })
         .catch((error) => {
             button.disabled = false;

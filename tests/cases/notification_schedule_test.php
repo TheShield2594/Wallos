@@ -285,3 +285,44 @@ wallos_test('Apprise settings are validated before they are saved', function () 
     $save = file_get_contents(WALLOS_ROOT . '/endpoints/notifications/saveapprisenotifications.php');
     assert_contains('validate_webhook_url_for_ssrf(', $save, 'the server URL passes the SSRF check when saved');
 });
+
+wallos_test('review fixes: legacy NULL lead times, preserved fields, pruning and the run lock', function () {
+    assert_same([], wallos_subscription_reminder_days(['reminder_days' => null, 'notify_days_before' => null], [3]),
+        'a NULL lead time (set through the API as "") still sends no reminder');
+    assert_same(null, wallos_reminder_fields_from_input(['notify_days_before' => null])['notify_days_before'], 'and is stored as NULL');
+
+    $existing = ['reminder_days' => '7,3', 'notify_days_before' => 7, 'cancellation_notify_days_before' => 21];
+    $kept = wallos_reminder_fields_from_input(['mute_payment_until_cancellation' => '1'], $existing);
+    assert_same(['7,3', 7, 21], [$kept['reminder_days'], $kept['notify_days_before'], $kept['cancellation_notify_days_before']],
+        'an edit with reminders switched off keeps the stored schedule and lead time');
+    $reset = wallos_reminder_fields_from_input(['notify_days_before' => '-1', 'cancellation_notify_days_before' => '0'], $existing);
+    assert_same([null, -1, 0], [$reset['reminder_days'], $reset['notify_days_before'], $reset['cancellation_notify_days_before']],
+        'an explicit -1 and 0 still pick the default and no lead time');
+
+    $db = wallos_test_open_database();
+    wallos_test_create_user($db, 1, 'alice');
+    $unpaid = notification_test_subscription($db, 1, ['name' => 'Unpaid', 'next_payment' => '2024-01-10', 'auto_renew' => 0]);
+    $paid = notification_test_subscription($db, 1, ['name' => 'Paid', 'next_payment' => '2026-12-10']);
+    wallos_notification_log_record($db, 1, 'payment', [
+        ['subscription_id' => $unpaid, 'due_date' => '2024-01-10', 'offset' => -3],
+        ['subscription_id' => $paid, 'due_date' => '2024-01-10', 'offset' => 1],
+    ]);
+    wallos_notification_log_prune($db, 1, '2026-11-18');
+    assert_same(1, $db->querySingle('SELECT COUNT(*) FROM notification_log WHERE subscription_id = ' . $unpaid),
+        'the log of a payment still unpaid is kept, so its repeats are not sent again');
+    assert_same(0, $db->querySingle('SELECT COUNT(*) FROM notification_log WHERE subscription_id = ' . $paid), 'a past one is pruned');
+    $db->close();
+
+    $first = wallos_acquire_notification_lock('testlock');
+    assert_true($first !== false, 'the first run takes the lock');
+    assert_same(false, wallos_acquire_notification_lock('testlock'), 'an overlapping run does not');
+    flock($first, LOCK_UN);
+    fclose($first);
+    @unlink(WALLOS_ROOT . '/db/.notifications-testlock.lock');
+
+    foreach (['sendnotifications.php', 'sendcancellationnotifications.php'] as $cron) {
+        assert_contains('wallos_acquire_notification_lock(', file_get_contents(WALLOS_ROOT . '/endpoints/cronjobs/' . $cron), $cron . ' runs one at a time');
+    }
+    assert_contains('DELETE FROM notification_log WHERE subscription_id', file_get_contents(WALLOS_ROOT . '/endpoints/subscription/delete.php'),
+        'deleting a subscription drops its log rows');
+});

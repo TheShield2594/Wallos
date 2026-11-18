@@ -26,6 +26,13 @@ require_once __DIR__ . '/../../includes/budget_period_calculations.php';
 require 'settimezone.php';
 
 $force = php_sapi_name() !== 'cli' || in_array('--force', $argv ?? [], true);
+
+// One run at a time: an overlapping run would read the same unsent reminders.
+$notificationLock = wallos_acquire_notification_lock('payment');
+if ($notificationLock === false) {
+    echo "Another payment reminder run is in progress.\n";
+    exit;
+}
 $containerTimezone = date_default_timezone_get();
 
 if (php_sapi_name() == 'cli') {

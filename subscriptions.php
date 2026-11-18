@@ -703,7 +703,10 @@ if ($db->querySingle("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND 
           <legend class="visually-hidden"><?= translate('notify_me', $i18n) ?></legend>
           <div class="chip-group" id="subscription-reminder-days"
             data-day-before="<?= htmlspecialchars(translate('day_before', $i18n), ENT_QUOTES) ?>"
-            data-days-before="<?= htmlspecialchars(translate('days_before', $i18n), ENT_QUOTES) ?>">
+            data-days-before="<?= htmlspecialchars(translate('days_before', $i18n), ENT_QUOTES) ?>"
+            data-none="<?= htmlspecialchars(translate('pick_at_least_one_reminder', $i18n), ENT_QUOTES) ?>"
+            data-max="10"
+            data-too-many="<?= htmlspecialchars(sprintf(translate('too_many_reminders', $i18n), 10), ENT_QUOTES) ?>">
             <?php foreach ([0, 1, 2, 3, 5, 7, 14, 30, 60, 90] as $reminderChoice) { ?>
               <input type="checkbox" class="chip-input" id="subscription_reminder_<?= $reminderChoice ?>" name="reminder_days[]"
                 value="<?= $reminderChoice ?>" disabled>

@@ -21,6 +21,7 @@ $deleteStatements = [
     "DELETE FROM subscription_payments WHERE subscription_id = :subscriptionId AND user_id = :userId",
     "DELETE FROM subscription_price_changes WHERE subscription_id = :subscriptionId AND user_id = :userId",
     "DELETE FROM subscription_shares WHERE subscription_id = :subscriptionId AND user_id = :userId",
+    "DELETE FROM notification_log WHERE subscription_id = :subscriptionId AND user_id = :userId",
     "UPDATE subscriptions SET replacement_subscription_id = NULL WHERE replacement_subscription_id = :subscriptionId AND user_id = :userId",
 ];
 $deleted = @$db->exec('BEGIN IMMEDIATE') !== false;

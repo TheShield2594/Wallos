@@ -26,36 +26,52 @@ if ($reminderDays === []) {
     die(json_encode(["success" => false, "message" => translate('fill_mandatory_fields', $i18n)]));
 }
 
-$sendTime = wallos_normalize_send_time((string) ($data['send_time'] ?? '09:00'));
+$fail = function () use ($i18n) {
+    die(json_encode(["success" => false, "message" => translate('error_saving_notifications', $i18n)]));
+};
+
+$stmt = $db->prepare('SELECT * FROM notification_settings WHERE user_id = :userId');
+if ($stmt === false) {
+    $fail();
+}
+$stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
+$result = $stmt->execute();
+if ($result === false) {
+    $fail();
+}
+$current = $result->fetchArray(SQLITE3_ASSOC) ?: null;
+
+// A field the request leaves out keeps its saved value (older clients send
+// only `days`); a new row starts from the defaults.
+$sendTime = wallos_normalize_send_time((string) ($data['send_time'] ?? ($current['send_time'] ?? '09:00')));
 if ($sendTime === null) {
     die(json_encode(["success" => false, "message" => translate('invalid_send_time', $i18n)]));
 }
 
-$timezone = trim((string) ($data['timezone'] ?? ''));
+$timezone = trim((string) (array_key_exists('timezone', $data) ? $data['timezone'] : ($current['timezone'] ?? '')));
 if ($timezone !== '' && !wallos_valid_timezone($timezone)) {
     die(json_encode(["success" => false, "message" => translate('invalid_timezone', $i18n)]));
 }
 
-$repeatEvery = max(0, min(90, (int) ($data['repeat_every'] ?? 0)));
-$repeatMax = max(0, min(52, (int) ($data['repeat_max'] ?? 0)));
+$repeatEvery = max(0, min(90, (int) ($data['repeat_every'] ?? ($current['repeat_every'] ?? 0))));
+$repeatMax = max(0, min(52, (int) ($data['repeat_max'] ?? ($current['repeat_max'] ?? 0))));
 if ($repeatEvery === 0 || $repeatMax === 0) {
     $repeatEvery = 0;
     $repeatMax = 0;
 }
-$periodSummary = !empty($data['period_summary_at_period_start']) ? 1 : 0;
-
-$stmt = $db->prepare('SELECT COUNT(*) FROM notification_settings WHERE user_id = :userId');
-$stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
-$exists = (int) $stmt->execute()->fetchArray(SQLITE3_NUM)[0] > 0;
+$periodSummary = !empty($data['period_summary_at_period_start'] ?? ($current['period_summary_at_period_start'] ?? 0)) ? 1 : 0;
 
 $columns = 'days = :days, reminder_days = :reminderDays, send_time = :sendTime, timezone = :timezone,
     repeat_every = :repeatEvery, repeat_max = :repeatMax, period_summary_at_period_start = :periodSummary';
-$query = $exists
+$query = $current !== null
     ? 'UPDATE notification_settings SET ' . $columns . ' WHERE user_id = :userId'
     : 'INSERT INTO notification_settings (user_id, days, reminder_days, send_time, timezone, repeat_every, repeat_max, period_summary_at_period_start)
         VALUES (:userId, :days, :reminderDays, :sendTime, :timezone, :repeatEvery, :repeatMax, :periodSummary)';
 
 $stmt = $db->prepare($query);
+if ($stmt === false) {
+    $fail();
+}
 // `days` keeps the largest offset, for the API and the iCal feed.
 $stmt->bindValue(':days', max($reminderDays), SQLITE3_INTEGER);
 $stmt->bindValue(':reminderDays', wallos_format_reminder_days($reminderDays), SQLITE3_TEXT);
@@ -66,6 +82,6 @@ $stmt->bindValue(':repeatMax', $repeatMax, SQLITE3_INTEGER);
 $stmt->bindValue(':periodSummary', $periodSummary, SQLITE3_INTEGER);
 $stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
 
-echo json_encode($stmt && $stmt->execute()
+echo json_encode($stmt->execute() !== false
     ? ["success" => true, "message" => translate('notifications_settings_saved', $i18n)]
     : ["success" => false, "message" => translate('error_saving_notifications', $i18n)]);

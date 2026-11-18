@@ -180,8 +180,9 @@ function api_extra_fields($existing, $cycle)
             'cancellation_notify_days_before' => $_POST['cancellation_notify_days_before'] ?? ($existing['cancellation_notify_days_before'] ?? 0),
             'mute_payment_until_cancellation' => $_POST['mute_payment_until_cancellation'] ?? ($existing['mute_payment_until_cancellation'] ?? 0),
         ];
-        if (($reminderInput['notify_days_before'] === '' || $reminderInput['notify_days_before'] === null)) {
-            $reminderInput['notify_days_before'] = -1;
+        // '' stores NULL, as before: no payment reminder.
+        if ($reminderInput['notify_days_before'] === '') {
+            $reminderInput['notify_days_before'] = null;
         }
         $reminders = wallos_reminder_fields_from_input($reminderInput);
     }
@@ -1234,6 +1235,7 @@ switch ($action) {
             "DELETE FROM subscription_payments WHERE subscription_id = :subId AND user_id = :userId",
             "DELETE FROM subscription_price_changes WHERE subscription_id = :subId AND user_id = :userId",
             "DELETE FROM subscription_shares WHERE subscription_id = :subId AND user_id = :userId",
+            "DELETE FROM notification_log WHERE subscription_id = :subId AND user_id = :userId",
             "UPDATE subscriptions SET replacement_subscription_id = NULL WHERE replacement_subscription_id = :subId AND user_id = :userId",
         ];
         $deleted = api_save_atomically($db, function () use ($db, $deleteStatements, $subscriptionId, $userId) {

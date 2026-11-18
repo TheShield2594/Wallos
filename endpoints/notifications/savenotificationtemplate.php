@@ -29,7 +29,7 @@ $delete->bindValue(':channel', $channel, SQLITE3_TEXT);
 
 if (!empty($data['reset']) || (trim($title) === '' && trim($body) === '')) {
     $delete->execute();
-    die(json_encode(["success" => true, "message" => translate('template_reset', $i18n)]));
+    die(json_encode(["success" => true, "action" => "reset", "message" => translate('template_reset', $i18n)]));
 }
 
 $error = wallos_notification_template_error($title, $body);
@@ -49,5 +49,5 @@ $saved = $stmt->execute() !== false;
 $db->exec($saved ? 'COMMIT' : 'ROLLBACK');
 
 echo json_encode($saved
-    ? ["success" => true, "message" => translate('notifications_settings_saved', $i18n)]
+    ? ["success" => true, "action" => "saved", "message" => translate('notifications_settings_saved', $i18n)]
     : ["success" => false, "message" => translate('error_saving_notifications', $i18n)]);

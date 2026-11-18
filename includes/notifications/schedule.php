@@ -94,8 +94,12 @@ function wallos_subscription_reminder_days(array $subscription, array $defaultDa
     if ($own !== []) {
         return $own;
     }
-    $single = $subscription['notify_days_before'] ?? null;
-    if ($single !== null && $single !== '' && (int) $single >= 0) {
+    $single = array_key_exists('notify_days_before', $subscription) ? $subscription['notify_days_before'] : -1;
+    // NULL (an API client sent '') never sent a reminder, and still doesn't.
+    if ($single === null || $single === '') {
+        return [];
+    }
+    if ((int) $single >= 0) {
         return [(int) $single];
     }
 
@@ -272,6 +276,9 @@ function wallos_notification_log_record(SQLite3 $db, $userId, $kind, array $entr
     $sentAt = $sentAt ?? gmdate('Y-m-d H:i:s');
     $stmt = $db->prepare('INSERT OR IGNORE INTO notification_log (user_id, subscription_id, kind, due_date, "offset", sent_at)
         VALUES (:userId, :subscriptionId, :kind, :dueDate, :offset, :sentAt)');
+    if ($stmt === false) {
+        return false;
+    }
     foreach ($entries as $entry) {
         $stmt->bindValue(':userId', (int) $userId, SQLITE3_INTEGER);
         $stmt->bindValue(':subscriptionId', (int) $entry['subscription_id'], SQLITE3_INTEGER);
@@ -279,9 +286,13 @@ function wallos_notification_log_record(SQLite3 $db, $userId, $kind, array $entr
         $stmt->bindValue(':dueDate', $entry['due_date'], SQLITE3_TEXT);
         $stmt->bindValue(':offset', (int) $entry['offset'], SQLITE3_INTEGER);
         $stmt->bindValue(':sentAt', $sentAt, SQLITE3_TEXT);
-        $stmt->execute();
+        if ($stmt->execute() === false) {
+            return false;
+        }
         $stmt->reset();
     }
+
+    return true;
 }
 
 /**
@@ -290,7 +301,11 @@ function wallos_notification_log_record(SQLite3 $db, $userId, $kind, array $entr
 function wallos_notification_log_prune(SQLite3 $db, $userId, $today)
 {
     $cutoff = (new DateTime($today))->modify('-400 days')->format('Y-m-d');
-    $stmt = $db->prepare('DELETE FROM notification_log WHERE user_id = :userId AND due_date < :cutoff');
+    // Not the rows of a payment that is still the subscription's next one (an
+    // unpaid, overdue payment): dropping them would re-send its repeats.
+    $stmt = $db->prepare('DELETE FROM notification_log WHERE user_id = :userId AND due_date < :cutoff
+        AND NOT EXISTS (SELECT 1 FROM subscriptions s WHERE s.id = notification_log.subscription_id
+            AND s.user_id = notification_log.user_id AND substr(s.next_payment, 1, 10) = notification_log.due_date)');
     $stmt->bindValue(':userId', (int) $userId, SQLITE3_INTEGER);
     $stmt->bindValue(':cutoff', $cutoff, SQLITE3_TEXT);
     $stmt->execute();
@@ -427,6 +442,10 @@ function wallos_collect_payment_reminders(SQLite3 $db, $userId, array $settings,
  */
 function wallos_record_payment_reminders(SQLite3 $db, $userId, array $pending, array $delivered)
 {
+    // The log rows and the legacy marker are written together: a marker
+    // without its rows would count later offsets as already sent.
+    $inTransaction = @$db->exec('BEGIN IMMEDIATE') !== false;
+    $ok = true;
     $logEntries = [];
     $mark = $db->prepare('UPDATE subscriptions SET last_notified_payment = :nextPayment WHERE id = :id AND user_id = :userId');
     foreach ($pending as $key => $reminder) {
@@ -439,10 +458,18 @@ function wallos_record_payment_reminders(SQLite3 $db, $userId, array $pending, a
         $mark->bindValue(':nextPayment', $reminder['due_date'], SQLITE3_TEXT);
         $mark->bindValue(':id', $reminder['subscription_id'], SQLITE3_INTEGER);
         $mark->bindValue(':userId', (int) $userId, SQLITE3_INTEGER);
-        $mark->execute();
+        $ok = $mark->execute() !== false;
         $mark->reset();
+        if (!$ok) {
+            break;
+        }
     }
-    wallos_notification_log_record($db, $userId, 'payment', $logEntries);
+    $ok = $ok && wallos_notification_log_record($db, $userId, 'payment', $logEntries);
+    if ($inTransaction) {
+        $db->exec($ok ? 'COMMIT' : 'ROLLBACK');
+    }
+
+    return $ok;
 }
 
 /**
@@ -556,15 +583,27 @@ const WALLOS_CANCELLATION_CANDIDATES_SQL = "SELECT * FROM subscriptions WHERE us
  * @return array notify_days_before, reminder_days (string|null),
  *               cancellation_notify_days_before, mute_payment_until_cancellation
  */
-function wallos_reminder_fields_from_input(array $input)
+function wallos_reminder_fields_from_input(array $input, ?array $existing = null)
 {
+    // Editing: a form that sent no payment schedule (reminders switched
+    // off, so its fields were disabled) keeps the stored one, and one that
+    // sent no lead time keeps that. An explicit -1 still picks the default.
+    if ($existing !== null) {
+        if (!array_key_exists('reminder_days', $input) && !array_key_exists('notify_days_before', $input)) {
+            $input['reminder_days'] = $existing['reminder_days'] ?? null;
+            $input['notify_days_before'] = $existing['notify_days_before'] ?? -1;
+        }
+        if (!array_key_exists('cancellation_notify_days_before', $input)) {
+            $input['cancellation_notify_days_before'] = $existing['cancellation_notify_days_before'] ?? 0;
+        }
+    }
     $days = wallos_parse_reminder_days($input['reminder_days'] ?? null);
-    $single = $input['notify_days_before'] ?? -1;
-    $single = is_numeric($single) ? (int) $single : -1;
+    $single = array_key_exists('notify_days_before', $input) ? $input['notify_days_before'] : -1;
+    $single = $single === null ? null : (is_numeric($single) ? (int) $single : -1);
     if ($days !== []) {
         // The largest offset, for the API and the calendar feed.
         $single = max($days);
-    } elseif ($single < -1 || $single > WALLOS_REMINDER_MAX_OFFSET) {
+    } elseif ($single !== null && ($single < -1 || $single > WALLOS_REMINDER_MAX_OFFSET)) {
         $single = -1;
     }
 
@@ -586,7 +625,7 @@ function wallos_store_reminder_fields(SQLite3 $db, $subscriptionId, $userId, arr
     $stmt = $db->prepare('UPDATE subscriptions SET notify_days_before = :single, reminder_days = :days,
         cancellation_notify_days_before = :lead, mute_payment_until_cancellation = :mute
         WHERE id = :id AND user_id = :userId');
-    $stmt->bindValue(':single', $fields['notify_days_before'], SQLITE3_INTEGER);
+    $stmt->bindValue(':single', $fields['notify_days_before'], $fields['notify_days_before'] === null ? SQLITE3_NULL : SQLITE3_INTEGER);
     $stmt->bindValue(':days', $fields['reminder_days'], $fields['reminder_days'] === null ? SQLITE3_NULL : SQLITE3_TEXT);
     $stmt->bindValue(':lead', $fields['cancellation_notify_days_before'], SQLITE3_INTEGER);
     $stmt->bindValue(':mute', $fields['mute_payment_until_cancellation'], SQLITE3_INTEGER);
@@ -594,4 +633,33 @@ function wallos_store_reminder_fields(SQLite3 $db, $subscriptionId, $userId, arr
     $stmt->bindValue(':userId', (int) $userId, SQLITE3_INTEGER);
 
     return $stmt->execute() !== false;
+}
+
+/**
+ * Takes the lock of one reminder cron, so a run that overlaps another (a
+ * slow run, or the admin's manual run) cannot send the same reminders
+ * twice. Held until the process ends.
+ *
+ * @param string $name 'payment' or 'cancellation'
+ * @return resource|false the lock handle, or false when another run holds it
+ */
+function wallos_acquire_notification_lock($name)
+{
+    $path = __DIR__ . '/../../db/.notifications-' . preg_replace('/[^a-z]/', '', $name) . '.lock';
+    $handle = @fopen($path, 'c');
+    if ($handle === false) {
+        $handle = @fopen($path, 'r');
+    } else {
+        // The cron and the web server can run as different users.
+        @chmod($path, 0666);
+    }
+    if ($handle === false) {
+        return false;
+    }
+    if (!flock($handle, LOCK_EX | LOCK_NB)) {
+        fclose($handle);
+        return false;
+    }
+
+    return $handle;
 }

@@ -25,6 +25,13 @@ require_once __DIR__ . '/../../libs/PHPMailer/Exception.php';
 require 'settimezone.php';
 
 $force = php_sapi_name() !== 'cli' || in_array('--force', $argv ?? [], true);
+
+// One run at a time: an overlapping run would read the same unsent reminders.
+$notificationLock = wallos_acquire_notification_lock('cancellation');
+if ($notificationLock === false) {
+    echo "Another cancellation reminder run is in progress.\n";
+    exit;
+}
 $containerTimezone = date_default_timezone_get();
 
 $users = [];

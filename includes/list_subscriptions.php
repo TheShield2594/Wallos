@@ -223,16 +223,18 @@ function listRowSubtitle($subscription, $i18n, $lang)
     if ($isOverdue) {
         return [translate('overdue', $i18n) . ' · ' . sprintf(translate('was_due', $i18n), formatDate($subscription['next_payment_raw'], $lang)), 'danger'];
     }
-    if (!empty($subscription['intro_type'])) {
-        // "Free trial · ends Nov 4" while the intro period runs.
-        $label = translate($subscription['intro_type'] === 'trial' ? 'free_trial' : 'intro_price', $i18n);
-        return [$label . ' · ' . sprintf(translate('ends_on', $i18n), formatDate($subscription['intro_end_date'], $lang)), 'accent'];
-    }
     $dueSoonPrefix = '';
     if (isset($subscription['due_in_days']) && $subscription['due_in_days'] !== null && empty($subscription['paid_badge'])) {
         $days = (int) $subscription['due_in_days'];
         $dueSoonPrefix = $days === 0 ? translate('due_today', $i18n)
             : ($days === 1 ? translate('due_tomorrow', $i18n) : sprintf(translate('due_in_days', $i18n), $days));
+    }
+    if (!empty($subscription['intro_type'])) {
+        // "Free trial · ends Nov 4" while the intro period runs, and due soon
+        // when its first payment is inside the reminder window.
+        $label = translate($subscription['intro_type'] === 'trial' ? 'free_trial' : 'intro_price', $i18n);
+        $text = $label . ' · ' . sprintf(translate('ends_on', $i18n), formatDate($subscription['intro_end_date'], $lang));
+        return $dueSoonPrefix !== '' ? [$dueSoonPrefix . ' · ' . $text, 'warning'] : [$text, 'accent'];
     }
     $planText = listRowPlanText($subscription, $i18n, $lang);
     $schedule = $planText !== '' ? formatDate($subscription['next_payment_raw'], $lang) . ' · ' . $planText

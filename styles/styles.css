@@ -4975,8 +4975,16 @@ a.segmented-option {
 
 /* Due soon (issue #40): the progress bar takes the row's warning or
    overdue colour. */
+.list-row-progress.is-warning {
+  background-color: rgba(var(--warning-rgb), 0.25);
+}
+
 .list-row-progress.is-warning>span {
   background-color: var(--warning);
+}
+
+.list-row-progress.is-danger {
+  background-color: rgba(var(--danger-rgb), 0.25);
 }
 
 .list-row-progress.is-danger>span {

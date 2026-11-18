@@ -637,7 +637,9 @@ $upcomingPaymentsLimit = normalize_upcoming_payments_limit($settings['upcoming_p
                 <fieldset class="chip-fieldset">
                     <legend><?= translate('default_reminders', $i18n) ?></legend>
                     <div class="chip-group" id="default-reminder-days"
-                        data-none="<?= htmlspecialchars(translate('pick_at_least_one_reminder', $i18n), ENT_QUOTES) ?>">
+                        data-none="<?= htmlspecialchars(translate('pick_at_least_one_reminder', $i18n), ENT_QUOTES) ?>"
+                        data-max="<?= WALLOS_REMINDER_MAX_OFFSETS ?>"
+                        data-too-many="<?= htmlspecialchars(sprintf(translate('too_many_reminders', $i18n), WALLOS_REMINDER_MAX_OFFSETS), ENT_QUOTES) ?>">
                         <?php foreach ($notificationReminderChoices as $choice) { ?>
                             <input type="checkbox" class="chip-input" id="reminder_day_<?= $choice ?>" name="reminder_days[]"
                                 value="<?= $choice ?>" <?= in_array($choice, $notificationReminderDays, true) ? 'checked' : '' ?>>

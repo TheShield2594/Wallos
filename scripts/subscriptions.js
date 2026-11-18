@@ -80,8 +80,40 @@ function setReminderFields(subscription) {
   document.querySelector("#reminder_use_default").checked = days.length === 0;
   document.querySelector("#notify_days_before").value = days.length ? Math.max(...days) : -1;
   document.querySelector("#mute_payment_until_cancellation").checked = !!subscription && Number(subscription.mute_payment_until_cancellation) === 1;
-  document.querySelector("#cancellation_notify_days_before").value = String(subscription ? (subscription.cancellation_notify_days_before || 0) : 0);
+  const lead = document.querySelector("#cancellation_notify_days_before");
+  const leadDays = subscription ? Number(subscription.cancellation_notify_days_before || 0) : 0;
+  if (![...lead.options].some((option) => Number(option.value) === leadDays)) {
+    // A lead time set through the API: keep it selectable, so saving the
+    // form does not drop it.
+    const option = document.createElement('option');
+    option.value = String(leadDays);
+    option.textContent = `${leadDays} ${document.querySelector('#subscription-reminder-days').dataset.daysBefore}`;
+    lead.appendChild(option);
+  }
+  lead.value = String(leadDays);
   toggleReminderChips();
+}
+
+/*
+  Checks the chosen reminders before saving; the problem to show, or null.
+  Custom reminders need at least one chip and at most as many as the server
+  keeps (it would drop the smallest ones silently).
+*/
+function reminderFieldsError() {
+  const notify = document.querySelector("#notifications");
+  const useDefault = document.querySelector("#reminder_use_default");
+  if (!notify || notify.disabled || !notify.checked || useDefault.checked || useDefault.disabled) {
+    return null;
+  }
+  const group = document.querySelector('#subscription-reminder-days');
+  const chosen = group.querySelectorAll('input:checked').length;
+  if (chosen === 0) {
+    return group.dataset.none;
+  }
+  if (chosen > Number(group.dataset.max)) {
+    return group.dataset.tooMany;
+  }
+  return null;
 }
 
 function syncReminderFields() {
@@ -712,6 +744,12 @@ document.addEventListener('DOMContentLoaded', function () {
       const introType = document.querySelector("#intro_type");
       if (introType) introType.value = "none";
       setReminderFields(null);
+    }
+    const reminderError = reminderFieldsError();
+    if (reminderError) {
+      showErrorMessage(reminderError);
+      submitButton.disabled = false;
+      return;
     }
     syncReminderFields();
 

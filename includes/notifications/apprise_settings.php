@@ -40,7 +40,14 @@ function wallos_apprise_settings_from_input(array $input, $forTest = false)
     } elseif ($fields['urls'] === '' && $needed) {
         return ['error' => 'fill_mandatory_fields', 'fields' => []];
     }
-    if (strlen($fields['urls']) > 8000 || strlen($fields['tags']) > 500) {
+    if ($fields['mode'] === 'urls' && strlen($fields['urls']) > 8000) {
+        return ['error' => 'error', 'fields' => []];
+    }
+    if ($fields['mode'] === 'key') {
+        // The list is hidden in key mode: not stored, not checked.
+        $fields['urls'] = '';
+    }
+    if (strlen($fields['tags']) > 500) {
         return ['error' => 'error', 'fields' => []];
     }
 

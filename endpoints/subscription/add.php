@@ -280,6 +280,9 @@ if ($isEdit) {
         echo json_encode(['status' => 'Error', 'message' => translate('error', $i18n)]);
         exit();
     }
+    // Fields the form left out (reminders switched off) keep their stored values.
+    $reminderFields = wallos_reminder_fields_from_input($_POST, $editable);
+    $notifyDaysBefore = $reminderFields['notify_days_before'];
     if ($editable['access'] !== 'owner') {
         $sharedEdit = true;
         $viewerCurrencies = wallos_household_viewer_currencies($db, $userId);

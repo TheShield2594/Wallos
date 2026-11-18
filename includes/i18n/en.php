@@ -854,6 +854,7 @@ $i18n = [
     "due_in_days" => "Due in %d days",
     "invalid_send_time" => "Pick a send time on a 15-minute step.",
     "invalid_timezone" => "Unknown time zone.",
+    "too_many_reminders" => "Pick at most %d reminders.",
     "day" => "day",
     "ntfy" => "Ntfy",
 ];
