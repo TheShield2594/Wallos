@@ -797,6 +797,13 @@ if ($db->querySingle("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND 
     </div>
 
     <div class="form-group">
+      <input type="text" id="description" name="description" maxlength="200" autocomplete="off"
+        placeholder="<?= translate('subscription_description', $i18n) ?>"
+        aria-label="<?= translate('subscription_description', $i18n) ?>" aria-describedby="description-hint">
+      <p class="form-hint" id="description-hint"><?= translate('subscription_description_hint', $i18n) ?></p>
+    </div>
+
+    <div class="form-group">
       <div class="notes-editor">
         <div class="notes-toolbar">
           <button type="button" class="notes-toolbar-button" title="<?= translate('notes_bold', $i18n) ?>" onClick="applyNotesMarkdown('bold')">

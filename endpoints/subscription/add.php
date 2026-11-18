@@ -13,6 +13,7 @@ require_once '../../includes/notifications/schedule.php';
 require_once '../../includes/intro_pricing.php';
 require_once '../../includes/households.php';
 require_once '../../includes/price_changes.php';
+require_once '../../includes/ai_recommendations.php';
 require_once '../../includes/currency_formatter.php';
 require_once '../../includes/cost_sharing.php';
 
@@ -254,6 +255,8 @@ $payerUserId = $_POST["payer_user_id"];
 $categoryId = $_POST['category_id'];
 $notes = validate_markdown($_POST["notes"]);
 $url = validate($_POST['url']);
+// What the service is, for AI recommendations (issue #42).
+$description = wallos_normalize_subscription_description($_POST['description'] ?? '');
 $logoUrl = validate($_POST['logo-url']);
 $logo = "";
 $logoError = "";
@@ -584,7 +587,7 @@ if (!$isEdit) {
                         auto_renew, start_date, logo_text_color, logo_variant,
                         billing_anchor_day, renew_from_action, variable_amount, end_date,
                         total_payments, payments_made, ended_reason, plan_mode, tier_name, active_months,
-                        reimbursed_percent, reimbursed_reason
+                        reimbursed_percent, reimbursed_reason, description
                     ) VALUES (
                         :name, :logo, :price, :currencyId, :nextPayment, :cycle, :frequency, :notes,
                         :paymentMethodId, :payerUserId, :categoryId, :notify, :inactive, :url,
@@ -592,7 +595,7 @@ if (!$isEdit) {
                         :autoRenew, :startDate, :logoTextColor, :logoVariant,
                         :billingAnchorDay, :renewFromAction, :variableAmount, :endDate,
                         :totalPayments, :paymentsMade, :endedReason, :planMode, :tierName, :activeMonths,
-                        :reimbursedPercent, :reimbursedReason
+                        :reimbursedPercent, :reimbursedReason, :description
                     )";
 } else {
     $id = $_POST['id'];
@@ -642,7 +645,8 @@ if (!$isEdit) {
                         tier_name = :tierName,
                         active_months = :activeMonths,
                         reimbursed_percent = :reimbursedPercent,
-                        reimbursed_reason = :reimbursedReason";
+                        reimbursed_reason = :reimbursedReason,
+                        description = :description";
 
     if ($logo != "") {
         $sql .= ", logo = :logo, logo_text_color = :logoTextColor, logo_variant = :logoVariant";
@@ -691,6 +695,7 @@ $stmt->bindValue(':tierName', $tierName, $tierName === null ? SQLITE3_NULL : SQL
 $stmt->bindValue(':activeMonths', $activeMonths, SQLITE3_INTEGER);
 $stmt->bindValue(':reimbursedPercent', $reimbursedPercent, SQLITE3_FLOAT);
 $stmt->bindValue(':reimbursedReason', $reimbursedReason, $reimbursedReason === null ? SQLITE3_NULL : SQLITE3_TEXT);
+$stmt->bindValue(':description', $description, SQLITE3_TEXT);
 
 // The row, its cancellation notice, intro period and sharing are saved as
 // one unit: if any part fails, nothing is saved and the form stays open.

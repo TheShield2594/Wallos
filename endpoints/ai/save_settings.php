@@ -12,6 +12,9 @@ $aiApiKey     = isset($data['api_key']) ? trim($data['api_key']) : '';
 $aiOllamaHost = isset($data['ollama_host']) ? trim($data['ollama_host']) : '';
 $aiModel      = isset($data['model']) ? trim($data['model']) : '';
 $aiSchedule   = isset($data['ai_run_schedule']) ? $data['ai_run_schedule'] : "manual";
+// Send descriptions and website domains with the subscriptions (issue #42).
+// On by default; an older client that does not send it keeps it on.
+$aiIncludeDescriptions = array_key_exists('include_descriptions', $data) ? (bool) $data['include_descriptions'] : true;
 
 // Validate type
 if (empty($aiType) || !in_array($aiType, ['chatgpt', 'gemini', 'openrouter', 'ollama', 'openai-compatible'])) {
@@ -78,8 +81,8 @@ if ($deleted === false) {
 }
 
 $stmt = $db->prepare("
-    INSERT INTO ai_settings (user_id, type, enabled, api_key, model, url, run_schedule)
-    VALUES (:user_id, :type, :enabled, :api_key, :model, :url, :run_schedule)
+    INSERT INTO ai_settings (user_id, type, enabled, api_key, model, url, run_schedule, include_descriptions)
+    VALUES (:user_id, :type, :enabled, :api_key, :model, :url, :run_schedule, :include_descriptions)
 ");
 $stmt->bindValue(':user_id',  $userId,      SQLITE3_INTEGER);
 $stmt->bindValue(':type',     $aiType,      SQLITE3_TEXT);
@@ -88,6 +91,7 @@ $stmt->bindValue(':api_key',  $aiApiKey,    SQLITE3_TEXT);
 $stmt->bindValue(':model',    $aiModel,     SQLITE3_TEXT);
 $stmt->bindValue(':url',      $aiOllamaHost,SQLITE3_TEXT);
 $stmt->bindValue(':run_schedule', $aiSchedule, SQLITE3_TEXT);
+$stmt->bindValue(':include_descriptions', $aiIncludeDescriptions ? 1 : 0, SQLITE3_INTEGER);
 $result = $stmt->execute();
 
 if ($result) {

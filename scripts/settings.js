@@ -1327,6 +1327,7 @@ function saveAiSettingsButton() {
   const aiOllamaHost = document.querySelector("#ai_ollama_host").value.trim();
   const aiModel = document.querySelector("#ai_model").value;
   const aiRunSchedule = document.querySelector("#ai_run_schedule").value;
+  const aiIncludeDescriptions = document.querySelector("#ai_include_descriptions").checked;
 
   fetch('endpoints/ai/save_settings.php', {
     method: 'POST',
@@ -1334,7 +1335,7 @@ function saveAiSettingsButton() {
       'Content-Type': 'application/json',
       'X-CSRF-Token': window.csrfToken,
     },
-    body: JSON.stringify({ ai_enabled: aiEnabled, ai_type: aiType, api_key: aiApiKey, ollama_host: aiOllamaHost, model: aiModel, ai_run_schedule: aiRunSchedule })
+    body: JSON.stringify({ ai_enabled: aiEnabled, ai_type: aiType, api_key: aiApiKey, ollama_host: aiOllamaHost, model: aiModel, ai_run_schedule: aiRunSchedule, include_descriptions: aiIncludeDescriptions })
   })
     .then(response => response.json())
     .then(data => {

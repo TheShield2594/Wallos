@@ -255,6 +255,7 @@ function fillEditFormFields(subscription) {
   inactive.checked = subscription.inactive;
   const url = document.querySelector("#url");
   url.value = subscription.url;
+  document.querySelector("#description").value = subscription.description || '';
 
   const autoRenew = document.querySelector("#auto_renew");
   if (autoRenew) {

@@ -1748,6 +1748,11 @@ $upcomingPaymentsLimit = normalize_upcoming_payments_limit($settings['upcoming_p
                     </option>
                 </select>
             </div>
+            <div class="form-group-inline">
+                <input type="checkbox" id="ai_include_descriptions" name="ai_include_descriptions"
+                    <?= (int) ($aiSettings['include_descriptions'] ?? 1) === 1 ? "checked" : "" ?>>
+                <label for="ai_include_descriptions"><?= translate('ai_include_descriptions', $i18n) ?></label>
+            </div>
             <div class="buttons wrap mobile-reverse">
                 <?php
                 $canBeExecuted = !empty($aiSettings['model']) && !empty($aiSettings['enabled']) && $aiSettings['enabled'] == 1;
@@ -1762,6 +1767,7 @@ $upcomingPaymentsLimit = normalize_upcoming_payments_limit($settings['upcoming_p
             </div>
             <div class="settings-notes">
                 <p><i class="fa-solid fa-circle-info"></i><?= translate('ai_recommendations_info', $i18n) ?></p>
+                <p><i class="fa-solid fa-circle-info"></i><?= translate('ai_include_descriptions_info', $i18n) ?></p>
                 <p><i class="fa-solid fa-circle-info"></i><?= translate('may_take_time', $i18n) ?></p>
                 <p><i
                         class="fa-solid fa-circle-info"></i><?= translate('recommendations_visible_on_dashboard', $i18n) ?>

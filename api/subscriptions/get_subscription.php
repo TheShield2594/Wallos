@@ -35,6 +35,7 @@ Example response:
     "category_id": 3,
     "notify": 1,
     "url": "https://netflix.com",
+    "description": "",
     "inactive": 0,
     "notify_days_before": 2,
     "user_id": 1,
