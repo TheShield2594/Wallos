@@ -3556,6 +3556,15 @@ input[type="color"]::-moz-color-swatch {
   color: var(--text2);
 }
 
+.user-role-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border, currentColor);
+  color: var(--text2);
+}
+
 .account-2fa .buttons {
   justify-content: flex-start;
 }

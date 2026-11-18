@@ -2,7 +2,7 @@
 /*
 This API Endpoint accepts POST requests only.
 It receives the following parameters:
-- api_key: the API key of the user (must be user ID 1 / admin).
+- api_key: the API key of the user (must belong to an admin).
 - registrations_open: (optional) '1' or '0' (allow new signups).
 - max_users: (optional) maximum allowed users (integer).
 - require_email_verification: (optional) '1' or '0'.
@@ -33,6 +33,7 @@ Example response:
 */
 
 require_once '../../includes/connect_endpoint.php';
+require_once __DIR__ . '/../../includes/admin_roles.php';
 require_once '../../includes/ssrf_helper.php';
 require_once '../../includes/oidc_settings.php';
 
@@ -76,12 +77,12 @@ if (!$user) {
 
 $userId = $user['id'];
 
-// Must be Admin user (ID 1)
-if ($userId !== 1) {
+// Must be an admin
+if (!wallos_is_admin($db, $userId)) {
     echo json_encode([
         'success' => false,
         'title' => 'Forbidden',
-        'message' => 'Only the admin user (user ID 1) can update global settings.'
+        'message' => 'Only an admin can update global settings.'
     ]);
     exit;
 }

@@ -299,6 +299,28 @@ function removeUser(userId) {
 
 }
 
+function setUserAdmin(userId, isAdmin) {
+  fetch('endpoints/admin/setuseradmin.php', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRF-Token': window.csrfToken,
+    },
+    body: JSON.stringify({ userId: userId, isAdmin: isAdmin })
+  })
+    .then(response => response.json())
+    .then(data => {
+      if (data.success) {
+        showSuccessMessage(data.message);
+        // The badges, buttons and last-admin rules all depend on the new role.
+        setTimeout(() => window.location.reload(), 600);
+      } else {
+        showErrorMessage(data.message);
+      }
+    })
+    .catch(error => showErrorMessage('Error:', error));
+}
+
 function addUserButton() {
   const button = document.getElementById('addUserButton');
   button.disabled = true;
@@ -467,6 +489,16 @@ function saveOidcSettingsButton() {
   const oidcAutoCreateUser = document.getElementById("oidcAutoCreateUser").checked ? 1 : 0;
   const oidcPasswordLoginDisabled = document.getElementById("oidcPasswordLoginDisabled").checked ? 1 : 0;
   const oidcRequireEmailVerified = document.getElementById("oidcRequireEmailVerified").checked ? 1 : 0;
+  const oidcRolesClaim = document.getElementById("oidcRolesClaim").value;
+  const oidcAdminValues = document.getElementById("oidcAdminValues").value;
+
+  // Turning password login off locks out every account without an OIDC link.
+  const passwordLoginCheckbox = document.getElementById("oidcPasswordLoginDisabled");
+  if (oidcPasswordLoginDisabled === 1 && passwordLoginCheckbox.dataset.wasChecked !== "1"
+    && !confirm(passwordLoginCheckbox.dataset.confirm)) {
+    button.disabled = false;
+    return;
+  }
 
   const data = {
     oidcName: oidcName,
@@ -482,7 +514,9 @@ function saveOidcSettingsButton() {
     oidcAuthStyle: oidcAuthStyle,
     oidcAutoCreateUser: oidcAutoCreateUser,
     oidcPasswordLoginDisabled: oidcPasswordLoginDisabled,
-    oidcRequireEmailVerified: oidcRequireEmailVerified
+    oidcRequireEmailVerified: oidcRequireEmailVerified,
+    oidcRolesClaim: oidcRolesClaim,
+    oidcAdminValues: oidcAdminValues
   };
 
 

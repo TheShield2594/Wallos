@@ -36,6 +36,7 @@ Example response:
 */
 
 require_once '../../includes/connect_endpoint.php';
+require_once __DIR__ . '/../../includes/admin_roles.php';
 require_once '../../includes/oidc_settings.php';
 
 header('Content-Type: application/json; charset=UTF-8');
@@ -74,7 +75,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" || $_SERVER["REQUEST_METHOD"] === "GET
 
     $userId = $user['id'];
 
-    if ($userId !== 1) {
+    if (!wallos_is_admin($db, $userId)) {
         $response = [
             "success" => false,
             "title" => "Invalid user"

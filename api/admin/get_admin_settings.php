@@ -2,7 +2,7 @@
 /*
 This API Endpoint accepts both POST and GET requests.
 It receives the following parameters:
-- api_key: the API key of the user (must be user ID 1 / admin).
+- api_key: the API key of the user (must belong to an admin).
 
 It returns a JSON object with the following properties:
 - success: whether the request was successful (boolean).
@@ -37,6 +37,7 @@ Example response:
 */
 
 require_once '../../includes/connect_endpoint.php';
+require_once __DIR__ . '/../../includes/admin_roles.php';
 
 header('Content-Type: application/json; charset=UTF-8');
 
@@ -74,7 +75,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" || $_SERVER["REQUEST_METHOD"] === "GET
 
     $userId = $user['id'];
 
-    if ($userId !== 1) {
+    if (!wallos_is_admin($db, $userId)) {
         $response = [
             "success" => false,
             "title" => "Invalid user"

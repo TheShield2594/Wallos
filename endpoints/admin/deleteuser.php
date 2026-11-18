@@ -8,12 +8,22 @@ require_once '../../includes/logo_cleanup.php';
 $postData = file_get_contents("php://input");
 $data = json_decode($postData, true);
 
-$userId = $data['userId'];
+$adminUserId = (int) $userId;
+$userId = (int) ($data['userId'] ?? 0);
 
-if ($userId == 1) {
+// The account doing the deleting stays (it deletes itself from Profile), and
+// the last admin stays so the instance is never left without one. Any other
+// account can go, the one with id 1 included: the instance-wide settings are
+// not tied to it.
+if ($userId <= 0 || $userId === $adminUserId) {
     die(json_encode([
         "success" => false,
         "message" => translate('error', $i18n)
+    ]));
+} elseif (!wallos_can_delete_user($db, $userId)) {
+    die(json_encode([
+        "success" => false,
+        "message" => translate('cannot_remove_last_admin', $i18n)
     ]));
 } else {
     // Collect this account's uploaded logo files before its rows go, so they

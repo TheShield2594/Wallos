@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/admin_roles.php';
+
 function wallos_get_ssrf_allowlist_env_value()
 {
     $value = getenv('SSRF_ALLOWLIST');
@@ -180,7 +182,7 @@ function validate_webhook_url_for_ssrf($url, $db, $i18n, $userId = null) {
     if ($is_private) {
         $ssrfConfiguration = wallos_get_effective_ssrf_allowlist($db);
 
-        if ($userId != 1 && !$ssrfConfiguration['allow_standard_users']) {
+        if (!wallos_is_admin($db, $userId) && !$ssrfConfiguration['allow_standard_users']) {
             die(json_encode([
                 "success" => false,
                 "message" => "Security Block: Standard users are not permitted to use internal network addresses."
@@ -398,7 +400,7 @@ function is_url_safe_for_ssrf($url, $db, $userId = null) {
     if ($is_private) {
         $ssrfConfiguration = wallos_get_effective_ssrf_allowlist($db);
 
-        if ($userId != 1 && !$ssrfConfiguration['allow_standard_users']) {
+        if (!wallos_is_admin($db, $userId) && !$ssrfConfiguration['allow_standard_users']) {
             return false; // private, user is not admin, and standard users aren't opted in — skip silently
         }
 

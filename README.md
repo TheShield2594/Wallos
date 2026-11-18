@@ -200,6 +200,16 @@ If `OIDC_ISSUER` is set, Tally reads `/.well-known/openid-configuration` and use
 | `OIDC_AUTO_CREATE_USER` | Create user automatically |
 | `OIDC_DISABLE_PASSWORD_LOGIN` | Disable password login |
 | `OIDC_REQUIRE_EMAIL_VERIFIED` | Require verified email for account linking |
+| `OIDC_ROLES_CLAIM` | Roles claim |
+| `OIDC_ADMIN_VALUES` | Admin values |
+
+#### Admins and OIDC-only sign-in
+
+An account is an admin when it has the admin role; the account that set the instance up is the first one. Admins can promote and demote others under **Admin → User Management**. The last admin can't be demoted or deleted.
+
+To let the identity provider decide, set **Roles claim** (for example `groups`, or `realm_access.roles` for Keycloak) and **Admin values** (a comma-separated list such as `tally-admins`). On every OIDC login Tally reads that claim from the ID token and the user info response (a list, or a string separated by spaces or commas) and grants or removes the admin role. It never removes the last admin this way; it logs a warning instead.
+
+**Disable password login** can be turned on with any number of accounts once at least one admin account is linked to OIDC (sign in with OIDC as that admin once). If you lock yourself out, set `TALLY_FORCE_PASSWORD_LOGIN=true` on the container to turn password login back on, sign in, fix the settings, then remove the variable.
 
 ### SSRF allowlist
 

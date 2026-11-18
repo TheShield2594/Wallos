@@ -9,7 +9,7 @@ It receives the following parameters:
 - disabled_to_bottom: whether to sort the inactive subscriptions to the bottom (string) default false. Must be the literal string "true" to take effect.
 - sort: the sorting method (string) default next_payment ['name', 'id', 'next_payment', 'price', 'payer_user_id', 'category_id', 'payment_method_id', 'inactive', 'alphanumeric'].
 - convert_currency: whether to convert to the main currency (string) default false. Must be the literal string "true" to take effect.
-- all-user-subscription: whether to return subscriptions for every user instead of just the caller (string) default null. Only honored when api_key belongs to user id 1; adds the "users" field to the response.
+- all-user-subscription: whether to return subscriptions for every user instead of just the caller (string) default null. Only honored when api_key belongs to an admin; adds the "users" field to the response.
 - api_key: the API key of the user.
 
 It returns a JSON object with the following properties:
@@ -101,6 +101,7 @@ Example response:
 */
 
 require_once '../../includes/connect_endpoint.php';
+require_once __DIR__ . '/../../includes/admin_roles.php';
 require_once __DIR__ . '/../../includes/cancellation_deadline.php';
 require_once __DIR__ . '/../../includes/intro_pricing.php';
 require_once '../../includes/currency_rates.php';
@@ -145,7 +146,8 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" || $_SERVER["REQUEST_METHOD"] === "GET
     $userCurrencyId = $user['main_currency'];
 
     $allUserSubscription = isset($_REQUEST['all-user-subscription']) ? $_REQUEST['all-user-subscription'] : null;
-    if ($allUserSubscription == 1 && $userId != 1) {
+    $isAdminCaller = wallos_is_admin($db, $userId);
+    if ($allUserSubscription == 1 && !$isAdminCaller) {
         $response = [
             "success" => false,
             "title" => "Denied. Not admin user"
@@ -218,7 +220,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" || $_SERVER["REQUEST_METHOD"] === "GET
 
     // Construction of the main SQL Query
     $params = [];
-    if ($allUserSubscription == 1 && $userId == 1) {
+    if ($allUserSubscription == 1 && $isAdminCaller) {
         $sql = "SELECT * FROM subscriptions WHERE 1 = 1";
     } else {
         $sql = "SELECT * FROM subscriptions WHERE user_id = :userId";
@@ -337,7 +339,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" || $_SERVER["REQUEST_METHOD"] === "GET
         "notes" => []
     ];
 
-    if ($allUserSubscription == 1 && $userId == 1) {
+    if ($allUserSubscription == 1 && $isAdminCaller) {
         $sql = "PRAGMA table_info(user)";
         $stmt = $db->prepare($sql);
         $result = $stmt->execute();

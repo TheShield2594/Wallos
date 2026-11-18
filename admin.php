@@ -31,7 +31,7 @@ function oidc_input_attrs($field, $managedFields)
 }
 
 // get user accounts
-$stmt = $db->prepare('SELECT id, username, email FROM user ORDER BY id ASC');
+$stmt = $db->prepare('SELECT id, username, email, is_admin, oidc_sub FROM user ORDER BY id ASC');
 $result = $stmt->execute();
 
 $users = [];
@@ -41,6 +41,20 @@ while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
 $userCount = is_array($users) ? count($users) : 0;
 
 $loginDisabledAllowed = $userCount == 1 && $settings['registrations_open'] == 0;
+
+$adminCount = 0;
+$oidcAdminCount = 0;
+foreach ($users as $user) {
+    if ((int) $user['is_admin'] === 1) {
+        $adminCount++;
+        if (!empty($user['oidc_sub'])) {
+            $oidcAdminCount++;
+        }
+    }
+}
+// Password login can be turned off with any number of accounts, once an admin
+// can sign in through the identity provider (issue #45).
+$passwordLoginDisableAllowed = $oidcAdminCount > 0 || (int) $oidcSettings['password_login_disabled'] === 1;
 ?>
 
 <?php page_toolbar_start(translate('admin', $i18n)); ?>
@@ -136,7 +150,10 @@ $loginDisabledAllowed = $userCount == 1 && $settings['registrations_open'] == 0;
             <div class="user-list">
                 <?php
                 foreach ($users as $user) {
-                    $userIcon = $user['id'] == 1 ? 'fa-user-shield' : 'fa-user';
+                    $userIsAdmin = (int) $user['is_admin'] === 1;
+                    $userIcon = $userIsAdmin ? 'fa-user-shield' : 'fa-user';
+                    $isLastAdmin = $userIsAdmin && $adminCount <= 1;
+                    $isSelf = (int) $user['id'] === (int) $userId;
                     ?>
                     <div class="form-group-inline" data-userid="<?= $user['id'] ?>">
                         <div class="user-list-row">
@@ -145,6 +162,12 @@ $loginDisabledAllowed = $userCount == 1 && $settings['registrations_open'] == 0;
                                     <i class="fa-solid <?= $userIcon ?>"></i>
                                 </div>
                                 <?= htmlspecialchars($user['username']) ?>
+                                <?php if ($userIsAdmin) { ?>
+                                    <span class="user-role-badge"><?= translate('admin', $i18n) ?></span>
+                                <?php } ?>
+                                <?php if (!empty($user['oidc_sub'])) { ?>
+                                    <span class="user-role-badge" title="<?= translate('linked_to_oidc', $i18n) ?>">OIDC</span>
+                                <?php } ?>
                             </div>
                             <div title="<?= translate('email', $i18n) ?>">
                                 <div class="user-list-icon">
@@ -154,8 +177,20 @@ $loginDisabledAllowed = $userCount == 1 && $settings['registrations_open'] == 0;
                             </div>
                         </div>
                         <div>
+                            <?php if ($userIsAdmin) { ?>
+                                <button class="image-button medium<?= $isLastAdmin ? ' disabled' : '' ?>" <?= $isLastAdmin ? 'disabled' : '' ?>
+                                    onClick="setUserAdmin(<?= (int) $user['id'] ?>, false)"
+                                    title="<?= translate($isLastAdmin ? 'cannot_remove_last_admin' : 'remove_admin', $i18n) ?>">
+                                    <i class="fa-solid fa-user-minus"></i>
+                                </button>
+                            <?php } else { ?>
+                                <button class="image-button medium" onClick="setUserAdmin(<?= (int) $user['id'] ?>, true)"
+                                    title="<?= translate('make_admin', $i18n) ?>">
+                                    <i class="fa-solid fa-user-shield"></i>
+                                </button>
+                            <?php } ?>
                             <?php
-                            if ($user['id'] != 1) {
+                            if (!$isLastAdmin && !$isSelf) {
                                 ?>
                                 <button class="image-button medium" onClick="removeUser(<?= $user['id'] ?>)"
                                     title="<?= translate('delete_user', $i18n) ?>">
@@ -333,8 +368,32 @@ $loginDisabledAllowed = $userCount == 1 && $settings['registrations_open'] == 0;
             <div class="form-group-inline">
                 <input type="checkbox" id="oidcPasswordLoginDisabled"
                     <?= $oidcSettings['password_login_disabled'] ? 'checked' : '' ?>
-                    <?= oidc_input_attrs('password_login_disabled', $oidcManagedFields) ?> />
+                    data-was-checked="<?= $oidcSettings['password_login_disabled'] ? '1' : '0' ?>"
+                    data-confirm="<?= htmlspecialchars(translate('disable_password_login_confirmation', $i18n)) ?>"
+                    <?= isset($oidcManagedFields['password_login_disabled']) ? oidc_input_attrs('password_login_disabled', $oidcManagedFields) : ($passwordLoginDisableAllowed ? '' : 'disabled') ?> />
                 <label for="oidcPasswordLoginDisabled"><?= translate('disable_password_login', $i18n) ?></label>
+            </div>
+            <div class="settings-notes">
+                <p>
+                    <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                    <?= translate($passwordLoginDisableAllowed ? 'disable_password_login_info' : 'password_login_needs_oidc_admin', $i18n) ?>
+                </p>
+            </div>
+            <div class="form-group">
+                <label for="oidcRolesClaim"><?= translate('oidc_roles_claim', $i18n) ?></label>
+                <input type="text" id="oidcRolesClaim" placeholder="groups" autocomplete="off"
+                    value="<?= htmlspecialchars($oidcSettings['roles_claim']) ?>" <?= oidc_input_attrs('roles_claim', $oidcManagedFields) ?> />
+            </div>
+            <div class="form-group">
+                <label for="oidcAdminValues"><?= translate('oidc_admin_values', $i18n) ?></label>
+                <input type="text" id="oidcAdminValues" placeholder="tally-admins" autocomplete="off"
+                    value="<?= htmlspecialchars($oidcSettings['admin_values']) ?>" <?= oidc_input_attrs('admin_values', $oidcManagedFields) ?> />
+            </div>
+            <div class="settings-notes">
+                <p>
+                    <i class="fa-solid fa-circle-info"></i>
+                    <?= translate('oidc_role_mapping_info', $i18n) ?>
+                </p>
             </div>
             <div class="form-group-inline">
                 <input type="checkbox" id="oidcRequireEmailVerified"

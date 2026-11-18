@@ -299,7 +299,7 @@ while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
         </div>
         <div>
             <?php
-            if ($userId != 1 && !$demoMode) {
+            if (wallos_can_delete_user($db, $userId) && !$demoMode) {
                 ?>
                 <h3><?= translate('danger_zone', $i18n) ?></h3>
                 <div class="form-group-inline">
