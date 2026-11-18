@@ -143,8 +143,12 @@ require_once __DIR__ . '/getdbkeys.php';
         </section>
 
         <section class="card hide" id="details-price-changes-card">
-          <h3 class="card-title"><?= translate('price_changes', $i18n) ?></h3>
+          <h3 class="card-title"><?= translate('price_history', $i18n) ?></h3>
+          <p class="price-history-summary" id="details-price-history-summary"></p>
+          <div class="price-history-chart hide" id="details-price-history-chart" role="img"
+            aria-label="<?= htmlspecialchars(translate('price_history_chart', $i18n)) ?>"></div>
           <ul class="history-list" id="details-price-changes-list"></ul>
+          <p class="card-footnote hide" id="details-price-history-started"></p>
         </section>
 
         <section class="card hide" id="details-notes-item">
@@ -222,6 +226,12 @@ $detailsLookups = [
     'per_month_short' => translate('per_month_short', $i18n),
     'price_change_provider' => translate('price_change_provider', $i18n),
     'price_change_tier' => translate('price_change_tier', $i18n),
+    'price_history_up' => translate('price_history_up', $i18n),
+    'price_history_down' => translate('price_history_down', $i18n),
+    'price_history_changed' => translate('price_history_changed', $i18n),
+    'price_history_none' => translate('price_history_none', $i18n),
+    'price_history_footnote' => translate('price_history_footnote', $i18n),
+    'price_history_started_at' => translate('price_history_started_at', $i18n),
   ],
 ];
 foreach ($categories as $categoryId => $category) {

@@ -843,22 +843,86 @@ function detailsLoadPriceChanges(subscription) {
       if (currentDetailsId !== requestedId || !data || !data.success) {
         return;
       }
-      detailsRenderPriceChanges(data.changes || []);
+      detailsRenderPriceChanges(data.changes || [], data.history || []);
     })
     .catch(() => { /* the card just stays hidden */ });
 }
 
-function detailsRenderPriceChanges(changes) {
+// A price spread per month, so a monthly and a yearly price compare.
+function detailsMonthlyPrice(price, cycle, frequency) {
+  const perCycle = { 1: 30.4375, 2: 30.4375 / 7, 3: 1, 4: 1 / 12 }[cycle];
+  if (perCycle === undefined || price === null) {
+    return null;
+  }
+  return price * perCycle / Math.max(1, frequency || 1);
+}
+
+function detailsPercentText(from, to) {
+  if (!from || from <= 0 || to === null) {
+    return '';
+  }
+  const percent = Math.round(((to - from) / from) * 100);
+  return (percent > 0 ? '+' : (percent < 0 ? '−' : '')) + Math.abs(percent) + '%';
+}
+
+function detailsRenderPriceChanges(changes, history) {
   const strings = detailsStrings();
   const card = document.querySelector('#details-price-changes-card');
   const list = document.querySelector('#details-price-changes-list');
+  const summary = document.querySelector('#details-price-history-summary');
+  const chart = document.querySelector('#details-price-history-chart');
+  const started = document.querySelector('#details-price-history-started');
   list.innerHTML = "";
-  card.classList.toggle('hide', changes.length === 0);
+  chart.innerHTML = "";
+  card.classList.toggle('hide', history.length === 0 && changes.length === 0);
 
   const priceText = (price, currencyId, cycle, frequency) => {
     const cycleText = detailsBillingCycleText(cycle, frequency);
     return detailsFormatPrice(price, currencyId) + (cycleText ? ` · ${cycleText.toLowerCase()}` : '');
   };
+
+  // Summary: the first price against the current one.
+  const first = history[0] || null;
+  const last = history[history.length - 1] || null;
+  const sinceText = first ? detailsFormatDate(first.date) : '';
+  let summaryText = '';
+  if (first && history.length === 1) {
+    summaryText = detailsFill(strings.price_history_none, sinceText);
+  } else if (first && last) {
+    const comparable = first.currency_id === last.currency_id
+      && first.cycle === last.cycle && first.frequency === last.frequency
+      && first.price !== null && last.price !== null;
+    const delta = comparable ? last.price - first.price : null;
+    if (comparable && Math.abs(delta) >= 0.005) {
+      summaryText = (delta > 0 ? strings.price_history_up : strings.price_history_down)
+        .replace('%1$s', detailsFormatPrice(Math.abs(delta), last.currency_id))
+        .replace('%2$s', detailsPercentText(first.price, last.price).replace(/^[+−]/, ''))
+        .replace('%3$s', sinceText);
+    } else {
+      summaryText = strings.price_history_changed
+        .replace('%1$s', String(history.length - 1))
+        .replace('%2$s', sinceText);
+    }
+  }
+  summary.textContent = summaryText ? `${summaryText} ${strings.price_history_footnote}` : '';
+  summary.classList.toggle('hide', summaryText === '');
+
+  // Bar chart: one bar per price, per month so cycles compare. Skipped when
+  // the prices are in different currencies (no historical conversion).
+  const monthly = history.map((point) => detailsMonthlyPrice(point.price, point.cycle, point.frequency));
+  const sameCurrency = history.every((point) => point.currency_id === history[0].currency_id);
+  const chartable = history.length > 1 && sameCurrency && monthly.every((value) => value !== null);
+  chart.classList.toggle('hide', !chartable);
+  if (chartable) {
+    const max = Math.max(...monthly, 0.01);
+    history.forEach((point, index) => {
+      const bar = document.createElement('span');
+      bar.className = 'price-history-bar' + (index === history.length - 1 ? ' is-current' : '');
+      bar.style.height = `${Math.max(6, Math.round((monthly[index] / max) * 100))}%`;
+      bar.title = `${detailsFormatDate(point.date)} · ${priceText(point.price, point.currency_id, point.cycle, point.frequency)}`;
+      chart.appendChild(bar);
+    });
+  }
 
   changes.forEach((change) => {
     const item = document.createElement('li');
@@ -887,7 +951,9 @@ function detailsRenderPriceChanges(changes) {
     if (change.old_monthly !== null && change.new_monthly !== null) {
       const delta = change.new_monthly - change.old_monthly;
       const sign = delta > 0 ? '+' : (delta < 0 ? '−' : '');
-      amount.textContent = `${sign}${detailsFormatPrice(Math.abs(delta), change.currency_id)}${strings.per_month_short}`;
+      const percent = detailsPercentText(change.old_monthly, change.new_monthly);
+      amount.textContent = `${sign}${detailsFormatPrice(Math.abs(delta), change.currency_id)}${strings.per_month_short}`
+        + (percent ? ` (${percent})` : '');
       amount.classList.toggle('is-success', delta < 0);
       amount.classList.toggle('is-danger', delta > 0);
     } else {
@@ -897,4 +963,10 @@ function detailsRenderPriceChanges(changes) {
     item.append(text, amount);
     list.appendChild(item);
   });
+
+  const startedText = first && history.length > 1
+    ? detailsFill(strings.price_history_started_at, priceText(first.price, first.currency_id, first.cycle, first.frequency))
+    : '';
+  started.textContent = startedText;
+  started.classList.toggle('hide', startedText === '');
 }

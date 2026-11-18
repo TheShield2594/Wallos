@@ -10,6 +10,8 @@ It returns a JSON object with the following properties:
 - success: whether the request was successful (boolean).
 - title: the title of the response (string).
 - subscription: an object containing the subscription details.
+  price_history lists every price the subscription has had, oldest first,
+  in the currency it was recorded in (never converted).
 - notes: warning messages or additional information (array).
 
 Example response:
@@ -40,7 +42,11 @@ Example response:
     "cancellation_date": "",
     "category_name": "Entertainment",
     "payer_user_name": "John Doe",
-    "payment_method_name": "PayPal"
+    "payment_method_name": "PayPal",
+    "price_history": [
+      {"date": "2026-01-01", "price": 13.99, "currency": "EUR", "currency_id": 1, "cycle": 3, "frequency": 1},
+      {"date": "2026-06-10", "price": 15.99, "currency": "EUR", "currency_id": 1, "cycle": 3, "frequency": 1}
+    ]
   },
   "notes": []
 }
@@ -48,6 +54,7 @@ Example response:
 
 require_once '../../includes/connect_endpoint.php';
 require_once '../../includes/currency_rates.php';
+require_once '../../includes/price_changes.php';
 
 header('Content-Type: application/json; charset=UTF-8');
 
@@ -128,6 +135,25 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" || $_SERVER["REQUEST_METHOD"] === "GET
     $pmResult = $pmStmt->execute();
     $pmRow = $pmResult->fetchArray(SQLITE3_ASSOC);
     $subscription['payment_method_name'] = $pmRow ? $pmRow['name'] : 'Unknown payment method';
+
+    // Price history, from the stored price (before any conversion below).
+    $currencyCodes = [];
+    $codeStmt = $db->prepare("SELECT id, code FROM currencies WHERE user_id = :userId");
+    $codeStmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
+    $codeResult = $codeStmt->execute();
+    while ($codeResult && ($codeRow = $codeResult->fetchArray(SQLITE3_ASSOC))) {
+        $currencyCodes[(int) $codeRow['id']] = $codeRow['code'];
+    }
+    $subscription['price_history'] = array_map(function ($point) use ($currencyCodes) {
+        return [
+            'date' => $point['date'],
+            'price' => $point['price'],
+            'currency' => $currencyCodes[$point['currency_id']] ?? null,
+            'currency_id' => $point['currency_id'],
+            'cycle' => $point['cycle'],
+            'frequency' => $point['frequency'],
+        ];
+    }, wallos_price_history_points($subscription, wallos_price_changes_list($db, $userId, $subscriptionId, 500)));
 
     // Optional Currency Conversion
     if (isset($_REQUEST['convert_currency']) && $_REQUEST['convert_currency'] === 'true' && $subscription['currency_id'] != $userCurrencyId) {

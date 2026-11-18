@@ -1793,6 +1793,32 @@ body.light img.logo-theme-variant[data-native-theme="dark"] {
   color: var(--warning);
 }
 
+.price-history-summary {
+  margin: 0 16px 8px;
+  font-size: 14px;
+  color: var(--text2);
+}
+
+.price-history-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 64px;
+  margin: 4px 16px 12px;
+}
+
+.price-history-bar {
+  flex: 1;
+  max-width: 32px;
+  min-height: 4px;
+  border-radius: 4px 4px 2px 2px;
+  background-color: var(--fill);
+}
+
+.price-history-bar.is-current {
+  background-color: var(--tint);
+}
+
 #details-price-changes-list .history-note {
   white-space: normal;
 }
