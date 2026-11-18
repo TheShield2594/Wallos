@@ -8,6 +8,7 @@ require_once __DIR__ . '/../../includes/connect_endpoint_crontabs.php';
 
 require 'settimezone.php';
 require_once __DIR__ . '/../../includes/instance_config.php';
+require_once __DIR__ . '/../../includes/ssrf_helper.php';
 
 // The admin row with anything the deployment owns applied over it, so this job
 // uses the same mail server the admin page shows.
@@ -32,6 +33,15 @@ if ($rows) {
         $fromEmail = empty($admin['from_email']) ? 'wallos@wallosapp.com' : $admin['from_email'];
         $encryption = $admin['encryption'];
         $server_url = $admin['server_url'];
+        // Validate the SMTP host at send time and connect to the approved IP
+        // only, so a host re-pointed after it was saved (DNS rebinding)
+        // cannot reach an internal address.
+        $smtpIp = validate_smtp_host($smtpAddress, (int) $smtpPort, $db);
+        if ($smtpIp === false) {
+            echo "SSRF attempt detected for SMTP host. Password reset emails not sent.";
+            exit();
+        }
+
         $smtpAuth = (isset($admin["smtp_username"]) && $admin["smtp_username"] != "") || (isset($admin["smtp_password"]) && $admin["smtp_password"] != "");
 
         require __DIR__ . '/../../libs/PHPMailer/PHPMailer.php';
@@ -41,7 +51,7 @@ if ($rows) {
         $mail = new PHPMailer(true);
         $mail->isSMTP();
         $mail->Timeout = 15;
-        $mail->Host = $smtpAddress;
+        wallos_pin_mailer_to_ip($mail, $smtpAddress, $smtpIp);
         $mail->SMTPAuth = $smtpAuth;
         if ($smtpAuth) {
             $mail->Username = $smtpUsername;
