@@ -63,6 +63,10 @@ wallos_test('wallos_pin_mailer_to_ip connects to the IP and verifies the hostnam
     assert_same(['bindto' => '0:0'], $mail->SMTPOptions['socket'], 'other context options are kept');
     assert_true($mail->SMTPAutoTLS, 'opportunistic STARTTLS stays on for a remote host');
 
+    $fqdn = new PHPMailer\PHPMailer\PHPMailer(true);
+    wallos_pin_mailer_to_ip($fqdn, 'smtp.example.com.', '203.0.113.7');
+    assert_same('smtp.example.com', $fqdn->SMTPOptions['ssl']['peer_name'], 'a terminal DNS dot is dropped from peer_name');
+
     $v6 = new PHPMailer\PHPMailer\PHPMailer(true);
     wallos_pin_mailer_to_ip($v6, '[2001:db8::1]', '2001:db8::1');
     assert_same('[2001:db8::1]', $v6->Host, 'an IPv6 address is bracketed for PHPMailer');

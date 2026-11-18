@@ -276,8 +276,9 @@ function wallos_pin_mailer_to_ip($mail, $host, $ip) {
     // PHPMailer's Host takes a bracketed IPv6 literal (see isValidHost()).
     $mail->Host = filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false ? '[' . $ip . ']' : $ip;
 
-    // Certificates name the host without brackets.
-    $peerName = trim($host, '[]');
+    // Certificates name the host without brackets or a terminal DNS dot;
+    // an explicit peer_name is compared as given, so normalise it here.
+    $peerName = rtrim(trim($host, '[]'), '.');
     $options = is_array($mail->SMTPOptions) ? $mail->SMTPOptions : [];
     $options['ssl'] = array_merge($options['ssl'] ?? [], ['peer_name' => $peerName]);
     $mail->SMTPOptions = $options;
