@@ -300,3 +300,49 @@ function wallos_price_fields_for_save(array $locked, array $input)
         'tier_name' => array_key_exists('tier_name', $input) ? wallos_normalize_tier_name($input['tier_name']) : ($locked['tier_name'] ?? null),
     ];
 }
+
+/**
+ * The prices a subscription has had, oldest first: the starting price, then
+ * the new price of each recorded change. Prices stay in the currency they
+ * were recorded in (no conversion of historical prices).
+ *
+ * Without any change the history is the current price since the start date.
+ *
+ * @param array   $subscription the row: price, currency_id, cycle, frequency, start_date
+ * @param array[] $changes      wallos_price_changes_list() rows (any order)
+ * @return array[] [{date, price, currency_id, cycle, frequency}]
+ */
+function wallos_price_history_points(array $subscription, array $changes)
+{
+    usort($changes, function ($a, $b) {
+        return [substr((string) $a['changed_at'], 0, 10), (int) $a['id']] <=> [substr((string) $b['changed_at'], 0, 10), (int) $b['id']];
+    });
+
+    $startDate = substr((string) ($subscription['start_date'] ?? ''), 0, 10);
+    $point = function ($date, $price, $currencyId, $cycle, $frequency) {
+        return [
+            'date' => $date,
+            'price' => $price === null ? null : (float) $price,
+            'currency_id' => (int) $currencyId,
+            'cycle' => (int) $cycle,
+            'frequency' => max(1, (int) $frequency),
+        ];
+    };
+
+    if ($changes === []) {
+        return [$point($startDate, $subscription['price'], $subscription['currency_id'], $subscription['cycle'], $subscription['frequency'])];
+    }
+
+    $first = $changes[0];
+    $firstChange = substr((string) $first['changed_at'], 0, 10);
+    // A start date after the first change (edited later) would put the
+    // starting price after it; date the start at the change instead.
+    $initialDate = ($startDate === '' || $startDate > $firstChange) ? $firstChange : $startDate;
+
+    $points = [$point($initialDate, $first['old_price'], $first['old_currency_id'], $first['old_cycle'], $first['old_frequency'])];
+    foreach ($changes as $change) {
+        $points[] = $point(substr((string) $change['changed_at'], 0, 10), $change['new_price'], $change['currency_id'], $change['new_cycle'], $change['new_frequency']);
+    }
+
+    return $points;
+}

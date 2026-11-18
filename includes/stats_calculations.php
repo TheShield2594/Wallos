@@ -164,11 +164,20 @@ if ($result) {
         $subscriptions[] = $row;
     }
     // "Household" scope (statistics page): add what other members share with
-    // the account's household, unless the figures are filtered by the
-    // account's own members, categories or payment methods. Their currency
-    // is mapped onto the account's currencies (see includes/households.php).
-    if (($statsScope ?? 'mine') === 'household' && empty($_GET['member']) && empty($_GET['category']) && empty($_GET['payment'])) {
-        foreach (wallos_shared_subscriptions($db, $userId) as $sharedRow) {
+    // the account's household. Their currency is mapped onto the account's
+    // currencies, and their category, payer and payment method (the
+    // owner's) count as one "Shared with me" bucket in every breakdown,
+    // which the filters can also select (see includes/households.php).
+    if (($statsScope ?? 'mine') === 'household'
+        && wallos_shared_rows_pass_filters([$_GET['member'] ?? null, $_GET['category'] ?? null, $_GET['payment'] ?? null])) {
+        $sharedStatsRows = wallos_shared_rows_in_bucket(wallos_shared_subscriptions($db, $userId));
+        if ($sharedStatsRows !== []) {
+            $sharedBucketName = translate('shared_bucket', $i18n);
+            $categoryCost[WALLOS_SHARED_BUCKET_ID] = ['cost' => 0, 'name' => $sharedBucketName];
+            $memberCost[WALLOS_SHARED_BUCKET_ID] = ['cost' => 0, 'name' => $sharedBucketName];
+            $paymentMethodsCount[WALLOS_SHARED_BUCKET_ID] = ['count' => 0, 'name' => $sharedBucketName];
+        }
+        foreach ($sharedStatsRows as $sharedRow) {
             $subscriptions[] = $sharedRow;
         }
     }
@@ -252,7 +261,9 @@ if ($result) {
                         getPriceConverted(wallos_current_price(wallos_gross_row($subscription)), $currency, $db, $userId),
                         wallos_cycle_active_months($subscription));
                 }
-                $memberFactor = $statsCostMode === 'net' ? 1 - wallos_sanitize_reimbursed_percent($subscription['reimbursed_percent'] ?? 0) / 100 : 1;
+                // A shared row's reimbursement is its owner's, not this account's.
+                $memberFactor = $statsCostMode === 'net' && empty($subscription['shared_owner_name'])
+                    ? 1 - wallos_sanitize_reimbursed_percent($subscription['reimbursed_percent'] ?? 0) / 100 : 1;
                 foreach (wallos_member_fractions($subscription, $rowShares) as $shareMemberId => $fraction) {
                     if (isset($memberCost[$shareMemberId])) {
                         $memberCost[$shareMemberId]['cost'] += $grossMonthly * $fraction * $memberFactor;

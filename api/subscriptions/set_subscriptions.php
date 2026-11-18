@@ -39,6 +39,7 @@ For 'add' and 'edit' actions (all optional for 'edit'):
 - shared: 1 to share the subscription with your household, 0 to make it private.
 - replacement_subscription_id: the ID of the replacement subscription (integer).
 - tier_name: (edit) the plan or tier name (string, empty to clear).
+- description: what the service is (string, at most 200 characters, empty to clear). Sent to the AI model for recommendations when the account allows it.
 - active_months: the months a plan billing at least monthly (every 1-31 days, 1-4 weeks or every month) bills in, as a 12-bit mask (integer 1-4095, bit 0 = January, 4095 = every month; Sep-Dec is 3840). A next_payment in an inactive month moves to the first active one.
 - price_change_reason: (edit) 'tier' (default, you changed plan) or 'provider' (the provider changed the price); recorded in the price history when the price, currency, cycle or frequency changes.
 
@@ -67,6 +68,7 @@ require_once '../../includes/cancellation_deadline.php';
 require_once '../../includes/intro_pricing.php';
 require_once '../../includes/households.php';
 require_once '../../includes/price_changes.php';
+require_once '../../includes/ai_recommendations.php';
 require_once '../../includes/recurrence.php';
 require_once '../../includes/notifications/schedule.php';
 
@@ -759,12 +761,12 @@ switch ($action) {
                             name, logo, price, currency_id, next_payment, cycle, frequency, notes,
                             payment_method_id, payer_user_id, category_id, notify, inactive, url,
                             notify_days_before, user_id, cancellation_date, replacement_subscription_id,
-                            auto_renew, start_date, logo_text_color, logo_variant, active_months
+                            auto_renew, start_date, logo_text_color, logo_variant, active_months, description
                         ) VALUES (
                             :name, :logo, :price, :currencyId, :nextPayment, :cycle, :frequency, :notes,
                             :paymentMethodId, :payerUserId, :categoryId, :notify, :inactive, :url,
                             :notifyDaysBefore, :userId, :cancellationDate, :replacement_subscription_id,
-                            :autoRenew, :startDate, :logoTextColor, :logoVariant, :activeMonths
+                            :autoRenew, :startDate, :logoTextColor, :logoVariant, :activeMonths, :description
                         )";
         $activeMonths = api_active_months_input($cycle, $frequency);
         $nextPayment = api_first_active_payment($nextPayment, $startDate, $cycle, $frequency, $activeMonths);
@@ -792,6 +794,7 @@ switch ($action) {
         $stmtInsert->bindParam(':autoRenew', $autoRenew, SQLITE3_INTEGER);
         $stmtInsert->bindParam(':startDate', $startDate, SQLITE3_TEXT);
         $stmtInsert->bindValue(':activeMonths', $activeMonths, SQLITE3_INTEGER);
+        $stmtInsert->bindValue(':description', wallos_normalize_subscription_description($_POST['description'] ?? ''), SQLITE3_TEXT);
 
         $newSubscriptionId = api_save_atomically($db, function () use ($db, $stmtInsert) {
             return $stmtInsert->execute() !== false ? $db->lastInsertRowID() : false;
@@ -1110,7 +1113,8 @@ switch ($action) {
                             cancellation_date = :cancellationDate,
                             replacement_subscription_id = :replacement_subscription_id,
                             tier_name = :tierName,
-                            active_months = :activeMonths
+                            active_months = :activeMonths,
+                            description = :description
                        WHERE id = :id AND user_id = :userId";
         $activeMonths = api_active_months_input($cycle, $frequency, $subscription['active_months'] ?? WALLOS_ALL_MONTHS);
         $nextPayment = api_first_active_payment($nextPayment, $startDate, $cycle, $frequency, $activeMonths);
@@ -1138,6 +1142,10 @@ switch ($action) {
         $stmtUpdate->bindParam(':cancellationDate', $cancellationDate, SQLITE3_TEXT);
         $stmtUpdate->bindParam(':replacement_subscription_id', $replacementSubscriptionId, SQLITE3_INTEGER);
         $stmtUpdate->bindValue(':activeMonths', $activeMonths, SQLITE3_INTEGER);
+        $description = array_key_exists('description', $_POST)
+            ? wallos_normalize_subscription_description($_POST['description'])
+            : (string) ($subscription['description'] ?? '');
+        $stmtUpdate->bindValue(':description', $description, SQLITE3_TEXT);
         $stmtUpdate->bindParam(':id', $subscriptionId, SQLITE3_INTEGER);
         $stmtUpdate->bindParam(':userId', $userId, SQLITE3_INTEGER);
         $tierName = array_key_exists('tier_name', $_POST) ? wallos_normalize_tier_name($_POST['tier_name']) : ($subscription['tier_name'] ?? null);
@@ -1236,6 +1244,7 @@ switch ($action) {
             "DELETE FROM subscription_price_changes WHERE subscription_id = :subId AND user_id = :userId",
             "DELETE FROM subscription_shares WHERE subscription_id = :subId AND user_id = :userId",
             "DELETE FROM notification_log WHERE subscription_id = :subId AND user_id = :userId",
+            "DELETE FROM notification_recipient_log WHERE subscription_id = :subId AND owner_user_id = :userId",
             "UPDATE subscriptions SET replacement_subscription_id = NULL WHERE replacement_subscription_id = :subId AND user_id = :userId",
         ];
         $deleted = api_save_atomically($db, function () use ($db, $deleteStatements, $subscriptionId, $userId) {

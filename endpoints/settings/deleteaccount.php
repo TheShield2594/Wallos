@@ -51,6 +51,7 @@ if ($userIdToDelete == 1 || $userIdToDelete != $userId) {
         'DELETE FROM subscription_shares WHERE user_id = :id',
         'DELETE FROM settings WHERE user_id = :id',
         'DELETE FROM fixer WHERE user_id = :id',
+        'DELETE FROM fixer_keys WHERE user_id = :id',
         'DELETE FROM custom_colors WHERE user_id = :id',
         'DELETE FROM currencies WHERE user_id = :id',
         'DELETE FROM categories WHERE user_id = :id',
@@ -83,6 +84,7 @@ if ($userIdToDelete == 1 || $userIdToDelete != $userId) {
         'DELETE FROM apprise_notifications WHERE user_id = :id',
         'DELETE FROM notification_templates WHERE user_id = :id',
         'DELETE FROM notification_log WHERE user_id = :id',
+        'DELETE FROM notification_recipient_log WHERE user_id = :id OR owner_user_id = :id',
     ]);
 
     if (!$deleted) {

@@ -3,8 +3,11 @@
 This API Endpoint accepts POST requests only.
 It receives the following parameters:
 - api_key: the API key of the user (for Tally authentication).
-- fixer_api_key: the Fixer.io or APILayer API key to save (optional; if empty/omitted, clears the key).
-  Not read for provider '2', which needs no account.
+- fixer_api_key: the Fixer.io or APILayer API key to save (optional; if empty/omitted, clears the
+  settings and every saved key). Not read for provider '2', which needs no account.
+  Keys are kept per provider: saving one for APILayer leaves the Fixer.io key saved.
+- use_saved_key: '1' to switch to provider '0' or '1' with the key saved for it earlier, without
+  sending the key again (fixer_api_key is then not needed).
 - provider: the provider type (optional; '0' for Fixer.io, '1' for APILayer.com, '2' for
   Frankfurter, defaults to '0').
 
@@ -22,6 +25,7 @@ Example response:
 */
 
 require_once '../../includes/connect_endpoint.php';
+require_once '../../includes/fixer_keys.php';
 
 header('Content-Type: application/json; charset=UTF-8');
 
@@ -132,6 +136,19 @@ if ($provider === 2) {
     exit;
 }
 
+// Switching to a provider whose key was saved earlier (issue #44).
+if ($fixerApiKey === '' && ($_POST['use_saved_key'] ?? '') === '1') {
+    $fixerApiKey = wallos_fixer_resolve_key($db, $userId, $provider, '');
+    if ($fixerApiKey === '') {
+        echo json_encode([
+            'success' => false,
+            'title' => 'No saved key',
+            'message' => 'No API key is saved for this provider.'
+        ]);
+        exit;
+    }
+}
+
 // If key is empty, clear the settings
 if ($fixerApiKey === '') {
     $removeSql = "DELETE FROM fixer WHERE user_id = :userId";
@@ -139,7 +156,7 @@ if ($fixerApiKey === '') {
     $removeStmt->bindParam(':userId', $userId, SQLITE3_INTEGER);
     $removeResult = $removeStmt->execute();
 
-    if ($removeResult) {
+    if ($removeResult && wallos_fixer_clear_keys($db, $userId)) {
         echo json_encode([
             'success' => true,
             'title' => 'Fixer settings cleared',
@@ -202,12 +219,19 @@ if (isset($apiData['success']) && $apiData['success'] == true) {
     // result. This copy did not, while the insert that replaces the row it
     // removes did - so a failed delete answered "saved successfully" over a
     // fixer table that now holds two keys for one user.
+    //
+    // The active row and the provider's saved key (fixer_keys) are written in
+    // one transaction, so a failure leaves both as they were.
+    $inTransaction = @$db->exec('BEGIN IMMEDIATE') !== false;
     $removeSql = "DELETE FROM fixer WHERE user_id = :userId";
     $removeStmt = $db->prepare($removeSql);
     $removeStmt->bindParam(':userId', $userId, SQLITE3_INTEGER);
-    $removeResult = $removeStmt->execute();
+    $removeResult = $inTransaction && $removeStmt->execute() !== false;
 
     if ($removeResult === false) {
+        if ($inTransaction) {
+            $db->exec('ROLLBACK');
+        }
         echo json_encode([
             'success' => false,
             'title' => 'Database error',
@@ -223,7 +247,11 @@ if (isset($apiData['success']) && $apiData['success'] == true) {
     $stmtInsert->bindParam(':api_key', $fixerApiKey, SQLITE3_TEXT);
     $stmtInsert->bindParam(':provider', $provider, SQLITE3_INTEGER);
     $stmtInsert->bindParam(':userId', $userId, SQLITE3_INTEGER);
-    $resultInsert = $stmtInsert->execute();
+    $resultInsert = $stmtInsert->execute() !== false && wallos_fixer_store_key($db, $userId, $provider, $fixerApiKey);
+    $resultInsert = $resultInsert && $db->exec('COMMIT') !== false;
+    if (!$resultInsert) {
+        $db->exec('ROLLBACK');
+    }
 
     if ($resultInsert) {
         // If usage limits are parsed and supported by the db schema

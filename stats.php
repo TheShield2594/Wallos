@@ -8,6 +8,8 @@ require_once 'includes/ui_helpers.php';
 // Mine / Household: the household scope adds what other members share.
 $statsHousehold = wallos_household_membership($db, $userId);
 $statsScope = ($statsHousehold !== null && ($_GET['scope'] ?? '') === 'household') ? 'household' : 'mine';
+// The filters offer the "Shared with me" bucket in the household scope (#59).
+$sharedFilterAvailable = $statsScope === 'household' && wallos_shared_subscriptions($db, $userId) !== [];
 
 
 // Get code of main currency to display on statistics
@@ -152,7 +154,7 @@ $actualYearOverYear = $actualLastYear > 0 ? ($actualThisYear - $actualLastYear) 
       </button>
       <div class="filtermenu-content">
         <?php
-        if (count($members) > 1) {
+        if (count($members) > 1 || !empty($sharedFilterAvailable)) {
           ?>
           <div class="filtermenu-submenu">
             <div class="filter-title" onClick="toggleSubMenu('member')"><?= translate("member", $i18n) ?></div>
@@ -170,13 +172,18 @@ $actualYearOverYear = $actualLastYear > 0 ? ($actualThisYear - $actualLastYear) 
                 <?php
               }
               ?>
+              <?php if (!empty($sharedFilterAvailable)) {
+                $isSelected = isset($_GET['member']) && in_array(WALLOS_SHARED_BUCKET_ID, array_map('intval', explode(',', $_GET['member'])), true);
+                ?>
+                <div class="filter-item <?= $isSelected ? 'selected' : '' ?>" data-memberid="<?= WALLOS_SHARED_BUCKET_ID ?>"><?= translate('shared_bucket', $i18n) ?></div>
+              <?php } ?>
             </div>
           </div>
           <?php
         }
         ?>
         <?php
-        if (count($categories) > 1) {
+        if (count($categories) > 1 || !empty($sharedFilterAvailable)) {
           // sort categories by order
           usort($categories, function ($a, $b) {
             return $a['order'] - $b['order'];
@@ -206,13 +213,18 @@ $actualYearOverYear = $actualLastYear > 0 ? ($actualThisYear - $actualLastYear) 
                 <?php
               }
               ?>
+              <?php if (!empty($sharedFilterAvailable)) {
+                $isSelected = isset($_GET['category']) && in_array(WALLOS_SHARED_BUCKET_ID, array_map('intval', explode(',', $_GET['category'])), true);
+                ?>
+                <div class="filter-item <?= $isSelected ? 'selected' : '' ?>" data-categoryid="<?= WALLOS_SHARED_BUCKET_ID ?>"><?= translate('shared_bucket', $i18n) ?></div>
+              <?php } ?>
             </div>
           </div>
           <?php
         }
         ?>
         <?php
-        if (count($paymentMethods) > 1) {
+        if (count($paymentMethods) > 1 || !empty($sharedFilterAvailable)) {
 
           usort($paymentMethods, function ($a, $b) {
             return $a['order'] <=> $b['order'];
@@ -235,6 +247,11 @@ $actualYearOverYear = $actualLastYear > 0 ? ($actualThisYear - $actualLastYear) 
                 <?php
               }
               ?>
+              <?php if (!empty($sharedFilterAvailable)) {
+                $isSelected = isset($_GET['payment']) && in_array(WALLOS_SHARED_BUCKET_ID, array_map('intval', explode(',', $_GET['payment'])), true);
+                ?>
+                <div class="filter-item <?= $isSelected ? 'selected' : '' ?>" data-paymentid="<?= WALLOS_SHARED_BUCKET_ID ?>"><?= translate('shared_bucket', $i18n) ?></div>
+              <?php } ?>
             </div>
           </div>
           <?php

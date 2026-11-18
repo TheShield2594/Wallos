@@ -17,13 +17,15 @@ Example response:
   "fixer": {
     "api_key": "********",
     "provider": 0,
-    "provider_name": "Fixer.io"
+    "provider_name": "Fixer.io",
+    "providers_with_key": [0, 1]
   },
   "notes": []
 }
 */
 
 require_once '../../includes/connect_endpoint.php';
+require_once '../../includes/fixer_keys.php';
 
 header('Content-Type: application/json; charset=UTF-8');
 
@@ -80,6 +82,8 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" || $_SERVER["REQUEST_METHOD"] === "GET
         if ($fixer['api_key']) {
             $fixer['api_key'] = "********";
         }
+        // The providers a key is saved for (issue #44); never the keys.
+        $fixer['providers_with_key'] = array_keys(wallos_fixer_saved_keys($db, $userId));
     } else {
         $fixer = [];
         $notes[] = "No fixer settings found";

@@ -23,6 +23,13 @@
   Every page and endpoint that reads or writes a subscription by id asks
   this file, so the rule lives in one place (tests/cases/households_test.php).
 
+  Payer labels (the per-account `household` table, "Paid by") can be linked
+  to a real account in the same shared household (household.linked_user_id,
+  issue #59). Shared rows then show that account's name as the payer, and
+  the linked account gets the subscription's reminders too. A link only
+  counts while both accounts are in the same household, and is cleared when
+  either leaves it.
+
   Shared subscriptions keep their owner's category, payer and payment method,
   shown read-only by name. Their price is shown in the viewer's currency with
   the same code as the owner's, converted to the viewer's main currency when
@@ -32,6 +39,14 @@
 require_once __DIR__ . '/currency_rates.php';
 
 const WALLOS_HOUSEHOLD_ROLES = ['viewer', 'editor'];
+
+/*
+  Shared rows keep their owner's category, payer and payment method, which
+  are not the viewer's records. Breakdowns and filters put them in one
+  "Shared with me" bucket under this id (issue #59), which no row of the
+  viewer's own can have.
+*/
+const WALLOS_SHARED_BUCKET_ID = 2147483647;
 
 /**
  * The household an account is active in.
@@ -213,11 +228,13 @@ function wallos_shared_subscriptions(SQLite3 $db, $userId, $activeOnly = false)
 
     $stmt = $db->prepare("SELECT s.*, u.username AS shared_owner_name,
             c.name AS shared_category_name, hh.name AS shared_payer_name, pm.name AS shared_payment_method_name,
-            cur.code AS shared_currency_code, cur.rate AS shared_currency_rate
+            cur.code AS shared_currency_code, cur.rate AS shared_currency_rate,
+            hh.linked_user_id AS shared_payer_linked_user_id, lu.username AS shared_payer_linked_username
         FROM subscriptions s
         JOIN user u ON u.id = s.user_id
         LEFT JOIN categories c ON c.id = s.category_id AND c.user_id = s.user_id
         LEFT JOIN household hh ON hh.id = s.payer_user_id AND hh.user_id = s.user_id
+        LEFT JOIN user lu ON lu.id = hh.linked_user_id
         LEFT JOIN payment_methods pm ON pm.id = s.payment_method_id
         LEFT JOIN currencies cur ON cur.id = s.currency_id AND cur.user_id = s.user_id
         WHERE s.shared_household_id = :householdId
@@ -233,8 +250,19 @@ function wallos_shared_subscriptions(SQLite3 $db, $userId, $activeOnly = false)
     $result = $stmt->execute();
 
     $viewerCurrencies = wallos_household_viewer_currencies($db, $userId);
+    $inHousehold = array_flip(wallos_household_account_ids($db, (int) $membership['id']));
     $rows = [];
     while ($result && ($row = $result->fetchArray(SQLITE3_ASSOC))) {
+        // A payer label linked to an account of this household shows that
+        // account's name; a stale link (the account left) is ignored.
+        $linkedId = $row['shared_payer_linked_user_id'] === null ? null : (int) $row['shared_payer_linked_user_id'];
+        if ($linkedId !== null && isset($inHousehold[$linkedId]) && $row['shared_payer_linked_username'] !== null) {
+            $row['shared_payer_name'] = $row['shared_payer_linked_username'];
+        } else {
+            $linkedId = null;
+        }
+        $row['shared_payer_linked_user_id'] = $linkedId;
+        unset($row['shared_payer_linked_username']);
         $row['shared_owner_id'] = (int) $row['user_id'];
         $row['access'] = $access;
         $row['shared_original_price'] = (float) $row['price'];
@@ -549,8 +577,13 @@ function wallos_household_drop_member(SQLite3 $db, $householdId, $memberUserId)
         $stmt = $db->prepare('UPDATE subscriptions SET shared_household_id = NULL WHERE user_id = :userId AND shared_household_id = :householdId');
         $stmt->bindValue(':userId', (int) $memberUserId, SQLITE3_INTEGER);
         $stmt->bindValue(':householdId', (int) $householdId, SQLITE3_INTEGER);
+        if (@$stmt->execute() === false) {
+            return false;
+        }
 
-        return @$stmt->execute() !== false;
+        // Payer labels linked to the member, and the member's own links to
+        // the others: an account can only be in one household at a time.
+        return wallos_household_clear_links($db, (int) $memberUserId);
     });
     if ($committed) {
         return 'removed';
@@ -655,6 +688,10 @@ function wallos_household_delete_rows(SQLite3 $db, $householdId)
 {
     foreach ([
         'UPDATE subscriptions SET shared_household_id = NULL WHERE shared_household_id = :householdId',
+        // Every payer link between the household's accounts goes with it.
+        'UPDATE household SET linked_user_id = NULL WHERE user_id IN (
+            SELECT owner_user_id FROM households WHERE id = :householdId
+            UNION SELECT user_id FROM household_members WHERE household_id = :householdId)',
         'DELETE FROM household_members WHERE household_id = :householdId',
         'DELETE FROM households WHERE id = :householdId',
     ] as $sql) {
@@ -700,6 +737,9 @@ function wallos_household_forget_user(SQLite3 $db, $userId)
             return false;
         }
     }
+    if (!wallos_household_clear_links($db, $userId)) {
+        return false;
+    }
     $stmt = @$db->prepare('DELETE FROM household_members WHERE user_id = :userId');
     if ($stmt === false) {
         return false;
@@ -732,4 +772,136 @@ function wallos_set_subscription_sharing(SQLite3 $db, $userId, $subscriptionId, 
     $stmt->execute();
 
     return $db->changes() > 0 ? ['success' => true] : ['success' => false, 'error' => 'not_owner'];
+}
+
+
+/**
+ * Every account in a household: its owner and its active members.
+ *
+ * @return int[]
+ */
+function wallos_household_account_ids(SQLite3 $db, $householdId)
+{
+    $ids = [];
+    foreach (wallos_household_members($db, $householdId) as $member) {
+        if ($member['status'] === 'active') {
+            $ids[] = (int) $member['user_id'];
+        }
+    }
+
+    return $ids;
+}
+
+/**
+ * The accounts a payer label of $userId can be linked to: the other active
+ * accounts of its household, by username.
+ *
+ * @return array<int, string> user id => username
+ */
+function wallos_household_link_candidates(SQLite3 $db, $userId)
+{
+    $membership = wallos_household_membership($db, $userId);
+    if ($membership === null) {
+        return [];
+    }
+    $candidates = [];
+    foreach (wallos_household_members($db, $membership['id']) as $member) {
+        if ($member['status'] === 'active' && (int) $member['user_id'] !== (int) $userId) {
+            $candidates[(int) $member['user_id']] = $member['username'];
+        }
+    }
+
+    return $candidates;
+}
+
+/**
+ * Links one of the account's payer labels to an account of its household,
+ * or unlinks it (null).
+ *
+ * The membership check and the write are only safe from a concurrent leave
+ * or removal inside a write transaction (wallos_household_transaction(),
+ * which wallos_household_drop_member() also takes); the settings endpoint
+ * calls it that way.
+ *
+ * @return array{success: bool, error?: string}
+ */
+function wallos_household_set_payer_link(SQLite3 $db, $userId, $payerId, $linkedUserId)
+{
+    if ($linkedUserId !== null) {
+        $linkedUserId = (int) $linkedUserId;
+        if (!array_key_exists($linkedUserId, wallos_household_link_candidates($db, $userId))) {
+            return ['success' => false, 'error' => 'not_member'];
+        }
+    }
+    $stmt = $db->prepare('UPDATE household SET linked_user_id = :linked WHERE id = :id AND user_id = :userId');
+    $stmt->bindValue(':linked', $linkedUserId, $linkedUserId === null ? SQLITE3_NULL : SQLITE3_INTEGER);
+    $stmt->bindValue(':id', (int) $payerId, SQLITE3_INTEGER);
+    $stmt->bindValue(':userId', (int) $userId, SQLITE3_INTEGER);
+    if ($stmt->execute() === false) {
+        return ['success' => false, 'error' => 'write_failed'];
+    }
+
+    return $db->changes() > 0 ? ['success' => true] : ['success' => false, 'error' => 'not_found'];
+}
+
+/**
+ * Clears the payer links that point to an account, and the ones its own
+ * payer labels hold.
+ *
+ * @return bool false when the write failed
+ */
+function wallos_household_clear_links(SQLite3 $db, $userId)
+{
+    $stmt = @$db->prepare('UPDATE household SET linked_user_id = NULL WHERE linked_user_id = :userId OR user_id = :userId');
+    if ($stmt === false) {
+        return false;
+    }
+    $stmt->bindValue(':userId', (int) $userId, SQLITE3_INTEGER);
+
+    return @$stmt->execute() !== false;
+}
+
+
+/**
+ * Shared rows with their category, payer and payment method moved to the
+ * shared bucket; the owner's ids stay in shared_category_id,
+ * shared_payer_id and shared_payment_method_id.
+ *
+ * @param array[] $rows wallos_shared_subscriptions() rows
+ * @return array[]
+ */
+function wallos_shared_rows_in_bucket(array $rows)
+{
+    return array_map(function ($row) {
+        $row['shared_category_id'] = $row['category_id'] ?? null;
+        $row['shared_payer_id'] = $row['payer_user_id'] ?? null;
+        $row['shared_payment_method_id'] = $row['payment_method_id'] ?? null;
+        $row['category_id'] = WALLOS_SHARED_BUCKET_ID;
+        $row['payer_user_id'] = WALLOS_SHARED_BUCKET_ID;
+        $row['payment_method_id'] = WALLOS_SHARED_BUCKET_ID;
+
+        return $row;
+    }, $rows);
+}
+
+/**
+ * Whether shared rows belong in a list filtered by these member, category
+ * and payment method selections: every dimension that is filtered must
+ * include the shared bucket.
+ *
+ * @param array $selections comma-separated id lists; null or '' = not filtered
+ */
+function wallos_shared_rows_pass_filters(array $selections)
+{
+    foreach ($selections as $selection) {
+        if ($selection === null || $selection === '') {
+            continue;
+        }
+        $ids = array_map('intval', explode(',', (string) $selection));
+        if (!in_array(WALLOS_SHARED_BUCKET_ID, $ids, true)) {
+            return false;
+        }
+    }
+
+    return true;
 }

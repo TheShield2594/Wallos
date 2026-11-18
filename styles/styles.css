@@ -1793,6 +1793,34 @@ body.light img.logo-theme-variant[data-native-theme="dark"] {
   color: var(--warning);
 }
 
+.price-history-summary {
+  margin: 0 16px 8px;
+  font-size: 14px;
+  color: var(--text2);
+}
+
+.price-history-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  overflow: hidden;
+  height: 64px;
+  margin: 4px 16px 12px;
+}
+
+.price-history-bar {
+  flex: 1 1 0;
+  min-width: 4px;
+  max-width: 32px;
+  min-height: 4px;
+  border-radius: 4px 4px 2px 2px;
+  background-color: var(--fill);
+}
+
+.price-history-bar.is-current {
+  background-color: var(--tint);
+}
+
 #details-price-changes-list .history-note {
   white-space: normal;
 }
@@ -5014,4 +5042,22 @@ a.segmented-option {
 .account-notification-section-header:focus-visible {
   outline: 2px solid var(--tint);
   outline-offset: 2px;
+}
+
+/* A secret input with a show/hide button inside its right edge. */
+.input-with-toggle {
+  position: relative;
+  width: 100%;
+}
+
+.input-with-toggle input {
+  width: 100%;
+  padding-right: 40px;
+}
+
+.input-with-toggle .icon-button {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
 }

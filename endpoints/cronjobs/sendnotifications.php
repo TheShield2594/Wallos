@@ -15,6 +15,7 @@ require_once 'validate.php';
 require_once __DIR__ . '/../../includes/connect_endpoint_crontabs.php';
 require_once __DIR__ . '/../../includes/notifications/dispatch.php';
 require_once __DIR__ . '/../../includes/notifications/schedule.php';
+require_once __DIR__ . '/../../includes/notifications/shared_reminders.php';
 
 require_once __DIR__ . '/../../libs/PHPMailer/PHPMailer.php';
 require_once __DIR__ . '/../../libs/PHPMailer/SMTP.php';
@@ -134,6 +135,21 @@ foreach ($users as $owner) {
             }
 
             wallos_notification_log_prune($db, $userId, $today);
+
+            // Shared subscriptions this account is the linked payer of
+            // (includes/notifications/shared_reminders.php): their owner is
+            // reminded on their own run; this account gets its own copy.
+            [$linkedEntries, $linkedPending] = wallos_collect_linked_payment_reminders($db, $userId, $settings, $today, $lookups);
+            if ($linkedEntries !== []) {
+                foreach ($linkedPending as $reminder) {
+                    echo "Shared reminder due: subscription " . $reminder['subscription_id'] . " (" . $reminder['due_date'] . ")<br />\n";
+                }
+                $linkedDelivered = wallos_dispatch_notifications($env, $channels, 'payment',
+                    wallos_linked_notification_contexts($linkedEntries, $owner, 'payment'), wallos_notification_templates_load($db, $userId));
+                $linkedRecorded = wallos_record_linked_payment_reminders($db, $userId, $linkedPending, $linkedDelivered);
+                $complete = $complete && $linkedRecorded && array_diff_key($linkedPending, $linkedDelivered) === [];
+            }
+            wallos_recipient_log_prune($db, $userId, $today);
         } elseif (php_sapi_name() !== 'cli') {
             echo "Notifications are disabled. No need to run.<br />";
         }

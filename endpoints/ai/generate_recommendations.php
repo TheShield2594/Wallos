@@ -4,24 +4,9 @@ require_once '../../includes/connect_endpoint.php';
 require_once '../../includes/validate_endpoint.php';
 require_once '../../includes/ssrf_helper.php';
 require_once '../../includes/ai_client.php';
+require_once '../../includes/ai_recommendations.php';
 
-function describeFrequency($cycle, $frequency)
-{
-    $unit = match ($cycle) {
-        1 => 'day',
-        2 => 'week',
-        3 => 'month',
-        4 => 'year',
-        default => 'unit'
-    };
 
-    return $frequency == 1 ? "Every $unit" : "Every $frequency {$unit}s";
-}
-
-function describeCurrency($currencyId, $currencies)
-{
-    return $currencies[$currencyId]['code'] ?? '';
-}
 
 // Load AI settings
 $aiSettings = ai_load_settings($db, $userId);
@@ -83,65 +68,11 @@ if (empty($subscriptions)) {
     exit;
 }
 
-$subscriptionsForAI = [];
-
-foreach ($subscriptions as $row) {
-    if ($row['inactive']) {
-        continue;
-    }
-
-    $price = round($row['price'], 2);
-    $currencyCode = $currencies[$row['currency_id']]['code'] ?? '';
-    $priceFormatted = $currencyCode ? "$price $currencyCode" : "$price";
-
-    $payerName = $members[$row['payer_user_id']]['name'] ?? 'Unknown';
-
-    $subscriptionsForAI[] = [
-        'name'      => $row['name'],
-        'price'     => $priceFormatted,
-        'frequency' => describeFrequency($row['cycle'], $row['frequency']),
-        'category'  => $categories[$row['category_id']]['name'] ?? 'Uncategorized',
-        'payer'     => $payerName,
-    ];
-}
-
-$prompt = <<<PROMPT
-You are a helpful assistant designed to help users save money on digital subscriptions.
-
-The user has shared a list of their active subscriptions across household members. For each subscription, you are given:
-- Name of the service
-- Price (in original currency)
-- Payment frequency (e.g., every month, every year, etc.)
-- Category
-- Payer (which household member pays for it)
-
-Analyze the data and give 3 to 7 smart and specific recommendations to reduce subscription costs. If possible, include estimated savings for each suggestion.
-
-Follow these guidelines:
-- Do NOT suggest switching to family or group plans unless two or more different household members are paying for the same or similar service.
-- Recognize known feature overlaps, such as:
-• YouTube Premium includes YouTube Music.
-• Amazon Prime includes Prime Video.
-• Google One, iCloud+, and Proton all offer cloud storage.
-• Real Debrid, All Debrid, and Premiumize offer similar download capabilities.
-- Suggest rotating or cancelling subscriptions that serve similar purposes (e.g. multiple streaming or IPTV services).
-- Recommend switching from monthly to yearly plans only if it provides clear savings and the user is likely to keep the service long-term.
-- Suggest looking for promo or new customer deals if a service appears overpriced.
-- Only recommend cancelling rarely used services if they do not provide unique value.
-
-Return the result as a JSON array. Each item in the array should have:
-- "title": a short summary of the suggestion
-- "description": a longer explanation with reasoning
-- "savings": a rough estimate like "10 EUR/month" or "60 EUR/year" (if possible)
-
-If possible, all text should be in the user's language: {$userLanguageName}. Otherwise, use English.
-
-Do not include any other text, just the JSON output. Absolutely no additional comments or explanations.
-
-Here is the user’s data:
-PROMPT;
-
-$prompt .= "\n\n" . json_encode($subscriptionsForAI, JSON_PRETTY_PRINT);
+// The shared prompt (includes/ai_recommendations.php). Descriptions and
+// website domains go only when the account allows it (on by default).
+$includeDescriptions = (int) ($aiSettings['include_descriptions'] ?? 1) === 1;
+$subscriptionsForAI = wallos_ai_build_payload($subscriptions, $currencies, $categories, $members, $includeDescriptions);
+$prompt = wallos_ai_recommendations_prompt($subscriptionsForAI, $userLanguageName, $includeDescriptions);
 
 // Run the completion against the configured provider
 $aiResult = ai_complete($aiSettings, $prompt, $db, $i18n, $userId);

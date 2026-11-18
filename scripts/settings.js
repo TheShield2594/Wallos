@@ -223,6 +223,16 @@ function editMember(memberId) {
 
   const memberName = memberNameElement.value;
   const memberEmail = memberEmailElement ? memberEmailElement.value : "";
+  const linkedElement = document.querySelector(`div[data-memberid="${memberId}"] select[name="linked_user_id"]`);
+  const body = {
+    action: "edit",
+    memberId: memberId,
+    name: memberName,
+    email: memberEmail,
+  };
+  if (linkedElement) {
+    body.linked_user_id = linkedElement.value;
+  }
 
   fetch("endpoints/household/household.php", {
     method: "POST",
@@ -230,12 +240,7 @@ function editMember(memberId) {
       "Content-Type": "application/x-www-form-urlencoded",
       'X-CSRF-Token': window.csrfToken,
     },
-    body: new URLSearchParams({
-      action: "edit",
-      memberId: memberId,
-      name: memberName,
-      email: memberEmail,
-    }),
+    body: new URLSearchParams(body),
   })
     .then(response => {
       if (!response.ok) {
@@ -980,6 +985,82 @@ document.addEventListener('DOMContentLoaded', function () {
 
 });
 
+// Keys are kept per provider (issue #44): the field shows whether the selected
+// provider has a saved key; left empty, saving uses it.
+function updateFixerKeyField() {
+  const input = document.querySelector("#fixerKey");
+  const provider = document.querySelector("#fixerProvider").value;
+  if (!input) {
+    return;
+  }
+  let hints = {};
+  try {
+    hints = JSON.parse(input.dataset.keyHints || "{}");
+  } catch (e) {
+    hints = {};
+  }
+  input.value = "";
+  input.closest(".form-group").classList.toggle("hide", provider === "2");
+  input.placeholder = hints[provider]
+    ? input.dataset.placeholderSaved.replace("%s", hints[provider])
+    : input.dataset.placeholderEmpty;
+  const removeButton = document.querySelector("#removeFixerKey");
+  if (removeButton) {
+    removeButton.classList.toggle("hide", !hints[provider]);
+  }
+}
+
+function removeFixerKeyButton() {
+  const input = document.querySelector("#fixerKey");
+  const provider = document.querySelector("#fixerProvider").value;
+  const removeButton = document.querySelector("#removeFixerKey");
+  removeButton.disabled = true;
+
+  fetch("endpoints/currency/fixer_api_key.php", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      'X-CSRF-Token': window.csrfToken,
+    },
+    body: new URLSearchParams({ action: "remove", provider: provider }),
+  })
+    .then(response => response.json())
+    .then(data => {
+      if (data.success) {
+        let hints = {};
+        try {
+          hints = JSON.parse(input.dataset.keyHints || "{}");
+        } catch (e) {
+          hints = {};
+        }
+        delete hints[provider];
+        input.dataset.keyHints = JSON.stringify(hints);
+        updateFixerKeyField();
+        showSuccessMessage(data.message);
+      } else {
+        showErrorMessage(data.message);
+      }
+    })
+    .catch(error => {
+      console.error(error);
+      showErrorMessage(translate("unknown_error"));
+    })
+    .finally(() => {
+      removeButton.disabled = false;
+    });
+}
+
+function toggleFixerKeyVisibility() {
+  const input = document.querySelector("#fixerKey");
+  const button = document.querySelector("#fixerKeyReveal");
+  const reveal = input.type === "password";
+  input.type = reveal ? "text" : "password";
+  button.setAttribute("aria-pressed", reveal ? "true" : "false");
+  button.querySelector("i").className = reveal ? "fa-solid fa-eye-slash" : "fa-solid fa-eye";
+}
+
+document.addEventListener("DOMContentLoaded", updateFixerKeyField);
+
 function addFixerKeyButton() {
   const addButton = document.getElementById("addFixerKey");
   addButton.disabled = true;
@@ -1006,6 +1087,17 @@ function addFixerKeyButton() {
         showSuccessMessage(data.message);
         addButton.disabled = false;
         convertCurrencyCheckbox.disabled = false;
+        if (data.key_hint !== undefined) {
+          let hints = {};
+          try {
+            hints = JSON.parse(apiKeyInput.dataset.keyHints || "{}");
+          } catch (e) {
+            hints = {};
+          }
+          hints[String(data.provider)] = data.key_hint;
+          apiKeyInput.dataset.keyHints = JSON.stringify(hints);
+        }
+        updateFixerKeyField();
 
         fetch("endpoints/currency/update_exchange.php", {
           method: "POST",
@@ -1327,6 +1419,7 @@ function saveAiSettingsButton() {
   const aiOllamaHost = document.querySelector("#ai_ollama_host").value.trim();
   const aiModel = document.querySelector("#ai_model").value;
   const aiRunSchedule = document.querySelector("#ai_run_schedule").value;
+  const aiIncludeDescriptions = document.querySelector("#ai_include_descriptions").checked;
 
   fetch('endpoints/ai/save_settings.php', {
     method: 'POST',
@@ -1334,7 +1427,7 @@ function saveAiSettingsButton() {
       'Content-Type': 'application/json',
       'X-CSRF-Token': window.csrfToken,
     },
-    body: JSON.stringify({ ai_enabled: aiEnabled, ai_type: aiType, api_key: aiApiKey, ollama_host: aiOllamaHost, model: aiModel, ai_run_schedule: aiRunSchedule })
+    body: JSON.stringify({ ai_enabled: aiEnabled, ai_type: aiType, api_key: aiApiKey, ollama_host: aiOllamaHost, model: aiModel, ai_run_schedule: aiRunSchedule, include_descriptions: aiIncludeDescriptions })
   })
     .then(response => response.json())
     .then(data => {

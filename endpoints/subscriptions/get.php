@@ -164,8 +164,9 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
 
   // Subscriptions shared with the account's household join the list unless
   // it is filtered by the account's own categories, members or payment methods.
-  $listFiltered = !empty($_GET['categories']) || !empty($_GET['payments']) || !empty($_GET['members']);
-  if (!$listFiltered) {
+  // Shared rows join unless a member, category or payment filter leaves out
+  // the "Shared with me" bucket (see includes/households.php).
+  if (wallos_shared_rows_pass_filters([$_GET['members'] ?? null, $_GET['categories'] ?? null, $_GET['payments'] ?? null])) {
     // The renewal-type and notification filters apply to shared rows as
     // they do to the account's own (see the SQL above).
     $renewalFilter = $_GET['renewalType'] ?? '';

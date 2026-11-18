@@ -1,6 +1,8 @@
 <?php
 /*
   Price and plan history of one subscription: GET ?id=12
+  Returns `changes` (newest first) and `history`, the prices it has had
+  (oldest first).
   (see includes/price_changes.php). The owner's history only: amounts are in
   the owner's currencies.
 */
@@ -14,10 +16,22 @@ if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true) {
     die(json_encode(['success' => false, 'message' => translate('session_expired', $i18n)]));
 }
 
-$changes = wallos_price_changes_list($db, $userId, (int) ($_GET['id'] ?? 0), 24);
+$subscriptionId = (int) ($_GET['id'] ?? 0);
+$changes = wallos_price_changes_list($db, $userId, $subscriptionId, 24);
+
+$stmt = $db->prepare('SELECT price, currency_id, cycle, frequency, start_date FROM subscriptions WHERE id = :id AND user_id = :userId');
+$stmt->bindValue(':id', $subscriptionId, SQLITE3_INTEGER);
+$stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
+$subscriptionResult = $stmt->execute();
+$subscription = $subscriptionResult ? $subscriptionResult->fetchArray(SQLITE3_ASSOC) : false;
+// The prices the subscription has had, oldest first, for the chart and the
+// "since" summary: from every change, so the starting price stays the real
+// one however many changes there are (only the last 24 are listed).
+$history = $subscription ? wallos_price_history_points($subscription, wallos_price_changes_list($db, $userId, $subscriptionId, PHP_INT_MAX)) : [];
 
 echo json_encode([
     'success' => true,
+    'history' => $history,
     'changes' => array_map(function ($change) {
         return [
             'id' => (int) $change['id'],
