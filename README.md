@@ -219,7 +219,29 @@ To set the allowlist before anyone can log in (for example, an identity provider
 
 ## API
 
-Tally keeps the Wallos API unchanged, so the [Wallos API documentation](https://api.wallosapp.com/) applies. Authenticate with the API key from your **Profile** page.
+Tally keeps the Wallos API endpoints, so the [Wallos API documentation](https://api.wallosapp.com/) applies, with scoped keys instead of one key per account.
+
+Create keys under **Profile → API keys**. Each key has a name and one or more scopes:
+
+| Scope | Allows |
+| --- | --- |
+| `read` | The account's own data (`api/*/get_*`) |
+| `write` | Changing the account's own data (`api/*/set_*`, including `api/admin/set_*` when the owner is an admin) |
+| `ical` | The calendar feed only (`api/subscriptions/get_ical_feed.php`) |
+| `admin:read` | Every account's subscriptions (`get_subscriptions.php?all-user-subscription=1`) and `api/admin/get_*`. Admins only, needs your password (or a 2FA code, or an OIDC sign-in in the last 10 minutes) to create, and stops working if the owner stops being an admin |
+
+`admin:read` includes `read`, and `read` includes `ical`. A key is shown once, when it is created: Tally stores only a hash of it. Revoke keys from your profile; admins can revoke any key under **Admin → API keys**.
+
+Send the key in a header:
+
+```bash
+curl -H "Authorization: Bearer tally_..." https://tally.example.com/api/subscriptions/get_subscriptions.php
+# or: -H "X-API-Key: tally_..."
+```
+
+The `api_key` query or form parameter still works but is deprecated (the response carries a `Deprecation` header), except for calendar feed URLs, where calendar apps can only pass the key in the URL. More than 20 failed key lookups from one address within 15 minutes are refused with HTTP 429 until the window passes.
+
+Upgrading: each account's existing key becomes a "Legacy key" with `read` and `write`, so existing scripts and calendar subscriptions keep working. Scripts that used the admin's key for `all-user-subscription=1` or `api/admin/get_*` need a new `admin:read` key.
 
 ## Development
 

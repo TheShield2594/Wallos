@@ -272,32 +272,97 @@ function submitDisableTotp() {
         });
 }
 
-function regenerateApiKey() {
-  const regenerateButton = document.getElementById("regenerateApiKey");
-  regenerateButton.disabled = true;
+function toggleApiKeyReauth() {
+  const adminScope = document.getElementById("api_scope_admin_read");
+  const reauth = document.getElementById("apiKeyReauth");
+  if (adminScope && reauth) {
+    reauth.classList.toggle("hide", !adminScope.checked);
+  }
+}
 
-  fetch("endpoints/user/regenerateapikey.php", {
+function createApiKey() {
+  const button = document.getElementById("createApiKeyButton");
+  const name = document.getElementById("newApiKeyName").value.trim();
+  const scopes = Array.from(document.querySelectorAll("#newApiKeyScopes input[type=checkbox]:checked"))
+    .map(input => input.value);
+  const passwordField = document.getElementById("apiKeyReauthPassword");
+  const totpField = document.getElementById("apiKeyReauthTotp");
+
+  button.disabled = true;
+  fetch("endpoints/user/createapikey.php", {
     method: "POST",
     headers: {
+      "Content-Type": "application/json",
       "X-CSRF-Token": window.csrfToken,
     },
+    body: JSON.stringify({
+      name: name,
+      scopes: scopes,
+      password: passwordField ? passwordField.value : "",
+      totpCode: totpField ? totpField.value : "",
+    }),
   })
     .then(response => response.json())
     .then(data => {
-      regenerateButton.disabled = false;
+      button.disabled = false;
+      if (passwordField) {
+        passwordField.value = "";
+      }
+      if (totpField) {
+        totpField.value = "";
+      }
       if (data.success) {
-        const newApiKey = data.apiKey;
-        document.getElementById("apikey").value = newApiKey;
+        // Shown once: only a hash is stored. The list refreshes on the next
+        // page load; the key stays on screen until then.
+        document.getElementById("newApiKey").value = data.apiKey;
+        document.getElementById("newApiKeyBox").classList.remove("hide");
+        document.getElementById("newApiKeyName").value = "";
         showSuccessMessage(data.message);
       } else {
-        showErrorMessage(data.message || translate("failed_regenerate_api_key"));
+        showErrorMessage(data.message);
       }
     })
     .catch(error => {
       console.error(error);
-      regenerateButton.disabled = false;
+      button.disabled = false;
       showErrorMessage(translate("unknown_error"));
     });
+}
+
+function copyNewApiKey() {
+  const field = document.getElementById("newApiKey");
+  navigator.clipboard.writeText(field.value)
+    .then(() => showSuccessMessage(translate("copied_to_clipboard")))
+    .catch(() => showErrorMessage(translate("unknown_error")));
+}
+
+function revokeApiKey(keyId) {
+  const row = document.querySelector(`.api-key-row[data-keyid="${keyId}"]`);
+  const button = row ? row.querySelector("button") : null;
+  if (button && button.dataset.confirm && !confirm(button.dataset.confirm)) {
+    return;
+  }
+
+  fetch("endpoints/user/revokeapikey.php", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-CSRF-Token": window.csrfToken,
+    },
+    body: JSON.stringify({ id: keyId }),
+  })
+    .then(response => response.json())
+    .then(data => {
+      if (data.success) {
+        if (row) {
+          row.remove();
+        }
+        showSuccessMessage(data.message);
+      } else {
+        showErrorMessage(data.message);
+      }
+    })
+    .catch(() => showErrorMessage(translate("unknown_error")));
 }
 
 

@@ -3,6 +3,8 @@
 This API Endpoint accepts both POST and GET requests.
 It receives:
 - api_key (or apiKey): the API key of the user.
+  Send it as "Authorization: Bearer <key>" (or an X-API-Key header); the api_key
+  parameter still works but is deprecated. Required scope: read.
 - reference_date (optional): date in YYYY-MM-DD format to evaluate the active budget period (defaults to today).
 
 It returns:
@@ -26,6 +28,7 @@ It returns:
 */
 
 require_once '../../includes/connect_endpoint.php';
+require_once __DIR__ . '/../../includes/api_auth.php';
 require_once '../../includes/budget_period_calculations.php';
 
 header('Content-Type: application/json; charset=UTF-8');
@@ -41,19 +44,6 @@ if ($_SERVER["REQUEST_METHOD"] !== "POST" && $_SERVER["REQUEST_METHOD"] !== "GET
 $rawBody = file_get_contents('php://input');
 $jsonData = json_decode($rawBody, true);
 $payload = is_array($jsonData) ? $jsonData : [];
-
-$apiKey = $_REQUEST['api_key']
-    ?? $_REQUEST['apiKey']
-    ?? $payload['api_key']
-    ?? $payload['apiKey']
-    ?? null;
-if (!$apiKey) {
-    echo json_encode([
-        "success" => false,
-        "title" => "Missing parameters"
-    ]);
-    exit;
-}
 
 $referenceDateRaw = $_REQUEST['reference_date']
     ?? $payload['reference_date']
@@ -81,19 +71,7 @@ if ($referenceDateRaw !== null && $referenceDateRaw !== '') {
     $referenceDate = new DateTime('now');
 }
 
-$sql = "SELECT id, main_currency, period_budget, budget_period_type, budget_period_anchor_date FROM user WHERE api_key = :apiKey";
-$stmt = $db->prepare($sql);
-$stmt->bindValue(':apiKey', $apiKey, SQLITE3_TEXT);
-$result = $stmt->execute();
-$user = $result ? $result->fetchArray(SQLITE3_ASSOC) : false;
-
-if (!$user) {
-    echo json_encode([
-        "success" => false,
-        "title" => "Invalid API key"
-    ]);
-    exit;
-}
+$user = wallos_api_require($db, 'read', ['payload' => $payload]);
 
 $userId = (int) $user['id'];
 $periodBudget = max(0, (float) ($user['period_budget'] ?? 0));

@@ -241,6 +241,51 @@ $passwordLoginDisableAllowed = $oidcAdminCount > 0 || (int) $oidcSettings['passw
     ?>
 
     <?php
+    // Every account's API keys (issue #43); admins can revoke any of them.
+    require_once 'includes/api_keys.php';
+    $allApiKeys = wallos_api_list_keys($db, null);
+    ?>
+    <section class="account-section">
+        <header>
+            <h2><?= translate('api_keys', $i18n) ?></h2>
+        </header>
+        <div class="api-key-list">
+            <?php if ($allApiKeys === []) { ?>
+                <p class="form-hint"><?= translate('no_api_keys', $i18n) ?></p>
+            <?php } ?>
+            <?php foreach ($allApiKeys as $apiKey) { ?>
+                <div class="api-key-row" data-keyid="<?= (int) $apiKey['id'] ?>">
+                    <div class="api-key-details">
+                        <span><i class="fa-solid fa-user" aria-hidden="true"></i> <?= htmlspecialchars($apiKey['username'] ?? '?') ?></span>
+                        <strong><?= htmlspecialchars($apiKey['name']) ?></strong>
+                        <code><?= htmlspecialchars($apiKey['prefix']) ?>&hellip;</code>
+                        <span class="api-key-scopes">
+                            <?php foreach ($apiKey['scopes'] as $scope) { ?>
+                                <span class="user-role-badge<?= $scope === 'admin:read' ? ' is-admin-scope' : '' ?>"><?= htmlspecialchars($scope) ?></span>
+                            <?php } ?>
+                        </span>
+                        <span class="form-hint">
+                            <?= translate('last_used', $i18n) ?>
+                            <?= $apiKey['last_used_at'] ? htmlspecialchars(substr($apiKey['last_used_at'], 0, 16)) . ' UTC' : translate('never', $i18n) ?>
+                        </span>
+                    </div>
+                    <button class="image-button medium" onClick="adminRevokeApiKey(<?= (int) $apiKey['id'] ?>)"
+                        title="<?= translate('revoke', $i18n) ?>" aria-label="<?= translate('revoke', $i18n) ?>"
+                        data-confirm="<?= htmlspecialchars(translate('revoke_api_key_confirmation', $i18n)) ?>">
+                        <i class="fa-solid fa-ban"></i>
+                    </button>
+                </div>
+            <?php } ?>
+        </div>
+        <div class="settings-notes">
+            <p>
+                <i class="fa-solid fa-circle-info"></i>
+                <?= translate('admin_api_keys_info', $i18n) ?>
+            </p>
+        </div>
+    </section>
+
+    <?php
     // Default categories for new accounts (issue #31).
     $categoryTemplates = wallos_category_templates($db);
     $templateParents = array_filter($categoryTemplates, function ($template) {

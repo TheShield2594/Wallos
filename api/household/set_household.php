@@ -3,6 +3,8 @@
 This API Endpoint accepts POST requests only.
 It receives the following parameters:
 - api_key: the API key of the user.
+  Send it as "Authorization: Bearer <key>" (or an X-API-Key header); the api_key
+  parameter still works but is deprecated. Required scope: write.
 - action: the action to perform ('add', 'edit', 'delete').
 - name: (required for 'add' and 'edit') the name of the household member.
 - email: (optional for 'add' and 'edit') the email of the household member.
@@ -24,6 +26,7 @@ Example response:
 */
 
 require_once '../../includes/connect_endpoint.php';
+require_once __DIR__ . '/../../includes/api_auth.php';
 require_once '../../includes/cost_sharing.php';
 require_once '../../includes/inputvalidation.php';
 
@@ -38,32 +41,8 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-$apiKey = $_POST['api_key'] ?? $_POST['apiKey'] ?? null;
-
 // Authenticate user first
-if (!$apiKey) {
-    echo json_encode([
-        'success' => false,
-        'title' => 'Missing API key',
-        'message' => 'API key is required.'
-    ]);
-    exit;
-}
-
-$sql = "SELECT * FROM user WHERE api_key = :apiKey";
-$stmt = $db->prepare($sql);
-$stmt->bindValue(':apiKey', $apiKey, SQLITE3_TEXT);
-$result = $stmt->execute();
-$user = $result->fetchArray(SQLITE3_ASSOC);
-
-if (!$user) {
-    echo json_encode([
-        'success' => false,
-        'title' => 'Unauthorized',
-        'message' => 'Invalid API key.'
-    ]);
-    exit;
-}
+$user = wallos_api_require($db, 'write');
 
 $userId = $user['id'];
 $action = $_POST['action'] ?? null;

@@ -3,6 +3,8 @@
 This API Endpoint accepts POST requests only.
 It receives the following parameters:
 - api_key: the API key of the user.
+  Send it as "Authorization: Bearer <key>" (or an X-API-Key header); the api_key
+  parameter still works but is deprecated. Required scope: write. The key's owner must be an admin.
 - disable: '1' to disable password login, '0' to enable it.
 
 It returns a JSON object with the following properties:
@@ -19,6 +21,7 @@ Example response:
 */
 
 require_once '../../includes/connect_endpoint.php';
+require_once __DIR__ . '/../../includes/api_auth.php';
 require_once __DIR__ . '/../../includes/admin_roles.php';
 require_once '../../includes/oidc_settings.php';
 
@@ -33,32 +36,8 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-$apiKey = $_POST['api_key'] ?? null;
-
 // Authenticate user first
-if (!$apiKey) {
-    echo json_encode([
-        'success' => false,
-        'title' => 'Missing API key',
-        'message' => 'API key is required.'
-    ]);
-    exit;
-}
-
-$sql = "SELECT * FROM user WHERE api_key = :apiKey";
-$stmt = $db->prepare($sql);
-$stmt->bindValue(':apiKey', $apiKey);
-$result = $stmt->execute();
-$user = $result->fetchArray(SQLITE3_ASSOC);
-
-if (!$user || !wallos_is_admin($db, $user['id'])) {
-    echo json_encode([
-        'success' => false,
-        'title' => 'Unauthorized',
-        'message' => 'Invalid API key or insufficient privileges.'
-    ]);
-    exit;
-}
+$user = wallos_api_require($db, 'write', ['requireAdmin' => true]);
 
 // Now check 'disable' parameter only after authentication
 $disable = $_POST['disable'] ?? null;

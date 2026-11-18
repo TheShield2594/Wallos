@@ -3565,6 +3565,50 @@ input[type="color"]::-moz-color-swatch {
   color: var(--text2);
 }
 
+.user-role-badge.is-admin-scope {
+  color: var(--warning);
+  border-color: var(--warning);
+}
+
+.api-key-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.api-key-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.api-key-details {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
+  font-size: 14px;
+}
+
+.api-key-details code {
+  color: var(--text2);
+}
+
+.api-key-scopes {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.api-key-created {
+  margin-bottom: 16px;
+}
+
 .account-2fa .buttons {
   justify-content: flex-start;
 }

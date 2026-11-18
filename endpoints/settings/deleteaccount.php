@@ -76,6 +76,7 @@ if ($userIdToDelete <= 0 || $userIdToDelete !== (int) $userId) {
         'DELETE FROM totp WHERE user_id = :id',
         'DELETE FROM total_yearly_cost WHERE user_id = :id',
         'DELETE FROM login_tokens WHERE user_id = :id',
+        'DELETE FROM api_keys WHERE user_id = :id',
         'DELETE FROM password_resets WHERE user_id = :id',
         'DELETE FROM custom_css_style WHERE user_id = :id',
         'DELETE FROM uploaded_avatars WHERE user_id = :id',

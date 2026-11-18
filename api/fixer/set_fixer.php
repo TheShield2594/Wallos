@@ -3,6 +3,8 @@
 This API Endpoint accepts POST requests only.
 It receives the following parameters:
 - api_key: the API key of the user (for Tally authentication).
+  Send it as "Authorization: Bearer <key>" (or an X-API-Key header); the api_key
+  parameter still works but is deprecated. Required scope: write.
 - fixer_api_key: the Fixer.io or APILayer API key to save (optional; if empty/omitted, clears the
   settings and every saved key). Not read for provider '2', which needs no account.
   Keys are kept per provider: saving one for APILayer leaves the Fixer.io key saved.
@@ -25,6 +27,7 @@ Example response:
 */
 
 require_once '../../includes/connect_endpoint.php';
+require_once __DIR__ . '/../../includes/api_auth.php';
 require_once '../../includes/fixer_keys.php';
 
 header('Content-Type: application/json; charset=UTF-8');
@@ -38,32 +41,8 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-$apiKey = $_POST['api_key'] ?? $_POST['apiKey'] ?? null;
-
 // Authenticate user first
-if (!$apiKey) {
-    echo json_encode([
-        'success' => false,
-        'title' => 'Missing API key',
-        'message' => 'API key is required.'
-    ]);
-    exit;
-}
-
-$sql = "SELECT * FROM user WHERE api_key = :apiKey";
-$stmt = $db->prepare($sql);
-$stmt->bindValue(':apiKey', $apiKey, SQLITE3_TEXT);
-$result = $stmt->execute();
-$user = $result->fetchArray(SQLITE3_ASSOC);
-
-if (!$user) {
-    echo json_encode([
-        'success' => false,
-        'title' => 'Unauthorized',
-        'message' => 'Invalid API key.'
-    ]);
-    exit;
-}
+$user = wallos_api_require($db, 'write');
 
 $userId = $user['id'];
 $fixerApiKey = isset($_POST['fixer_api_key']) ? trim($_POST['fixer_api_key']) : '';

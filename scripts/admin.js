@@ -321,6 +321,35 @@ function setUserAdmin(userId, isAdmin) {
     .catch(error => showErrorMessage('Error:', error));
 }
 
+function adminRevokeApiKey(keyId) {
+  const row = document.querySelector(`.api-key-row[data-keyid="${keyId}"]`);
+  const button = row ? row.querySelector("button") : null;
+  if (button && button.dataset.confirm && !confirm(button.dataset.confirm)) {
+    return;
+  }
+
+  fetch('endpoints/admin/revokeapikey.php', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRF-Token': window.csrfToken,
+    },
+    body: JSON.stringify({ id: keyId })
+  })
+    .then(response => response.json())
+    .then(data => {
+      if (data.success) {
+        if (row) {
+          row.remove();
+        }
+        showSuccessMessage(data.message);
+      } else {
+        showErrorMessage(data.message);
+      }
+    })
+    .catch(error => showErrorMessage('Error:', error));
+}
+
 function addUserButton() {
   const button = document.getElementById('addUserButton');
   button.disabled = true;
