@@ -5,6 +5,21 @@ if (!isset($userData)) {
 }
 
 $userId = $userData['id'];
+
+// Role mapping (issue #45): when a roles claim and admin values are set, the
+// identity provider decides who is an admin, on every login. The ID token
+// came straight from the token endpoint, so its claims are read as-is. The
+// last admin is never demoted this way (see wallos_oidc_sync_admin()).
+if (isset($oidcSettings, $userInfo)) {
+    require_once __DIR__ . '/../admin_roles.php';
+    $oidcShouldBeAdmin = wallos_oidc_resolve_admin(
+        wallos_oidc_decode_id_token_claims($tokenData['id_token'] ?? null),
+        $userInfo,
+        $oidcSettings['roles_claim'] ?? '',
+        $oidcSettings['admin_values'] ?? ''
+    );
+    wallos_oidc_sync_admin($db, $userId, $oidcShouldBeAdmin);
+}
 $username = $userData['username'];
 $language = $userData['language'];
 $main_currency = $userData['main_currency'];
@@ -15,6 +30,9 @@ $_SESSION['loggedin'] = true;
 $_SESSION['main_currency'] = $main_currency;
 $_SESSION['userId'] = $userId;
 $_SESSION['from_oidc'] = true; // Indicate this session is from OIDC login
+// A fresh provider sign-in stands in for re-entering a password (see
+// wallos_api_reauthenticate()).
+$_SESSION['oidc_login_at'] = time();
 // Kept for logout, where providers want it as id_token_hint
 if (isset($tokenData['id_token']) && is_string($tokenData['id_token'])) {
     $_SESSION['oidc_id_token'] = $tokenData['id_token'];

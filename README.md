@@ -122,6 +122,31 @@ services:
       test: ["NONE"]
 ```
 
+### Hardened containers
+
+The image can run without root, and with a read-only root filesystem.
+
+- **Rootless:** start the container as an unprivileged user (`--user 1000:1000`, or `user: "1000:1000"` in Compose). The `db` and `logos` folders must already belong to that user (`chown -R 1000:1000 ./db ./logos`); the container says so and stops if they don't. `PUID`/`PGID` are ignored in this mode. Unprivileged processes can't bind port 80, so nginx listens on **8080** instead: map it with `-p 8282:8080`. Set `PORT` to choose another port.
+- **Read-only root filesystem:** add `--read-only --tmpfs /tmp` (or `read_only: true` and `tmpfs: [/tmp]` in Compose). At runtime the app only writes to `/tmp` and to the two volumes. With the default `PUID`/`PGID` (82) this also works in root mode; custom ids need a writable `/etc`, so combine read-only with rootless instead.
+
+```yaml
+services:
+  tally:
+    image: ghcr.io/theshield2594/tally:main
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    ports:
+      - "8282:8080/tcp"
+    volumes:
+      - './db:/var/www/html/db'
+      - './logos:/var/www/html/images/uploads/logos'
+    restart: unless-stopped
+```
+
+Root mode is still the default, and existing setups keep working unchanged. In both modes, the scheduled jobs run as the app user under [supercronic](https://github.com/aptible/supercronic) and log to the container output, as do nginx and PHP (`docker logs tally`). The image only contains the files the app needs at runtime; tests, dev scripts and the container's own config are not in the web root.
+
 ### Bare metal
 
 You need NGINX or Apache and PHP 8.3 with these modules: `curl`, `dom`, `gd`, `intl`, `openssl`, `sqlite3`, `zip`, `mbstring` and `fpm`.
@@ -143,6 +168,8 @@ You need NGINX or Apache and PHP 8.3 with these modules: `curl`, `dom`, `gd`, `i
 30 3 * * 1 php /var/www/html/endpoints/cronjobs/generaterecommendations.php weekly >> /var/log/cron/generaterecommendations.log 2>&1
 0 4 1 * * php /var/www/html/endpoints/cronjobs/generaterecommendations.php monthly >> /var/log/cron/generaterecommendations.log 2>&1
 ```
+
+The Docker image no longer writes these logs to `/var/log/cron`; its jobs log to the container output instead.
 
 Upgrading an existing install: replace the old `0 8 * * *` cancellation and `0 9 * * *` payment reminder entries with the two `*/15` lines above (do not add them alongside the old ones). Each account's reminders now go out at the "Send at" time in Settings → Notifications.
 
@@ -200,6 +227,16 @@ If `OIDC_ISSUER` is set, Tally reads `/.well-known/openid-configuration` and use
 | `OIDC_AUTO_CREATE_USER` | Create user automatically |
 | `OIDC_DISABLE_PASSWORD_LOGIN` | Disable password login |
 | `OIDC_REQUIRE_EMAIL_VERIFIED` | Require verified email for account linking |
+| `OIDC_ROLES_CLAIM` | Roles claim |
+| `OIDC_ADMIN_VALUES` | Admin values |
+
+#### Admins and OIDC-only sign-in
+
+An account is an admin when it has the admin role; the account that set the instance up is the first one. Admins can promote and demote others under **Admin → User Management**. The last admin can't be demoted or deleted.
+
+To let the identity provider decide, set **Roles claim** (for example `groups`, or `realm_access.roles` for Keycloak) and **Admin values** (a comma-separated list such as `tally-admins`). On every OIDC login Tally reads that claim from the ID token and the user info response (a list, or a string separated by spaces or commas) and grants or removes the admin role. It never removes the last admin this way; it logs a warning instead.
+
+**Disable password login** can be turned on with any number of accounts once at least one admin account is linked to OIDC (sign in with OIDC as that admin once). If you lock yourself out, set `TALLY_FORCE_PASSWORD_LOGIN=true` on the container to turn password login back on, sign in, fix the settings, then remove the variable.
 
 ### SSRF allowlist
 
@@ -209,7 +246,29 @@ To set the allowlist before anyone can log in (for example, an identity provider
 
 ## API
 
-Tally keeps the Wallos API unchanged, so the [Wallos API documentation](https://api.wallosapp.com/) applies. Authenticate with the API key from your **Profile** page.
+Tally keeps the Wallos API endpoints, so the [Wallos API documentation](https://api.wallosapp.com/) applies, with scoped keys instead of one key per account.
+
+Create keys under **Profile → API keys**. Each key has a name and one or more scopes:
+
+| Scope | Allows |
+| --- | --- |
+| `read` | The account's own data (`api/*/get_*`) |
+| `write` | Changing the account's own data (`api/*/set_*`, including `api/admin/set_*` when the owner is an admin) |
+| `ical` | The calendar feed only (`api/subscriptions/get_ical_feed.php`) |
+| `admin:read` | Every account's subscriptions (`get_subscriptions.php?all-user-subscription=1`) and `api/admin/get_*`. Admins only, needs your password (or a 2FA code, or an OIDC sign-in in the last 10 minutes) to create, and stops working if the owner stops being an admin |
+
+`admin:read` includes `read`, and `read` includes `ical`. A key is shown once, when it is created: Tally stores only a hash of it. Revoke keys from your profile; admins can revoke any key under **Admin → API keys**.
+
+Send the key in a header:
+
+```bash
+curl -H "Authorization: Bearer tally_..." https://tally.example.com/api/subscriptions/get_subscriptions.php
+# or: -H "X-API-Key: tally_..."
+```
+
+The `api_key` query or form parameter still works but is deprecated (the response carries a `Deprecation` header), except for calendar feed URLs, where calendar apps can only pass the key in the URL. More than 20 failed key lookups from one address within 15 minutes are refused with HTTP 429 until the window passes.
+
+Upgrading: each account's existing key becomes a "Legacy key" with `read` and `write`, so existing scripts and calendar subscriptions keep working. An admin's existing key also gets `admin:read`, so dashboards using `all-user-subscription=1` or `api/admin/get_*` keep working too. Keys are now stored hashed and can't be shown again: if you've lost one, create a new key.
 
 ## Development
 

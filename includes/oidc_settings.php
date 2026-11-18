@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/admin_roles.php';
+
 function wallos_get_oidc_defaults()
 {
     return [
@@ -17,6 +19,10 @@ function wallos_get_oidc_defaults()
         'auto_create_user' => 0,
         'password_login_disabled' => 0,
         'require_email_verified' => 1,
+        // Role mapping (issue #45): the claim holding the user's groups or
+        // roles, and the comma-separated values of it that make an admin.
+        'roles_claim' => '',
+        'admin_values' => '',
     ];
 }
 
@@ -76,6 +82,8 @@ function wallos_get_db_oidc_settings($db)
 
     // Column added via ALTER TABLE may return NULL for existing rows in SQLite
     $settings['require_email_verified'] = $settings['require_email_verified'] ?? 1;
+    $settings['roles_claim'] = (string) ($settings['roles_claim'] ?? '');
+    $settings['admin_values'] = (string) ($settings['admin_values'] ?? '');
 
     return $settings;
 }
@@ -228,6 +236,8 @@ function wallos_get_effective_oidc_configuration($db)
         'logout_url' => 'OIDC_LOGOUT_URL',
         'user_identifier_field' => 'OIDC_USER_IDENTIFIER',
         'scopes' => 'OIDC_SCOPES',
+        'roles_claim' => 'OIDC_ROLES_CLAIM',
+        'admin_values' => 'OIDC_ADMIN_VALUES',
     ];
 
     foreach ($envFieldMap as $field => $envVar) {
@@ -255,6 +265,16 @@ function wallos_get_effective_oidc_configuration($db)
     }
     $isConfigured = count($missingFields) === 0;
 
+    // The way back in when the identity provider is unreachable or the role
+    // mapping went wrong: password login comes back whatever the settings say.
+    if (wallos_force_password_login()) {
+        if ((int) $settings['password_login_disabled'] === 1) {
+            $notes[] = 'Password login is turned back on by TALLY_FORCE_PASSWORD_LOGIN. Remove it once you have signed in.';
+        }
+        $settings['password_login_disabled'] = 0;
+        $managedFields['password_login_disabled'] = 'TALLY_FORCE_PASSWORD_LOGIN';
+    }
+
     if ($enabled && !$isConfigured) {
         $notes[] = 'OIDC is enabled but the login button is hidden because required fields are empty: '
             . implode(', ', $missingFields) . '.';
@@ -268,4 +288,68 @@ function wallos_get_effective_oidc_configuration($db)
         'discovery_document' => $discoveryDocument,
         'is_configured' => $isConfigured,
     ];
+}
+
+/**
+ * Writes the oauth_settings row (id 1), creating it when missing.
+ *
+ * @param SQLite3 $db
+ * @param array   $settings as returned by wallos_get_db_oidc_settings()
+ * @return bool
+ */
+function wallos_save_db_oidc_settings($db, array $settings)
+{
+    $fields = [
+        'name' => SQLITE3_TEXT,
+        'client_id' => SQLITE3_TEXT,
+        'client_secret' => SQLITE3_TEXT,
+        'authorization_url' => SQLITE3_TEXT,
+        'token_url' => SQLITE3_TEXT,
+        'user_info_url' => SQLITE3_TEXT,
+        'redirect_url' => SQLITE3_TEXT,
+        'logout_url' => SQLITE3_TEXT,
+        'user_identifier_field' => SQLITE3_TEXT,
+        'scopes' => SQLITE3_TEXT,
+        'auth_style' => SQLITE3_TEXT,
+        'auto_create_user' => SQLITE3_INTEGER,
+        'password_login_disabled' => SQLITE3_INTEGER,
+        'require_email_verified' => SQLITE3_INTEGER,
+        'roles_claim' => SQLITE3_TEXT,
+        'admin_values' => SQLITE3_TEXT,
+    ];
+
+    $exists = (int) $db->querySingle('SELECT COUNT(*) FROM oauth_settings WHERE id = 1') > 0;
+    if ($exists) {
+        $assignments = array_map(fn($field) => $field . ' = :' . $field, array_keys($fields));
+        $sql = 'UPDATE oauth_settings SET ' . implode(', ', $assignments) . ' WHERE id = 1';
+    } else {
+        $sql = 'INSERT INTO oauth_settings (id, ' . implode(', ', array_keys($fields)) . ') VALUES (1, :'
+            . implode(', :', array_keys($fields)) . ')';
+    }
+
+    $stmt = $db->prepare($sql);
+    if ($stmt === false) {
+        return false;
+    }
+    foreach ($fields as $field => $type) {
+        $value = $settings[$field] ?? wallos_get_oidc_defaults()[$field];
+        $stmt->bindValue(':' . $field, $type === SQLITE3_INTEGER ? (int) $value : (string) $value, $type);
+    }
+
+    return $stmt->execute() !== false;
+}
+
+/**
+ * Whether password login may be turned off now.
+ *
+ * Any number of accounts is fine (issue #45), as long as an admin can still
+ * get in through the identity provider: at least one admin account has to be
+ * linked to an OIDC subject, which happens on its first OIDC login.
+ *
+ * @param SQLite3 $db
+ * @return bool
+ */
+function wallos_password_login_disable_allowed($db)
+{
+    return wallos_oidc_admin_count($db) > 0;
 }

@@ -1,11 +1,12 @@
 <?php
 require_once '../../includes/connect_endpoint.php';
+require_once '../../includes/restore_staging.php';
 require_once '../../includes/validate_endpoint_admin.php';
 
 function emptyRestoreFolder()
 {
     $files = new RecursiveIteratorIterator(
-        new RecursiveDirectoryIterator('../../.tmp', RecursiveDirectoryIterator::SKIP_DOTS),
+        new RecursiveDirectoryIterator(wallos_restore_staging_dir(), RecursiveDirectoryIterator::SKIP_DOTS),
         RecursiveIteratorIterator::CHILD_FIRST
     );
 
@@ -21,18 +22,18 @@ if (isset($_FILES['file'])) {
     $fileError = $file['error'];
 
     if ($fileError === 0) {
-        $fileDestination = '../../.tmp/restore.zip';
+        $fileDestination = wallos_restore_staging_dir() . '/restore.zip';
         move_uploaded_file($fileTmpName, $fileDestination);
 
         $zip = new ZipArchive();
         if ($zip->open($fileDestination) === true) {
             // Validate all entries before extracting — ZipArchive::extractTo() does not
             // guarantee protection against path traversal (Zip Slip), and the extraction
-            // target sits under the web root, so a crafted archive could otherwise drop
+            // target used to sit under the web root, so a crafted archive could otherwise drop
             // an executable script here (RCE).
             // Extensions the web server may execute if extracted into a servable path.
-            // .tmp/ is denied at the nginx layer as the primary control; this is defense
-            // in depth for other deployments (Apache).
+            // Staging now sits outside the web root (see includes/restore_staging.php);
+            // this stays as defense in depth.
             $blockedExtensions = [
                 'php', 'php3', 'php4', 'php5', 'php7', 'php8', 'phtml', 'pht',
                 'phps', 'phar', 'shtml', 'cgi', 'pl', 'py', 'sh',
@@ -57,7 +58,7 @@ if (isset($_FILES['file'])) {
                     ]));
                 }
             }
-            $zip->extractTo('../../.tmp/restore/');
+            $zip->extractTo(wallos_restore_staging_dir() . '/restore/');
             $zip->close();
         } else {
             die(json_encode([
@@ -66,7 +67,7 @@ if (isset($_FILES['file'])) {
             ]));
         }
 
-        if (file_exists('../../.tmp/restore/wallos.db')) {
+        if (file_exists(wallos_restore_staging_dir() . '/restore/wallos.db')) {
             // Wait for every other request and cron job to let go of the database,
             // and keep new ones out until the swap and migrations are done. The
             // connection is closed first: upgrading the lock drops the shared one
@@ -96,7 +97,7 @@ if (isset($_FILES['file'])) {
             if (file_exists('../../db/wallos.db')) {
                 unlink('../../db/wallos.db');
             }
-            rename('../../.tmp/restore/wallos.db', '../../db/wallos.db');
+            rename(wallos_restore_staging_dir() . '/restore/wallos.db', '../../db/wallos.db');
 
             $db = new SQLite3('../../db/wallos.db');
             $db->busyTimeout(5000);
@@ -105,7 +106,7 @@ if (isset($_FILES['file'])) {
             ob_end_clean();
             wallos_db_lock_release_exclusive();
 
-            if (file_exists('../../.tmp/restore/logos/')) {
+            if (file_exists(wallos_restore_staging_dir() . '/restore/logos/')) {
                 $dir = '../../images/uploads/logos/';
                 $di = new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS);
                 $ri = new RecursiveIteratorIterator($di, RecursiveIteratorIterator::CHILD_FIRST);
@@ -118,13 +119,13 @@ if (isset($_FILES['file'])) {
                     }
                 }
 
-                $dir = new RecursiveDirectoryIterator('../../.tmp/restore/logos/');
+                $dir = new RecursiveDirectoryIterator(wallos_restore_staging_dir() . '/restore/logos/');
                 $ite = new RecursiveIteratorIterator($dir);
                 $allowedExtensions = ['png', 'jpg', 'jpeg', 'gif', 'webp'];
 
                 foreach ($ite as $filePath) {
                     if (in_array(pathinfo($filePath, PATHINFO_EXTENSION), $allowedExtensions)) {
-                        $destination = str_replace('../../.tmp/restore/', '../../images/uploads/', $filePath);
+                        $destination = str_replace(wallos_restore_staging_dir() . '/restore/', '../../images/uploads/', $filePath);
                         $destinationDir = pathinfo($destination, PATHINFO_DIRNAME);
 
                         if (!is_dir($destinationDir)) {

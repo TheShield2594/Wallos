@@ -150,9 +150,19 @@
     </div>
   </div>
 
+  <?php if (!empty($hasBundleChildren)) { ?>
+    <?php // Bundles (issue #24): a view switch kept in the browser, not a filter. ?>
+    <div class="filtermenu-submenu">
+      <div class="filter-title" id="toggle-bundle-children" role="switch" aria-checked="false" tabindex="0"
+        onClick="toggleBundleChildren()" onKeyDown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggleBundleChildren(); }">
+        <i class="fa-solid fa-layer-group" aria-hidden="true"></i> <?= translate('bundle_hide_included', $i18n) ?>
+      </div>
+    </div>
+  <?php } ?>
+
   <div class="filtermenu-submenu hide" id="clear-filters">
     <div class="filter-title filter-clear" onClick="clearFilters()">
       <i class="fa-solid fa-times-circle"></i> <?= translate("clear", $i18n) ?>
     </div>
   </div>
-</div>
+</div>

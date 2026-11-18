@@ -2,32 +2,27 @@
 
 ## Reporting a Vulnerability
 
-If you discover any security vulnerabilities in this project, please report them privately through GitHub: open the repository's **Security** tab and choose **Report a vulnerability** ([direct link](https://github.com/TheShield2594/Wallos/security/advisories/new)). Please don't open a public issue for security problems.
+If you discover a security vulnerability in Tally, please report it privately through GitHub: open the repository's **Security** tab and choose **Report a vulnerability** ([direct link](https://github.com/TheShield2594/Wallos/security/advisories/new)). Please don't open a public issue for security problems.
 
 If the vulnerability also affects upstream [Wallos](https://github.com/ellite/Wallos), please report it there as well.
 
 ## Supported Versions
 
-This project is currently supported with security updates for the following versions:
+Security fixes go into `main` and ship in the next Tally release. Only the latest release is supported; please upgrade before reporting a problem in an older one.
 
-| Version | Supported          |
-| ------- | ------------------ |
-| latest  | :white_check_mark: |
-| main    | :white_check_mark: |
-| 1.x.x   | :x:                |
+| Version                                   | Supported          |
+| ----------------------------------------- | ------------------ |
+| Latest `tally-v1.x` release               | :white_check_mark: |
+| `main` (the `ghcr.io/theshield2594/tally:main` image) | :white_check_mark: |
+| Older `tally-v1.x` releases               | :x:                |
+| Wallos releases (`v5.8.3` and earlier)    | :x: (report to [Wallos](https://github.com/ellite/Wallos)) |
 
 ## Security Measures
 
-I take security seriously and am working on ways to implement security measures to protect the project.
-
-What is being done currenty:
-- Periodically scan the docker image for vulnerabilities with trivy.
-
-## Reporting a Security Concern
-
-If you have any security concerns or questions regarding the security of this project, please use the same private reporting link above.
+- The container image `ghcr.io/theshield2594/tally` is scanned with [Trivy](https://trivy.dev) every week and on every push to `main` ([workflow](.github/workflows/trivy.yaml)). Findings appear under the repository's **Security → Code scanning** tab.
+- The image is rebuilt every week so it picks up Alpine security fixes, and can run rootless with a read-only root filesystem (see "Hardened containers" in the [README](README.md)).
+- The test suite runs on every push, and no image is published from code whose tests fail.
 
 ## Responsible Disclosure
 
-I kindly request that you follow responsible disclosure practices and give me reasonable time to address any reported vulnerabilities before making them public.
-
+Please follow responsible disclosure practices and allow reasonable time to address a reported vulnerability before making it public.

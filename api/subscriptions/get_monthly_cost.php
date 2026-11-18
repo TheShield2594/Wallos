@@ -5,6 +5,8 @@ It receives the following parameters:
 - month: the month for which the cost is to be calculated (integer).
 - year: the year for which the cost is to be calculated (integer).
 - api_key: the API key of the user (string).
+  Send it as "Authorization: Bearer <key>" (or an X-API-Key header); the api_key
+  parameter still works but is deprecated. Required scope: read.
 - mode (optional): what the cost counts (string).
     cashflow      (default) every payment that falls in the month.
     amortized     every active subscription spread evenly per month (a
@@ -34,18 +36,16 @@ Example response:
 */
 
 require_once '../../includes/connect_endpoint.php';
+require_once __DIR__ . '/../../includes/api_auth.php';
 require_once '../../includes/recurrence.php';
 require_once '../../includes/intro_pricing.php';
 require_once '../../includes/monthly_cost.php';
+require_once '../../includes/bundles.php';
 
 header('Content-Type: application/json; charset=UTF-8');
 
 if ($_SERVER["REQUEST_METHOD"] === "POST" || $_SERVER["REQUEST_METHOD"] === "GET") {
-    // if the parameters are not set, return an error
-
-    $apiKey = $_REQUEST['api_key'] ?? $_REQUEST['apiKey'] ?? null;
-
-    if (!$apiKey || !isset($_REQUEST['month']) || !isset($_REQUEST['year'])) {
+    if (!isset($_REQUEST['month']) || !isset($_REQUEST['year'])) {
         $response = [
             "success" => false,
             "title" => "Missing parameters"
@@ -66,20 +66,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" || $_SERVER["REQUEST_METHOD"] === "GET
         exit;
     }
 
-    $sql = "SELECT * FROM user WHERE api_key = :apiKey";
-    $stmt = $db->prepare($sql);
-    $stmt->bindValue(':apiKey', $apiKey);
-    $result = $stmt->execute();
-    $user = $result->fetchArray(SQLITE3_ASSOC);
-    // If the user is not found or the API key is invalid, return an error
-    if (!$user) {
-        echo json_encode([
-            "success" => false,
-            "title" => "Invalid API key",
-            "notes" => ["User not found or API key invalid."]
-        ]);
-        exit;
-    }
+    $user = wallos_api_require($db, 'read');
 
     $sql = "SELECT * FROM last_exchange_update";
     $result = $db->query($sql);
@@ -98,13 +85,13 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" || $_SERVER["REQUEST_METHOD"] === "GET
     $currency_code = $currency['code'];
     $currency_symbol = $currency['symbol'];
 
-
     $title = date('F Y', strtotime($year . '-' . $month . '-01'));
     $monthlyCost = 0;
     $notes = [];
     $currencies = [];
 
-    $sql = "SELECT * FROM subscriptions WHERE user_id = :userId AND inactive = 0";
+    // Subscriptions included in a parent bill are paid through it (issue #24).
+    $sql = "SELECT * FROM subscriptions WHERE user_id = :userId AND inactive = 0 AND " . wallos_standalone_sql();
     $stmt = $db->prepare($sql);
     $stmt->bindValue(':userId', $userId);
     $result = $stmt->execute();

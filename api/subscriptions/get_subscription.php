@@ -3,6 +3,8 @@
 This API Endpoint accepts both POST and GET requests.
 It receives the following parameters:
 - api_key: the API key of the user (string, required).
+  Send it as "Authorization: Bearer <key>" (or an X-API-Key header); the api_key
+  parameter still works but is deprecated. Required scope: read.
 - id / subscription_id: the ID of the subscription to retrieve (integer, required).
 - convert_currency: whether to convert the price to the user's main currency (boolean, default false).
 
@@ -12,6 +14,9 @@ It returns a JSON object with the following properties:
 - subscription: an object containing the subscription details.
   price_history lists every price the subscription has had, oldest first,
   in the currency it was recorded in (never converted).
+  parent_subscription_id is the subscription it is billed through (null when
+  billed separately) and allocated_amount the part of the parent's price
+  attributed to it (issue #24).
 - notes: warning messages or additional information (array).
 
 Example response:
@@ -54,16 +59,16 @@ Example response:
 */
 
 require_once '../../includes/connect_endpoint.php';
+require_once __DIR__ . '/../../includes/api_auth.php';
 require_once '../../includes/currency_rates.php';
 require_once '../../includes/price_changes.php';
 
 header('Content-Type: application/json; charset=UTF-8');
 
 if ($_SERVER["REQUEST_METHOD"] === "POST" || $_SERVER["REQUEST_METHOD"] === "GET") {
-    $apiKey = $_REQUEST['api_key'] ?? $_REQUEST['apiKey'] ?? null;
     $subscriptionId = $_REQUEST['id'] ?? $_REQUEST['subscription_id'] ?? $_REQUEST['subscriptionId'] ?? null;
 
-    if (!$apiKey || !$subscriptionId) {
+    if (!$subscriptionId) {
         echo json_encode([
             "success" => false,
             "title" => "Missing parameters",
@@ -75,20 +80,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" || $_SERVER["REQUEST_METHOD"] === "GET
     $subscriptionId = intval($subscriptionId);
 
     // Authenticate user
-    $sql = "SELECT * FROM user WHERE api_key = :apiKey";
-    $stmt = $db->prepare($sql);
-    $stmt->bindValue(':apiKey', $apiKey, SQLITE3_TEXT);
-    $result = $stmt->execute();
-    $user = $result->fetchArray(SQLITE3_ASSOC);
-
-    if (!$user) {
-        echo json_encode([
-            "success" => false,
-            "title" => "Invalid API key",
-            "message" => "Unauthorized access."
-        ]);
-        exit;
-    }
+    $user = wallos_api_require($db, 'read');
 
     $userId = $user['id'];
     $userCurrencyId = $user['main_currency'];

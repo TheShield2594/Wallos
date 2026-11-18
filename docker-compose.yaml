@@ -2,6 +2,14 @@ services:
   tally:
     container_name: tally
     image: ghcr.io/theshield2594/tally:main
+    # Optional hardening (see "Hardened containers" in the README): run
+    # without root and with a read-only root filesystem. The db and logos
+    # folders must belong to this user, and nginx then listens on 8080, so
+    # change the port mapping below to "8282:8080/tcp".
+    # user: "1000:1000"
+    # read_only: true
+    # tmpfs:
+    #   - /tmp
     ports:
       - "8282:80/tcp"
     environment:
@@ -23,6 +31,14 @@ services:
       # OIDC_AUTO_CREATE_USER: "true"
       # OIDC_DISABLE_PASSWORD_LOGIN: "false"
       # OIDC_REQUIRE_EMAIL_VERIFIED: "true"
+      # Admin role from the identity provider: the claim with the user's groups or
+      # roles (ID token or userinfo; dotted paths like realm_access.roles work) and
+      # the comma-separated values that make an account an admin. Synced on every
+      # OIDC login; the last admin is never demoted.
+      # OIDC_ROLES_CLAIM: "groups"
+      # OIDC_ADMIN_VALUES: "tally-admins"
+      # Recovery: turn password login back on whatever the OIDC settings say
+      # TALLY_FORCE_PASSWORD_LOGIN: "true"
       # Optional SSRF allowlist (overrides the Security Settings allowlist in the Admin UI)
       # SSRF_ALLOWLIST: "auth.example.com,192.168.1.100:8123"
     # Volumes store your data between container upgrades

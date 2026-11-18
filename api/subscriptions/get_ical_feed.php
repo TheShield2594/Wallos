@@ -4,52 +4,28 @@ This API Endpoint accepts both POST and GET requests.
 It receives the following parameters:
 - convert_currency: whether to convert to the main currency (boolean) default false.
 - api_key: the API key of the user.
+  Required scope: ical (read keys work too). Calendar apps pass it as ?api_key=.
 
 It returns a downloadable VCAL file with the active subscriptions
 */
 
 require_once '../../includes/connect_endpoint.php';
+require_once __DIR__ . '/../../includes/api_auth.php';
 require_once '../../includes/currency_formatter.php';
 require_once '../../includes/currency_rates.php';
 require_once '../../includes/ical_helper.php';
+require_once '../../includes/bundles.php';
 
 header('Content-Type: application/json; charset=UTF-8');
 
 if ($_SERVER["REQUEST_METHOD"] === "POST" || $_SERVER["REQUEST_METHOD"] === "GET") {
-    // if the parameters are not set, return an error
-
-    $apiKey = $_REQUEST['api_key'] ?? $_REQUEST['apiKey'] ?? null;
-
-    if (!$apiKey) {
-        $response = [
-            "success" => false,
-            "title" => "Missing parameters"
-        ];
-        echo json_encode($response);
-        exit;
-    }
-
     function getPriceConverted($price, $currency, $database)
     {
         return wallos_convert_price($price, $currency, $database);
     }
 
     // Get user from API key
-    $sql = "SELECT * FROM user WHERE api_key = :apiKey";
-    $stmt = $db->prepare($sql);
-    $stmt->bindValue(':apiKey', $apiKey);
-    $result = $stmt->execute();
-    $user = $result->fetchArray(SQLITE3_ASSOC);
-
-    // If the user is not found, return an error
-    if (!$user) {
-        $response = [
-            "success" => false,
-            "title" => "Invalid API key"
-        ];
-        echo json_encode($response);
-        exit;
-    }
+    $user = wallos_api_require($db, 'ical', ['queryKeyDeprecated' => false]);
 
     $userId = $user['id'];
     $userCurrencyId = $user['main_currency'];
@@ -103,7 +79,8 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" || $_SERVER["REQUEST_METHOD"] === "GET
         $paymentMethods[$paymentMethod['id']] = $paymentMethod['name'];
     }
 
-    $sql = "SELECT * FROM subscriptions WHERE user_id = :userId AND inactive = 0 ORDER BY next_payment ASC";
+    // One event per bill: subscriptions included in a parent are paid through it (issue #24).
+    $sql = "SELECT * FROM subscriptions WHERE user_id = :userId AND inactive = 0 AND " . wallos_standalone_sql() . " ORDER BY next_payment ASC";
 
     $stmt = $db->prepare($sql);
     $stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
@@ -207,8 +184,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" || $_SERVER["REQUEST_METHOD"] === "GET
     echo $icsContent;
     $db->close();
     exit;
-        
-
 
 } else {
     $response = [
@@ -218,6 +193,5 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" || $_SERVER["REQUEST_METHOD"] === "GET
     echo json_encode($response);
     exit;
 }
-
 
 ?>

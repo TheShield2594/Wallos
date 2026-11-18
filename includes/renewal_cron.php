@@ -17,6 +17,7 @@
 require_once __DIR__ . '/payment_ledger.php';
 require_once __DIR__ . '/intro_pricing.php';
 require_once __DIR__ . '/notifications/schedule.php';
+require_once __DIR__ . '/bundles.php';
 
 /**
  * The account's local date (Y-m-d) at $now, in its notification time zone
@@ -51,7 +52,9 @@ function wallos_run_renewals(SQLite3 $db, ?DateTimeInterface $now = null)
     $localDates = [];
     $failed = [];
     $advanced = 0;
-    $query = $db->prepare('SELECT * FROM subscriptions WHERE user_id = :userId AND next_payment < :today AND auto_renew = 1 AND inactive = 0');
+    // Subscriptions included in a parent bill (issue #24) are not advanced on
+    // their own: they follow the parent's next payment (wallos_update_schedule()).
+    $query = $db->prepare('SELECT * FROM subscriptions WHERE user_id = :userId AND next_payment < :today AND auto_renew = 1 AND inactive = 0 AND ' . wallos_standalone_sql());
     foreach ($userIds as $userId) {
         $today = wallos_account_local_date(wallos_notification_settings_row($db, $userId), $now);
         $localDates[$userId] = $today;

@@ -40,9 +40,12 @@ $adminResult = $db->query($adminQuery);
 $adminRow = $adminResult->fetchArray(SQLITE3_ASSOC);
 if ($adminRow['login_disabled'] == 1) {
 
+    // Single-user mode signs in as the instance's admin (the only account:
+    // the admin page allows this mode only then).
+    require_once 'includes/admin_roles.php';
     $query = "SELECT id, username, main_currency, language FROM user WHERE id = :id";
     $stmt = $db->prepare($query);
-    $stmt->bindValue(':id', 1, SQLITE3_INTEGER);
+    $stmt->bindValue(':id', wallos_primary_admin_id($db), SQLITE3_INTEGER);
     $result = $stmt->execute();
     $row = $result->fetchArray(SQLITE3_ASSOC);
 

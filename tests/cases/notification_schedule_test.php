@@ -89,7 +89,7 @@ wallos_test('each account runs once a day at its own send time and time zone', f
     wallos_mark_notification_run($db, 1, 'last_cancellation_run', '2026-11-19');
     assert_same(1, $db->querySingle('SELECT COUNT(*) FROM notification_settings WHERE user_id = 1'), 'on the same row');
 
-    $cron = file_get_contents(WALLOS_ROOT . '/cronjobs');
+    $cron = file_get_contents(WALLOS_ROOT . '/docker/crontab');
     assert_contains('*/15 * * * * /usr/local/bin/php /var/www/html/endpoints/cronjobs/sendnotifications.php', $cron, 'payment reminders run every 15 minutes');
     assert_contains('*/15 * * * * /usr/local/bin/php /var/www/html/endpoints/cronjobs/sendcancellationnotifications.php', $cron, 'and cancellation reminders');
     $db->close();

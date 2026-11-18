@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/intro_pricing.php';
+require_once __DIR__ . '/bundles.php';
 
 const UPCOMING_PAYMENTS_LIMITS = [3, 5, 10, 20];
 
@@ -42,6 +43,7 @@ function get_upcoming_payments($db, $userId, $limit)
 {
     $limit = normalize_upcoming_payments_limit($limit);
 
+    // Subscriptions included in a parent bill are paid through it (issue #24).
     $stmt = $db->prepare("SELECT id, logo, logo_text_color, logo_variant, name, price, currency_id, next_payment, inactive,
             intro_type, intro_price, intro_end_date
         FROM subscriptions
@@ -49,6 +51,7 @@ function get_upcoming_payments($db, $userId, $limit)
           AND next_payment >= date('now')
           AND inactive = 0
           AND cycle != 5
+          AND " . wallos_standalone_sql() . "
         ORDER BY next_payment ASC
         LIMIT :limit");
     $stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);

@@ -3,6 +3,8 @@
 This API Endpoint accepts POST requests only.
 It receives the following parameters:
 - api_key: the API key of the user (for Tally authentication).
+  Send it as "Authorization: Bearer <key>" (or an X-API-Key header); the api_key
+  parameter still works but is deprecated. Required scope: write.
 - action: the action to perform ('add', 'edit', 'delete').
 - id / subscription_id: (required for 'edit' and 'delete') the ID of the subscription.
 
@@ -42,6 +44,9 @@ For 'add' and 'edit' actions (all optional for 'edit'):
 - description: what the service is (string, at most 200 characters, empty to clear). Sent to the AI model for recommendations when the account allows it.
 - active_months: the months a plan billing at least monthly (every 1-31 days, 1-4 weeks or every month) bills in, as a 12-bit mask (integer 1-4095, bit 0 = January, 4095 = every month; Sep-Dec is 3840). A next_payment in an inactive month moves to the first active one.
 - price_change_reason: (edit) 'tier' (default, you changed plan) or 'provider' (the provider changed the price); recorded in the price history when the price, currency, cycle or frequency changes.
+- parent_subscription_id: the subscription this one is billed through (integer; empty or 0 for none). It must be one of your active, recurring subscriptions that is not itself billed through another one, and a subscription other ones are billed through cannot get a parent. A child takes the parent's cycle, frequency, next payment, payment method and payer (those parameters are then optional and ignored), and is left out of every total.
+- allocated_amount: the part of the parent's price, in the parent's currency per parent cycle, attributed to this child in the category statistics (float; empty to clear).
+- children_action: (edit) when disabling a subscription other ones are billed through: 'disable' (default) disables them too, 'detach' makes them standalone.
 
 It returns a JSON object with the following properties:
 - success: whether the request was successful (boolean).
@@ -49,6 +54,7 @@ It returns a JSON object with the following properties:
 - message: detailed information or error message (string).
 - subscriptionId: (only for successful 'add' action) the ID of the newly created subscription (integer).
 - logo_warning: (optional) present when logo_url/logo was given but saving it failed; the subscription is still saved without changing its logo (string).
+- bundle_warning: (optional) present when the allocated amounts of a parent add up to more than its price; the subscription is still saved (string).
 
 Example response:
 {
@@ -61,6 +67,7 @@ Example response:
 
 error_reporting(E_ERROR | E_PARSE);
 require_once '../../includes/connect_endpoint.php';
+require_once __DIR__ . '/../../includes/api_auth.php';
 require_once '../../includes/inputvalidation.php';
 require_once '../../includes/ssrf_helper.php';
 require_once '../../includes/logo_theme_variant.php';
@@ -71,6 +78,7 @@ require_once '../../includes/price_changes.php';
 require_once '../../includes/ai_recommendations.php';
 require_once '../../includes/recurrence.php';
 require_once '../../includes/notifications/schedule.php';
+require_once '../../includes/bundles.php';
 
 /**
  * The active_months parameter (issue #25): the stored mask when absent, every
@@ -240,6 +248,51 @@ function api_save_atomically(SQLite3 $db, callable $writeRow, callable $apply, $
     return $id;
 }
 
+/**
+ * parent_subscription_id and allocated_amount (issue #24): the stored values
+ * unless the request sends them. Exits with an error for a parent that
+ * breaks the bundle rules (see includes/bundles.php).
+ *
+ * @return array{0: int|null, 1: float|null, 2: array|null} parent id, allocated amount, parent row
+ */
+function api_bundle_input(SQLite3 $db, $userId, $subscriptionId, ?array $current)
+{
+    $parentId = wallos_sanitize_parent_id($current['parent_subscription_id'] ?? null);
+    if (array_key_exists('parent_subscription_id', $_POST)) {
+        $parentId = wallos_sanitize_parent_id($_POST['parent_subscription_id']);
+    }
+    $allocated = wallos_sanitize_allocated_amount($current['allocated_amount'] ?? null);
+    if (array_key_exists('allocated_amount', $_POST)) {
+        $allocated = wallos_sanitize_allocated_amount($_POST['allocated_amount']);
+    }
+    if ($parentId === null) {
+        return [null, null, null];
+    }
+    $check = wallos_bundle_validate_parent($db, $userId, $subscriptionId, $parentId);
+    if ($check['error'] !== null) {
+        echo json_encode([
+            'success' => false,
+            'title' => 'Invalid parent subscription',
+            'message' => translate($check['error'], $GLOBALS['i18n'] ?? []),
+        ]);
+        exit;
+    }
+
+    return [$parentId, $allocated, $check['parent']];
+}
+
+/**
+ * The allocation warning of a save, or null.
+ */
+function api_bundle_warning(SQLite3 $db, $userId, $savedId, $savedPrice, ?array $parent)
+{
+    $parentId = $parent !== null ? (int) $parent['id'] : (int) $savedId;
+    $parentPrice = $parent !== null ? $parent['price'] : $savedPrice;
+
+    return wallos_bundle_allocations_exceed($parentPrice, wallos_bundle_allocated_total($db, $userId, $parentId))
+        ? translate('bundle_allocations_exceed_price', $GLOBALS['i18n'] ?? []) : null;
+}
+
 header('Content-Type: application/json; charset=UTF-8');
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -251,32 +304,8 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-$apiKey = $_POST['api_key'] ?? $_POST['apiKey'] ?? null;
-
 // Authenticate user first
-if (!$apiKey) {
-    echo json_encode([
-        'success' => false,
-        'title' => 'Missing API key',
-        'message' => 'API key is required.'
-    ]);
-    exit;
-}
-
-$sql = "SELECT * FROM user WHERE api_key = :apiKey";
-$stmt = $db->prepare($sql);
-$stmt->bindValue(':apiKey', $apiKey, SQLITE3_TEXT);
-$result = $stmt->execute();
-$user = $result->fetchArray(SQLITE3_ASSOC);
-
-if (!$user) {
-    echo json_encode([
-        'success' => false,
-        'title' => 'Unauthorized',
-        'message' => 'Invalid API key.'
-    ]);
-    exit;
-}
+$user = wallos_api_require($db, 'write');
 
 $userId = $user['id'];
 $action = $_POST['action'] ?? null;
@@ -585,6 +614,19 @@ switch ($action) {
             $replacementSubscriptionId = null;
         }
 
+        // Billed through another subscription (issue #24): the child takes
+        // the parent's schedule, payment method and payer.
+        [$bundleParentId, $allocatedAmount, $bundleParent] = api_bundle_input($db, $userId, null, null);
+        if ($bundleParent !== null) {
+            $inherited = wallos_bundle_inherited_fields($bundleParent);
+            $cycle = $inherited['cycle'];
+            $frequency = $inherited['frequency'];
+            $nextPayment = $inherited['next_payment'];
+            $autoRenew = $inherited['auto_renew'];
+            $paymentMethodId = $inherited['payment_method_id'];
+            $payerUserId = $inherited['payer_user_id'];
+        }
+
         // Validate required fields
         if (!$name || trim($name) === '' || $price === null || !$currencyId || !$frequency || !$cycle || !$nextPayment) {
             echo json_encode([
@@ -761,12 +803,14 @@ switch ($action) {
                             name, logo, price, currency_id, next_payment, cycle, frequency, notes,
                             payment_method_id, payer_user_id, category_id, notify, inactive, url,
                             notify_days_before, user_id, cancellation_date, replacement_subscription_id,
-                            auto_renew, start_date, logo_text_color, logo_variant, active_months, description
+                            auto_renew, start_date, logo_text_color, logo_variant, active_months, description,
+                            parent_subscription_id, allocated_amount
                         ) VALUES (
                             :name, :logo, :price, :currencyId, :nextPayment, :cycle, :frequency, :notes,
                             :paymentMethodId, :payerUserId, :categoryId, :notify, :inactive, :url,
                             :notifyDaysBefore, :userId, :cancellationDate, :replacement_subscription_id,
-                            :autoRenew, :startDate, :logoTextColor, :logoVariant, :activeMonths, :description
+                            :autoRenew, :startDate, :logoTextColor, :logoVariant, :activeMonths, :description,
+                            :parentSubscriptionId, :allocatedAmount
                         )";
         $activeMonths = api_active_months_input($cycle, $frequency);
         $nextPayment = api_first_active_payment($nextPayment, $startDate, $cycle, $frequency, $activeMonths);
@@ -795,6 +839,8 @@ switch ($action) {
         $stmtInsert->bindParam(':startDate', $startDate, SQLITE3_TEXT);
         $stmtInsert->bindValue(':activeMonths', $activeMonths, SQLITE3_INTEGER);
         $stmtInsert->bindValue(':description', wallos_normalize_subscription_description($_POST['description'] ?? ''), SQLITE3_TEXT);
+        $stmtInsert->bindValue(':parentSubscriptionId', $bundleParentId, $bundleParentId === null ? SQLITE3_NULL : SQLITE3_INTEGER);
+        $stmtInsert->bindValue(':allocatedAmount', $allocatedAmount, $allocatedAmount === null ? SQLITE3_NULL : SQLITE3_FLOAT);
 
         $newSubscriptionId = api_save_atomically($db, function () use ($db, $stmtInsert) {
             return $stmtInsert->execute() !== false ? $db->lastInsertRowID() : false;
@@ -808,6 +854,10 @@ switch ($action) {
             ];
             if ($logoWarning !== '') {
                 $addResponse['logo_warning'] = $logoWarning;
+            }
+            $bundleWarning = api_bundle_warning($db, $userId, $newSubscriptionId, $price, $bundleParent);
+            if ($bundleWarning !== null) {
+                $addResponse['bundle_warning'] = $bundleWarning;
             }
             echo json_encode($addResponse);
         } else {
@@ -910,6 +960,20 @@ switch ($action) {
         if ($replacementSubscriptionId == 0 || $inactive == 0) {
             $replacementSubscriptionId = null;
         }
+
+        // Billed through another subscription (issue #24): the child takes
+        // the parent's schedule, payment method and payer.
+        [$bundleParentId, $allocatedAmount, $bundleParent] = api_bundle_input($db, $userId, $subscriptionId, $subscription);
+        if ($bundleParent !== null) {
+            $inherited = wallos_bundle_inherited_fields($bundleParent);
+            $cycle = $inherited['cycle'];
+            $frequency = $inherited['frequency'];
+            $nextPayment = $inherited['next_payment'];
+            $autoRenew = $inherited['auto_renew'];
+            $paymentMethodId = $inherited['payment_method_id'];
+            $payerUserId = $inherited['payer_user_id'];
+        }
+        $bundleChildrenAction = wallos_bundle_children_action($_POST['children_action'] ?? 'disable');
 
         // Validate values
         if (trim($name) === '') {
@@ -1114,7 +1178,9 @@ switch ($action) {
                             replacement_subscription_id = :replacement_subscription_id,
                             tier_name = :tierName,
                             active_months = :activeMonths,
-                            description = :description
+                            description = :description,
+                            parent_subscription_id = :parentSubscriptionId,
+                            allocated_amount = :allocatedAmount
                        WHERE id = :id AND user_id = :userId";
         $activeMonths = api_active_months_input($cycle, $frequency, $subscription['active_months'] ?? WALLOS_ALL_MONTHS);
         $nextPayment = api_first_active_payment($nextPayment, $startDate, $cycle, $frequency, $activeMonths);
@@ -1146,6 +1212,8 @@ switch ($action) {
             ? wallos_normalize_subscription_description($_POST['description'])
             : (string) ($subscription['description'] ?? '');
         $stmtUpdate->bindValue(':description', $description, SQLITE3_TEXT);
+        $stmtUpdate->bindValue(':parentSubscriptionId', $bundleParentId, $bundleParentId === null ? SQLITE3_NULL : SQLITE3_INTEGER);
+        $stmtUpdate->bindValue(':allocatedAmount', $allocatedAmount, $allocatedAmount === null ? SQLITE3_NULL : SQLITE3_FLOAT);
         $stmtUpdate->bindParam(':id', $subscriptionId, SQLITE3_INTEGER);
         $stmtUpdate->bindParam(':userId', $userId, SQLITE3_INTEGER);
         $tierName = array_key_exists('tier_name', $_POST) ? wallos_normalize_tier_name($_POST['tier_name']) : ($subscription['tier_name'] ?? null);
@@ -1161,7 +1229,7 @@ switch ($action) {
             }
         }
 
-        $updated = api_save_atomically($db, function () use ($db, $stmtUpdate, $subscriptionId, $subscription, $userId, &$price, &$currencyId, &$cycle, &$frequency, &$tierName, $priceInput, $priceChangeReason) {
+        $updated = api_save_atomically($db, function () use ($db, $stmtUpdate, $subscriptionId, $subscription, $userId, &$price, &$currencyId, &$cycle, &$frequency, &$tierName, $priceInput, $priceChangeReason, $bundleParentId, $inactive, $bundleChildrenAction) {
             // The price before this edit, read under the write lock so a
             // concurrent edit can't make both record the same old price, and
             // a partial edit keeps the price another edit just saved.
@@ -1175,6 +1243,17 @@ switch ($action) {
             $tierName = $priceFields['tier_name'];
             $stmtUpdate->bindValue(':tierName', $tierName, $tierName === null ? SQLITE3_NULL : SQLITE3_TEXT);
             if ($stmtUpdate->execute() === false) {
+                return false;
+            }
+            // Bundles (issue #24): a child follows its parent; a parent's
+            // children follow it, and are disabled (or detached) with it.
+            if ($bundleParentId !== null && !wallos_bundle_sync_children($db, $userId, $bundleParentId)) {
+                return false;
+            }
+            if ((int) $inactive === 1 && !wallos_bundle_on_parent_disabled($db, $userId, $subscriptionId, $bundleChildrenAction)) {
+                return false;
+            }
+            if (!wallos_bundle_sync_children($db, $userId, $subscriptionId)) {
                 return false;
             }
             // The old price goes into the price history (includes/price_changes.php).
@@ -1196,6 +1275,10 @@ switch ($action) {
             ];
             if ($logoWarning !== '') {
                 $updateResponse['logo_warning'] = $logoWarning;
+            }
+            $bundleWarning = api_bundle_warning($db, $userId, $subscriptionId, $price, $bundleParent);
+            if ($bundleWarning !== null) {
+                $updateResponse['bundle_warning'] = $bundleWarning;
             }
             echo json_encode($updateResponse);
         } else {
@@ -1239,6 +1322,8 @@ switch ($action) {
         // Delete the row, its payment and price history and the references to
         // it as one unit: if any part fails, nothing is deleted.
         $deleteStatements = [
+            // Subscriptions billed through this one become standalone again (issue #24).
+            "UPDATE subscriptions SET parent_subscription_id = NULL, allocated_amount = NULL WHERE parent_subscription_id = :subId AND user_id = :userId",
             "DELETE FROM subscriptions WHERE id = :subId AND user_id = :userId",
             "DELETE FROM subscription_payments WHERE subscription_id = :subId AND user_id = :userId",
             "DELETE FROM subscription_price_changes WHERE subscription_id = :subId AND user_id = :userId",

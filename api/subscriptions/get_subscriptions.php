@@ -9,8 +9,10 @@ It receives the following parameters:
 - disabled_to_bottom: whether to sort the inactive subscriptions to the bottom (string) default false. Must be the literal string "true" to take effect.
 - sort: the sorting method (string) default next_payment ['name', 'id', 'next_payment', 'price', 'payer_user_id', 'category_id', 'payment_method_id', 'inactive', 'alphanumeric'].
 - convert_currency: whether to convert to the main currency (string) default false. Must be the literal string "true" to take effect.
-- all-user-subscription: whether to return subscriptions for every user instead of just the caller (string) default null. Only honored when api_key belongs to user id 1; adds the "users" field to the response.
+- all-user-subscription: whether to return subscriptions for every user instead of just the caller (string) default null. Needs an API key with the admin:read scope, owned by an admin; adds the "users" field to the response.
 - api_key: the API key of the user.
+  Send it as "Authorization: Bearer <key>" (or an X-API-Key header); the api_key
+  parameter still works but is deprecated. Required scope: read.
 
 It returns a JSON object with the following properties:
 - success: whether the request was successful (boolean).
@@ -81,7 +83,9 @@ Example response:
             "category_name": "Entertainment",
             "payer_user_name": "Jane Doe",
             "payment_method_name": "Credit Card",
-            "replacement_subscription_id": 1
+            "replacement_subscription_id": 1,
+            "parent_subscription_id": null,
+            "allocated_amount": null
         }
     ],
     "users": [
@@ -101,6 +105,8 @@ Example response:
 */
 
 require_once '../../includes/connect_endpoint.php';
+require_once __DIR__ . '/../../includes/api_auth.php';
+require_once __DIR__ . '/../../includes/admin_roles.php';
 require_once __DIR__ . '/../../includes/cancellation_deadline.php';
 require_once __DIR__ . '/../../includes/intro_pricing.php';
 require_once '../../includes/currency_rates.php';
@@ -109,43 +115,22 @@ require_once __DIR__ . '/../../includes/cost_sharing.php';
 header('Content-Type: application/json; charset=UTF-8');
 
 if ($_SERVER["REQUEST_METHOD"] === "POST" || $_SERVER["REQUEST_METHOD"] === "GET") {
-    // if the parameters are not set, return an error
-    $apiKey = $_REQUEST['api_key'] ?? $_REQUEST['apiKey'] ?? null;
-    if (!$apiKey) {
-        $response = [
-            "success" => false,
-            "title" => "Missing parameters"
-        ];
-        echo json_encode($response);
-        exit;
-    }
-
     function getPriceConverted($price, $currency, $database)
     {
         return wallos_convert_price($price, $currency, $database);
     }
 
     // Get user from API key
-    $sql = "SELECT * FROM user WHERE api_key = :apiKey";
-    $stmt = $db->prepare($sql);
-    $stmt->bindValue(':apiKey', $apiKey);
-    $result = $stmt->execute();
-    $user = $result->fetchArray(SQLITE3_ASSOC);
-
-    // If the user is not found, return an error
-    if (!$user) {
-        $response = [
-            "success" => false,
-            "title" => "Invalid API key"
-        ];
-        echo json_encode($response);
-        exit;
-    }
+    $user = wallos_api_require($db, 'read');
     $userId = $user['id'];
     $userCurrencyId = $user['main_currency'];
 
     $allUserSubscription = isset($_REQUEST['all-user-subscription']) ? $_REQUEST['all-user-subscription'] : null;
-    if ($allUserSubscription == 1 && $userId != 1) {
+    // Every account's subscriptions need an admin:read key whose owner is
+    // still an admin; a plain read key only ever sees its own account.
+    $isAdminCaller = wallos_api_key_has_scope($GLOBALS['wallos_api_key']['scopes'], 'admin:read')
+        && wallos_is_admin($db, $userId);
+    if ($allUserSubscription == 1 && !$isAdminCaller) {
         $response = [
             "success" => false,
             "title" => "Denied. Not admin user"
@@ -218,7 +203,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" || $_SERVER["REQUEST_METHOD"] === "GET
 
     // Construction of the main SQL Query
     $params = [];
-    if ($allUserSubscription == 1 && $userId == 1) {
+    if ($allUserSubscription == 1 && $isAdminCaller) {
         $sql = "SELECT * FROM subscriptions WHERE 1 = 1";
     } else {
         $sql = "SELECT * FROM subscriptions WHERE user_id = :userId";
@@ -337,7 +322,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" || $_SERVER["REQUEST_METHOD"] === "GET
         "notes" => []
     ];
 
-    if ($allUserSubscription == 1 && $userId == 1) {
+    if ($allUserSubscription == 1 && $isAdminCaller) {
         $sql = "PRAGMA table_info(user)";
         $stmt = $db->prepare($sql);
         $result = $stmt->execute();
@@ -368,7 +353,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" || $_SERVER["REQUEST_METHOD"] === "GET
     echo json_encode($response);
     $db->close();
     exit;
-
 
 } else {
     $response = [

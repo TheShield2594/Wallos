@@ -14,6 +14,7 @@ require_once 'i18n/' . $lang . '.php';
 require_once 'getsettings.php';
 
 require_once 'version.php';
+require_once 'admin_roles.php';
 
 if ($userCount == 0) {
   $db->close();
@@ -51,7 +52,7 @@ if (isset($themeValue)) {
   ]);
 }
 
-$isAdmin = $_SESSION['userId'] == 1;
+$isAdmin = wallos_is_admin($db, $_SESSION['userId']);
 
 
 function hex2rgb($hex)

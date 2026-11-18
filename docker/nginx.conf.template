@@ -1,0 +1,84 @@
+# Template: startup.sh replaces __LISTEN__ and writes the result to
+# /tmp/tally/nginx/nginx.conf. Everything nginx writes (pid, temp files) lives
+# under /tmp/tally/nginx, and logs go to the container's stdout/stderr, so the
+# root filesystem can be read-only and nginx can run without root.
+
+# Ignored, with a notice, when the container runs rootless.
+user  nginx;
+worker_processes  1;
+
+error_log  stderr warn;
+pid        /tmp/tally/nginx/nginx.pid;
+
+events {
+    worker_connections  1024;
+}
+
+http {
+    include       /etc/nginx/mime.types;
+    default_type  application/octet-stream;
+
+    client_body_temp_path /tmp/tally/nginx/client_body;
+    proxy_temp_path       /tmp/tally/nginx/proxy;
+    fastcgi_temp_path     /tmp/tally/nginx/fastcgi;
+    uwsgi_temp_path       /tmp/tally/nginx/uwsgi;
+    scgi_temp_path        /tmp/tally/nginx/scgi;
+
+    # API keys may still arrive as ?api_key= (deprecated), so the access log
+    # records the path without the query string.
+    log_format  main  '$remote_addr - $remote_user [$time_local] "$request_method $uri $server_protocol" '
+                      '$status $body_bytes_sent "$http_referer" '
+                      '"$http_user_agent" "$http_x_forwarded_for"';
+
+    access_log  /dev/stdout  main;
+
+    sendfile        on;
+    keepalive_timeout  65;
+
+    # Database backups (with logos) can be tens of MB. The nginx default of 1M
+    # would reject a restore upload with 413 before PHP ever sees it.
+    client_max_body_size 256M;
+
+    server {
+        listen       __LISTEN__;
+        server_name  localhost;
+
+        location / {
+            root   /var/www/html;
+            index  index.php;
+        }
+
+        # Deny rules must precede the generic \.php$ handler below. nginx evaluates
+        # regex locations in order and uses the first match, so these have to come
+        # first — otherwise \.php$ matches and executes PHP under .tmp/, logos/, etc.
+        location ~ \.db$ {
+            deny all;
+            return 403;
+        }
+
+        location ~* images/uploads/logos/.*\.php$ {
+            deny all;
+            return 403;
+        }
+
+        # Folders that are never meant to be requested over HTTP. Prefix
+        # matches with ^~ outrank the \.php$ regex below, so PHP files in them
+        # can't be executed directly: migrations run at startup, libs/ and
+        # includes/ are only ever included, and db/ holds the database.
+        location ^~ /.tmp/       { deny all; return 403; }
+        location ^~ /db/         { deny all; return 403; }
+        location ^~ /migrations/ { deny all; return 403; }
+        location ^~ /libs/       { deny all; return 403; }
+        location ^~ /includes/   { deny all; return 403; }
+        location ^~ /tests/      { deny all; return 403; }
+        location ^~ /dev/        { deny all; return 403; }
+
+        location ~ \.php$ {
+            root           /var/www/html;
+            fastcgi_pass   127.0.0.1:9000;
+            fastcgi_index  index.php;
+            fastcgi_param  SCRIPT_FILENAME $document_root$fastcgi_script_name;
+            include        /etc/nginx/fastcgi_params;
+        }
+    }
+}

@@ -9,6 +9,7 @@ require_once __DIR__ . '/monthly_cost.php';
 require_once __DIR__ . '/price_changes.php';
 require_once __DIR__ . '/cost_sharing.php';
 require_once __DIR__ . '/categories.php';
+require_once __DIR__ . '/bundles.php';
 
 function getPriceConverted($price, $currency, $database, $userId)
 {
@@ -143,6 +144,9 @@ if (isset($_GET['payment']) && $_GET['payment'] !== '') {
 
 $conditions[] = "user_id = :userId";
 $params[':userId'] = $userId;
+// Subscriptions included in a parent bill are paid through it (issue #24):
+// only the parent counts, so nothing is counted twice.
+$conditions[] = wallos_standalone_sql();
 
 if (!empty($conditions)) {
     $query .= " WHERE " . implode(' AND ', $conditions);
@@ -177,7 +181,7 @@ if ($result) {
             $memberCost[WALLOS_SHARED_BUCKET_ID] = ['cost' => 0, 'name' => $sharedBucketName];
             $paymentMethodsCount[WALLOS_SHARED_BUCKET_ID] = ['count' => 0, 'name' => $sharedBucketName];
         }
-        foreach ($sharedStatsRows as $sharedRow) {
+        foreach (wallos_without_bundle_children($sharedStatsRows) as $sharedRow) {
             $subscriptions[] = $sharedRow;
         }
     }
@@ -192,6 +196,9 @@ if ($result) {
     }
     // What each member owes the payer per month, in the main currency.
     $memberOwed = [];
+    // The parent's cost per category: its children's allocations go to their
+    // own categories (see wallos_bundle_category_split()).
+    $bundleAllocations = wallos_bundle_allocations_by_parent($db, $userId);
 
     if (isset($subscriptions)) {
         $replacementSubscriptions = array();
@@ -272,8 +279,11 @@ if ($result) {
                 foreach (wallos_amounts_owed($subscription, $rowShares, $grossMonthly) as $owingMemberId => $owedAmount) {
                     $memberOwed[$owingMemberId][(int) $subscription['payer_user_id']] = ($memberOwed[$owingMemberId][(int) $subscription['payer_user_id']] ?? 0) + $owedAmount;
                 }
-                if (isset($categoryCost[$categoryId])) {
-                    $categoryCost[$categoryId]['cost'] += $price;
+                $bundleChildren = empty($subscription['shared_owner_name']) ? ($bundleAllocations[(int) $subscription['id']] ?? []) : [];
+                foreach (wallos_bundle_category_split($price, $categoryId, (float) wallos_gross_row($subscription)['price'], $bundleChildren) as $splitCategoryId => $splitAmount) {
+                    if (isset($categoryCost[$splitCategoryId])) {
+                        $categoryCost[$splitCategoryId]['cost'] += $splitAmount;
+                    }
                 }
                 if ($price > $mostExpensiveSubscription['price']) {
                     $mostExpensiveSubscription['price'] = $price;

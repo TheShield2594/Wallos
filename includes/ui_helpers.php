@@ -47,7 +47,7 @@ function render_tile($name, $logoSrc = '', $variantSrc = null, $textColor = null
 function render_list_row($row)
 {
     $id = (int) $row['id'];
-    $classes = 'list-row' . (!empty($row['dim']) ? ' is-dim' : '');
+    $classes = 'list-row' . (!empty($row['dim']) ? ' is-dim' : '') . (!empty($row['extra_class']) ? ' ' . $row['extra_class'] : '');
     ob_start();
     ?>
     <button type="button" class="<?= $classes ?>" data-id="<?= $id ?>"
@@ -55,7 +55,7 @@ function render_list_row($row)
         onClick="showSubscriptionDetails(event, <?= $id ?>)">
         <?= render_tile($row['name'], $row['logo'] ?? '', $row['logo_variant'] ?? null, $row['logo_text_color'] ?? null) ?>
         <span class="list-row-text">
-            <span class="list-row-title"><?= htmlspecialchars(htmlspecialchars_decode($row['name'])) ?></span>
+            <span class="list-row-title"><?= htmlspecialchars(htmlspecialchars_decode($row['name'])) ?><?php if (!empty($row['chip'])) { ?> <span class="list-row-chip"><?= htmlspecialchars($row['chip']) ?></span><?php } ?></span>
             <span class="list-row-subtitle<?= !empty($row['subtitle_tone']) ? ' is-' . $row['subtitle_tone'] : '' ?>"><?= htmlspecialchars($row['subtitle'] ?? '') ?></span>
             <?php if (isset($row['progress']) && $row['progress'] !== null) { ?>
                 <span class="list-row-progress<?= !empty($row['progress_tone']) ? ' is-' . $row['progress_tone'] : '' ?>" aria-hidden="true"><span style="width: <?= max(0, min(100, (int) $row['progress'])) ?>%"></span></span>

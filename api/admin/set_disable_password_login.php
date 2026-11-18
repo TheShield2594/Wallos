@@ -3,6 +3,8 @@
 This API Endpoint accepts POST requests only.
 It receives the following parameters:
 - api_key: the API key of the user.
+  Send it as "Authorization: Bearer <key>" (or an X-API-Key header); the api_key
+  parameter still works but is deprecated. Required scope: write. The key's owner must be an admin.
 - disable: '1' to disable password login, '0' to enable it.
 
 It returns a JSON object with the following properties:
@@ -19,6 +21,8 @@ Example response:
 */
 
 require_once '../../includes/connect_endpoint.php';
+require_once __DIR__ . '/../../includes/api_auth.php';
+require_once __DIR__ . '/../../includes/admin_roles.php';
 require_once '../../includes/oidc_settings.php';
 
 header('Content-Type: application/json; charset=UTF-8');
@@ -32,32 +36,8 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-$apiKey = $_POST['api_key'] ?? null;
-
 // Authenticate user first
-if (!$apiKey) {
-    echo json_encode([
-        'success' => false,
-        'title' => 'Missing API key',
-        'message' => 'API key is required.'
-    ]);
-    exit;
-}
-
-$sql = "SELECT * FROM user WHERE api_key = :apiKey";
-$stmt = $db->prepare($sql);
-$stmt->bindValue(':apiKey', $apiKey);
-$result = $stmt->execute();
-$user = $result->fetchArray(SQLITE3_ASSOC);
-
-if (!$user || $user['id'] !== 1) {
-    echo json_encode([
-        'success' => false,
-        'title' => 'Unauthorized',
-        'message' => 'Invalid API key or insufficient privileges.'
-    ]);
-    exit;
-}
+$user = wallos_api_require($db, 'write', ['requireAdmin' => true]);
 
 // Now check 'disable' parameter only after authentication
 $disable = $_POST['disable'] ?? null;
@@ -79,20 +59,28 @@ if (!in_array($disable, ['0', '1'], true)) {
     exit;
 }
 
-if (wallos_has_oidc_env_value('OIDC_DISABLE_PASSWORD_LOGIN')) {
+if (wallos_has_oidc_env_value('OIDC_DISABLE_PASSWORD_LOGIN') || wallos_force_password_login()) {
     echo json_encode([
         'success' => false,
         'title' => 'Managed by environment',
-        'message' => 'Password login is managed by the OIDC_DISABLE_PASSWORD_LOGIN environment variable.'
+        'message' => 'Password login is managed by the OIDC_DISABLE_PASSWORD_LOGIN or TALLY_FORCE_PASSWORD_LOGIN environment variable.'
+    ]);
+    exit;
+}
+
+if ($disable === '1' && !wallos_password_login_disable_allowed($db)) {
+    echo json_encode([
+        'success' => false,
+        'title' => 'Not allowed',
+        'message' => 'Password login can only be disabled while at least one admin account is linked to OIDC.'
     ]);
     exit;
 }
 
 // Update the password_login_disabled setting
-$updateSql = "UPDATE oauth_settings SET password_login_disabled = :disable WHERE id = 1";
-$updateStmt = $db->prepare($updateSql);
-$updateStmt->bindValue(':disable', intval($disable), SQLITE3_INTEGER);
-$updateResult = $updateStmt->execute();
+$oidcDbSettings = wallos_get_db_oidc_settings($db);
+$oidcDbSettings['password_login_disabled'] = intval($disable);
+$updateResult = wallos_save_db_oidc_settings($db, $oidcDbSettings);
 
 if ($updateResult) {
     echo json_encode([

@@ -5,6 +5,7 @@ require_once __DIR__ . '/../../includes/currency_rates.php';
 
 require 'settimezone.php';
 require_once __DIR__ . '/../../includes/monthly_cost.php';
+require_once __DIR__ . '/../../includes/bundles.php';
 
 if (php_sapi_name() == 'cli') {
     $date = new DateTime('now');
@@ -30,7 +31,8 @@ while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
     $userCurrencyId = $row['main_currency'];
     $totalYearlyCost = 0;
 
-    $query = "SELECT * FROM subscriptions WHERE user_id = :userId AND inactive = 0";
+    // Subscriptions included in a parent bill are paid through it (issue #24).
+    $query = "SELECT * FROM subscriptions WHERE user_id = :userId AND inactive = 0 AND " . wallos_standalone_sql();
     $stmt = $db->prepare($query);
     $stmt->bindParam(':userId', $userId, SQLITE3_INTEGER);
     $resultSubscriptions = $stmt->execute();
@@ -62,4 +64,4 @@ while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
 
 
 
-?>
+?>

@@ -4,6 +4,7 @@ require_once 'includes/currency_rates.php';
 require_once 'includes/recurrence.php';
 require_once 'includes/intro_pricing.php';
 require_once 'includes/households.php';
+require_once 'includes/bundles.php';
 
 function getPriceConverted($price, $currency, $database, $userId)
 {
@@ -142,10 +143,12 @@ if ($weekStartsSunday) {
             <h3><?= translate('export_icalendar', $i18n) ?></h3>
             <button type="button" class="close-modal" onclick="closePopup()" aria-label="<?= translate('close', $i18n) ?>"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
         </div>
+        <p class="form-hint"><?= translate('ical_link_info', $i18n) ?></p>
         <div class="form-group-inline">
-            <input id="iCalendarUrl" type="text" value="" readonly>
-            <input type="hidden" id="apiKey" value="<?= $userData['api_key'] ?>">
-            <button onclick="copyToClipboard()" class="button tiny"> <?= translate('copy_to_clipboard', $i18n) ?> </button>
+            <input id="iCalendarUrl" type="text" value="" readonly placeholder="<?= translate('ical_link_placeholder', $i18n) ?>">
+            <button onclick="createCalendarLink(this)" class="button tiny" id="createCalendarLink"
+                data-name="<?= htmlspecialchars(translate('calendar_feed', $i18n)) ?>"> <?= translate('create_link', $i18n) ?> </button>
+            <button onclick="copyToClipboard()" class="button tiny hide" id="copyCalendarLink"> <?= translate('copy_to_clipboard', $i18n) ?> </button>
         </div>
     </div>
 
@@ -182,6 +185,11 @@ if ($weekStartsSunday) {
 
     $registerPayment = function ($date, $subscription) use (&$paymentsByDay, &$totalCostThisMonth, &$numberOfSubscriptionsToPayThisMonth, &$amountDueThisMonth, $today, $db, $userId) {
       $paymentsByDay[(int) date('j', $date)][] = $subscription;
+      // A subscription included in a parent bill (issue #24) is shown on its
+      // day but paid through the parent: it stays out of the totals.
+      if (wallos_is_bundle_child($subscription)) {
+        return;
+      }
       // A payment inside a free trial or promo costs the intro price.
       $convertedPrice = getPriceConverted(wallos_price_on($subscription, date('Y-m-d', $date)), $subscription['currency_id'], $db, $userId);
       $totalCostThisMonth += $convertedPrice;
@@ -229,7 +237,7 @@ if ($weekStartsSunday) {
               <?php if (!empty($paymentsByDay[$day])) { ?>
                 <div class="calendar-cell-content">
                   <?php foreach ($paymentsByDay[$day] as $payment) { ?>
-                    <div class="calendar-event" onClick="showSubscriptionDetails(event, <?= $payment['id'] ?>)"
+                    <div class="calendar-event<?= wallos_is_bundle_child($payment) ? ' is-bundle-child' : '' ?>" onClick="showSubscriptionDetails(event, <?= $payment['id'] ?>)"
                       title="<?= htmlspecialchars($payment['name']) ?>">
                       <?= htmlspecialchars($payment['name']) ?>
                     </div>

@@ -20,6 +20,8 @@
     are negative offsets (-N, -2N, ...).
 */
 
+require_once __DIR__ . '/../bundles.php';
+
 const WALLOS_REMINDER_MAX_OFFSET = 365;
 const WALLOS_REMINDER_MAX_OFFSETS = 10;
 const WALLOS_CANCEL_LEAD_CHOICES = [0, 1, 3, 7, 14, 30, 60];
@@ -439,7 +441,8 @@ function wallos_collect_payment_reminders(SQLite3 $db, $userId, array $settings,
     $overdueOffsets = wallos_overdue_offsets($settings['repeat_every'] ?? 0, $settings['repeat_max'] ?? 0);
     $log = wallos_notification_log_load($db, $userId, 'payment');
 
-    $stmt = $db->prepare('SELECT * FROM subscriptions WHERE user_id = :userId AND notify = 1 AND inactive = 0 ORDER BY payer_user_id ASC, id ASC');
+    // One reminder per bill: subscriptions included in a parent are paid through it (issue #24).
+    $stmt = $db->prepare('SELECT * FROM subscriptions WHERE user_id = :userId AND notify = 1 AND inactive = 0 AND ' . wallos_standalone_sql() . ' ORDER BY payer_user_id ASC, id ASC');
     $stmt->bindValue(':userId', (int) $userId, SQLITE3_INTEGER);
     $result = $stmt->execute();
 
@@ -582,7 +585,7 @@ function wallos_collect_cancellation_reminders(SQLite3 $db, $userId, $today, arr
 
     // Free trials and promos: a reminder before the regular price starts,
     // and a one-off notice once it has (see includes/intro_pricing.php).
-    $stmt = $db->prepare('SELECT * FROM subscriptions WHERE user_id = :user_id AND inactive = 0 AND (intro_type IS NOT NULL OR intro_converted_on IS NOT NULL) ORDER BY payer_user_id ASC');
+    $stmt = $db->prepare('SELECT * FROM subscriptions WHERE user_id = :user_id AND inactive = 0 AND ' . wallos_standalone_sql() . ' AND (intro_type IS NOT NULL OR intro_converted_on IS NOT NULL) ORDER BY payer_user_id ASC');
     $stmt->bindValue(':user_id', (int) $userId, SQLITE3_INTEGER);
     $result = $stmt->execute();
     while ($result && ($row = $result->fetchArray(SQLITE3_ASSOC))) {
