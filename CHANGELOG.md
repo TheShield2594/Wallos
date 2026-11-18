@@ -2,6 +2,17 @@
 
 Tally is a fork of [Wallos](https://github.com/ellite/Wallos). The entries up to and including 5.8.3 are from the Wallos project.
 
+## [1.1.0](https://github.com/TheShield2594/Wallos/compare/tally-v1.0.0...tally-v1.1.0) (2026-11-18)
+
+
+### Features
+
+* **api:** scoped, hashed API keys (read, write, ical, admin:read) with Bearer and X-API-Key headers; keys are shown once and existing keys keep working as "Legacy key" ([#43](https://github.com/TheShield2594/Wallos/issues/43)) ([823422d](https://github.com/TheShield2594/Wallos/commit/823422da3ca6b7a7d98d9510f827cdfaf1258b35))
+* **auth:** admin is a role instead of user 1, can be granted from an OIDC group claim (OIDC_ROLES_CLAIM, OIDC_ADMIN_VALUES), and password login can be turned off once an OIDC-linked admin exists; TALLY_FORCE_PASSWORD_LOGIN=true turns it back on ([#45](https://github.com/TheShield2594/Wallos/issues/45)) ([823422d](https://github.com/TheShield2594/Wallos/commit/823422da3ca6b7a7d98d9510f827cdfaf1258b35))
+* bundled subscriptions, admin roles, scoped API keys and container hardening ([#68](https://github.com/TheShield2594/Wallos/issues/68)) ([823422d](https://github.com/TheShield2594/Wallos/commit/823422da3ca6b7a7d98d9510f827cdfaf1258b35))
+* **docker:** the container can run rootless (port 8080) and with a read-only root filesystem, the image only ships runtime files, and scheduled jobs run under supercronic and log to the container output ([#46](https://github.com/TheShield2594/Wallos/issues/46)) ([823422d](https://github.com/TheShield2594/Wallos/commit/823422da3ca6b7a7d98d9510f827cdfaf1258b35))
+* **subscriptions:** bundled subscriptions: a subscription can be billed through another one, is left out of totals, follows the parent's next payment, and splits the parent's cost by category ([#24](https://github.com/TheShield2594/Wallos/issues/24)) ([823422d](https://github.com/TheShield2594/Wallos/commit/823422da3ca6b7a7d98d9510f827cdfaf1258b35))
+
 ## 1.0.0 (2026-10-13)
 
 First release as Tally, a fork of [Wallos](https://github.com/ellite/Wallos) 5.8.3. Version numbers restart at 1.0.0.
