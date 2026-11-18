@@ -168,15 +168,21 @@ function wallos_intro_converted_due(array $subscription, $today)
  * later, still gets the intro price it was due at. Disabled subscriptions
  * are left alone (a cancelled trial).
  *
- * @param string $today Y-m-d
+ * @param string   $today  Y-m-d
+ * @param int|null $userId only this account's (the renewal cron passes each
+ *                         account's local date); null for every account
  * @return int how many were converted
  */
-function wallos_convert_ended_intros(SQLite3 $db, $today)
+function wallos_convert_ended_intros(SQLite3 $db, $today, $userId = null)
 {
     $stmt = $db->prepare("UPDATE subscriptions SET intro_converted_on = :today
         WHERE intro_type IS NOT NULL AND intro_end_date IS NOT NULL AND intro_end_date <= :today
-          AND inactive = 0 AND intro_converted_on IS NULL");
+          AND inactive = 0 AND intro_converted_on IS NULL"
+        . ($userId === null ? '' : ' AND user_id = :userId'));
     $stmt->bindValue(':today', $today, SQLITE3_TEXT);
+    if ($userId !== null) {
+        $stmt->bindValue(':userId', (int) $userId, SQLITE3_INTEGER);
+    }
     $stmt->execute();
 
     return $db->changes();

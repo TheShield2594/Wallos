@@ -2,8 +2,7 @@
 
 require_once 'validate.php';
 require_once __DIR__ . '/../../includes/connect_endpoint_crontabs.php';
-require_once __DIR__ . '/../../includes/payment_ledger.php';
-require_once __DIR__ . '/../../includes/intro_pricing.php';
+require_once __DIR__ . '/../../includes/renewal_cron.php';
 
 require 'settimezone.php';
 
@@ -25,50 +24,12 @@ echo $timezone . "<br />\n";
 $currentDate = new DateTime();
 $currentDateString = $currentDate->format('Y-m-d');
 
-// Every active auto-renewing subscription whose payment date has passed:
-// advance it along its calendar-anchored schedule, write one ledger row per
-// cycle it moved past, and close fixed-term plans after their final payment
-// (see includes/recurrence.php and includes/payment_ledger.php).
-$query = "SELECT * FROM subscriptions WHERE next_payment < :currentDate AND auto_renew = 1 AND inactive = 0";
-$stmt = $db->prepare($query);
-$stmt->bindValue(':currentDate', $currentDate->format('Y-m-d'));
-$result = $stmt->execute();
-
-$due = [];
-$failed = [];
-while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
-    $due[] = $row;
-}
-
-foreach ($due as $row) {
-    // A row saved before frequency was validated must not stall this loop
-    // for every other user: 0 never advances the date, and a negative value
-    // or a cycle without a unit (e.g. one-time) is not a valid interval.
-    if (!wallos_is_recurring($row)) {
-        continue;
-    }
-
-    if (empty(wallos_apply_schedule_advance($db, $row, $currentDate)['success'])) {
-        $failed[] = $row;
-    }
-}
-
-// A row skipped because the database stayed busy (each advance is its own
-// transaction) gets one more try once the rest are done, and is reported if
-// it still fails; the next run picks it up from its stored date.
-$stillFailed = [];
-foreach ($failed as $row) {
-    if (empty(wallos_apply_schedule_advance($db, $row, $currentDate)['success'])) {
-        $stillFailed[] = (int) $row['id'];
-    }
-}
-
-// Free trials and promos whose end date has come: the regular price takes
-// over (after the cycles above were recorded at the intro price). The
-// cancellation cron announces each conversion once.
-$converted = wallos_convert_ended_intros($db, $currentDateString);
-if ($converted > 0) {
-    echo "Ended " . $converted . " intro period(s).<br />\n";
+// Each account's payments advance on its own calendar (its notification time
+// zone, or the container's): see includes/renewal_cron.php.
+$run = wallos_run_renewals($db);
+$stillFailed = $run['failed'];
+if ($run['converted'] > 0) {
+    echo "Ended " . $run['converted'] . " intro period(s).<br />\n";
 }
 
 $formattedDate = $currentDate->format('Y-m-d');

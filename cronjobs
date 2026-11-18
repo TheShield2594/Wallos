@@ -1,6 +1,7 @@
-# Run the scripts every day. The two reminder senders run every 15 minutes and
-# process each account once a day, at the "Send at" time in its settings.
-0 1 * * * /usr/local/bin/php /var/www/html/endpoints/cronjobs/updatenextpayment.php >> /var/log/cron/updatenextpayment.log 2>&1
+# Run the scripts every day. The renewal cron and the two reminder senders run
+# every 15 minutes: renewals advance after each account's local midnight, and
+# reminders go out once a day, at the "Send at" time in its settings.
+*/15 * * * * /usr/local/bin/php /var/www/html/endpoints/cronjobs/updatenextpayment.php >> /var/log/cron/updatenextpayment.log 2>&1
 0 2 * * * /usr/local/bin/php /var/www/html/endpoints/cronjobs/updateexchange.php >> /var/log/cron/updateexchange.log 2>&1
 */15 * * * * /usr/local/bin/php /var/www/html/endpoints/cronjobs/sendcancellationnotifications.php >> /var/log/cron/sendcancellationnotifications.log 2>&1
 */15 * * * * /usr/local/bin/php /var/www/html/endpoints/cronjobs/sendnotifications.php >> /var/log/cron/sendnotifications.log 2>&1
