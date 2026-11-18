@@ -223,6 +223,16 @@ function editMember(memberId) {
 
   const memberName = memberNameElement.value;
   const memberEmail = memberEmailElement ? memberEmailElement.value : "";
+  const linkedElement = document.querySelector(`div[data-memberid="${memberId}"] select[name="linked_user_id"]`);
+  const body = {
+    action: "edit",
+    memberId: memberId,
+    name: memberName,
+    email: memberEmail,
+  };
+  if (linkedElement) {
+    body.linked_user_id = linkedElement.value;
+  }
 
   fetch("endpoints/household/household.php", {
     method: "POST",
@@ -230,12 +240,7 @@ function editMember(memberId) {
       "Content-Type": "application/x-www-form-urlencoded",
       'X-CSRF-Token': window.csrfToken,
     },
-    body: new URLSearchParams({
-      action: "edit",
-      memberId: memberId,
-      name: memberName,
-      email: memberEmail,
-    }),
+    body: new URLSearchParams(body),
   })
     .then(response => {
       if (!response.ok) {

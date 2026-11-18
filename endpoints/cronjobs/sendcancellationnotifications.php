@@ -16,6 +16,7 @@ require_once 'validate.php';
 require_once __DIR__ . '/../../includes/connect_endpoint_crontabs.php';
 require_once __DIR__ . '/../../includes/notifications/dispatch.php';
 require_once __DIR__ . '/../../includes/notifications/schedule.php';
+require_once __DIR__ . '/../../includes/notifications/shared_reminders.php';
 require_once __DIR__ . '/../../includes/currency_formatter.php';
 
 require_once __DIR__ . '/../../libs/PHPMailer/PHPMailer.php';
@@ -87,6 +88,23 @@ foreach ($users as $owner) {
                 }
             } elseif (php_sapi_name() !== 'cli') {
                 echo "Nothing to notify.<br />";
+            }
+
+            // Shared subscriptions this account is the linked payer of
+            // (includes/notifications/shared_reminders.php).
+            [$linkedEntries, $linkedMarkers] = wallos_collect_linked_cancellation_reminders($db, $userId, $today, $lookups);
+            if ($linkedEntries !== []) {
+                $linkedDelivered = wallos_dispatch_notifications($env, $channels, 'cancellation',
+                    wallos_linked_notification_contexts($linkedEntries, $owner, 'cancellation'), wallos_notification_templates_load($db, $userId));
+                $linkedRecorded = wallos_record_linked_cancellation_reminders($db, $userId, $linkedMarkers, $linkedDelivered);
+                foreach (['cancel', 'intro'] as $type) {
+                    foreach (array_keys($linkedMarkers[$type]) as $subscriptionId) {
+                        if (empty($linkedDelivered[wallos_notification_key($type, $subscriptionId)])) {
+                            $complete = false;
+                        }
+                    }
+                }
+                $complete = $complete && $linkedRecorded;
             }
         } elseif (php_sapi_name() !== 'cli') {
             echo "Notifications are disabled. No need to run.<br />";

@@ -3,6 +3,7 @@ require_once '../../includes/connect_endpoint.php';
 require_once '../../includes/cost_sharing.php';
 require_once '../../includes/inputvalidation.php';
 require_once '../../includes/validate_endpoint.php';
+require_once '../../includes/households.php';
 
 $action = $_POST['action'] ?? '';
 
@@ -60,6 +61,14 @@ function handleEditMember($db, $userId, $i18n)
         $stmt->bindParam(':memberId', $memberId, SQLITE3_INTEGER);
         $stmt->bindParam(':userId', $userId, SQLITE3_INTEGER);
         $result = $stmt->execute();
+
+        // Optional: link the payer label to an account of the shared
+        // household (issue #59). Left out of the request = unchanged.
+        if ($result && array_key_exists('linked_user_id', $_POST)) {
+            $linked = $_POST['linked_user_id'] === '' ? null : (int) $_POST['linked_user_id'];
+            $link = wallos_household_set_payer_link($db, $userId, (int) $memberId, $linked);
+            $result = $link['success'];
+        }
 
         if ($result) {
             $response = [

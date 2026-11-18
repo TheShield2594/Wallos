@@ -84,6 +84,7 @@ if ($userId == 1) {
         'DELETE FROM apprise_notifications WHERE user_id = :id',
         'DELETE FROM notification_templates WHERE user_id = :id',
         'DELETE FROM notification_log WHERE user_id = :id',
+        'DELETE FROM notification_recipient_log WHERE user_id = :id OR owner_user_id = :id',
     ]);
 
     if (!$deleted) {

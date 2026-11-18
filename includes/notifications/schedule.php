@@ -446,29 +446,11 @@ function wallos_collect_payment_reminders(SQLite3 $db, $userId, array $settings,
     $entries = [];
     $pending = [];
     while ($result && ($row = $result->fetchArray(SQLITE3_ASSOC))) {
-        // A payment inside a free trial or promo gets the "trial ending"
-        // reminder (sendcancellationnotifications.php) instead.
-        if (wallos_intro_suppresses_payment_reminder($row)) {
+        $due = wallos_payment_reminder_due($row, $today, $defaultDays, $overdueOffsets, $log, $row['last_notified_payment'] ?? null);
+        if ($due === null) {
             continue;
         }
-        $dueDate = substr((string) $row['next_payment'], 0, 10);
-        if (wallos_parse_date($dueDate) === null) {
-            continue;
-        }
-        if (!empty($row['mute_payment_until_cancellation'])) {
-            $deadline = wallos_cancel_deadline($row);
-            if (wallos_payment_reminder_muted($row, $deadline['cancel_by'] ?? null)) {
-                continue;
-            }
-        }
-
-        $daysUntil = wallos_days_between($today, $dueDate);
-        $offsets = wallos_subscription_reminder_days($row, $defaultDays);
-        $logged = wallos_logged_offsets($log[(int) $row['id']][$dueDate] ?? [], $row['last_notified_payment'] ?? null, $dueDate, $daysUntil, $offsets);
-        $dueOffsets = wallos_due_reminder_offsets($daysUntil, $offsets, $overdueOffsets, (int) $row['auto_renew'] === 1, $logged);
-        if ($dueOffsets === []) {
-            continue;
-        }
+        [$dueDate, $daysUntil, $dueOffsets] = $due;
 
         $key = 'payment:' . (int) $row['id'];
         $entries[(int) $row['payer_user_id']][] = wallos_notification_entry($row, $lookups, $daysUntil, ['key' => $key]);
@@ -476,6 +458,46 @@ function wallos_collect_payment_reminders(SQLite3 $db, $userId, array $settings,
     }
 
     return [$entries, $pending];
+}
+
+/**
+ * Whether a payment reminder of one subscription is due today, and for
+ * which offsets.
+ *
+ * @param array       $row           a subscriptions row
+ * @param int[]       $defaultDays   the reminder offsets when the row has none
+ * @param int[]       $overdueOffsets
+ * @param array       $log           [subscription_id][due_date] => offsets sent
+ * @param string|null $lastNotified  the legacy marker (null: none)
+ * @return array|null [due date, days until, offsets due]
+ */
+function wallos_payment_reminder_due(array $row, $today, array $defaultDays, array $overdueOffsets, array $log, $lastNotified)
+{
+    require_once __DIR__ . '/../intro_pricing.php';
+    require_once __DIR__ . '/../cancellation_deadline.php';
+
+    // A payment inside a free trial or promo gets the "trial ending"
+    // reminder (sendcancellationnotifications.php) instead.
+    if (wallos_intro_suppresses_payment_reminder($row)) {
+        return null;
+    }
+    $dueDate = substr((string) $row['next_payment'], 0, 10);
+    if (wallos_parse_date($dueDate) === null) {
+        return null;
+    }
+    if (!empty($row['mute_payment_until_cancellation'])) {
+        $deadline = wallos_cancel_deadline($row);
+        if (wallos_payment_reminder_muted($row, $deadline['cancel_by'] ?? null)) {
+            return null;
+        }
+    }
+
+    $daysUntil = wallos_days_between($today, $dueDate);
+    $offsets = wallos_subscription_reminder_days($row, $defaultDays);
+    $logged = wallos_logged_offsets($log[(int) $row['id']][$dueDate] ?? [], $lastNotified, $dueDate, $daysUntil, $offsets);
+    $dueOffsets = wallos_due_reminder_offsets($daysUntil, $offsets, $overdueOffsets, (int) $row['auto_renew'] === 1, $logged);
+
+    return $dueOffsets === [] ? null : [$dueDate, $daysUntil, $dueOffsets];
 }
 
 /**

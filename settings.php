@@ -153,6 +153,8 @@ $upcomingPaymentsLimit = normalize_upcoming_payments_limit($settings['upcoming_p
             $household[] = $row;
         }
     }
+    // A payer label can point to an account of the shared household (#59).
+    $payerLinkCandidates = wallos_household_link_candidates($db, $userId);
     ?>
 
     <section class="account-section">
@@ -173,6 +175,19 @@ $upcomingPaymentsLimit = normalize_upcoming_payments_limit($settings['upcoming_p
                             <input type="text" name="email" autocomplete="off" value="<?= htmlspecialchars($member['email'] ?? "") ?>"
                                 placeholder="<?= translate("email", $i18n) ?>">
                             <?php
+                            if ($payerLinkCandidates !== []) {
+                                $linkedId = $member['linked_user_id'] === null ? null : (int) $member['linked_user_id'];
+                                ?>
+                                <select name="linked_user_id" aria-label="<?= translate('linked_account', $i18n) ?>"
+                                    title="<?= translate('linked_account', $i18n) ?>">
+                                    <option value=""><?= translate('no_linked_account', $i18n) ?></option>
+                                    <?php foreach ($payerLinkCandidates as $candidateId => $candidateName) { ?>
+                                        <option value="<?= $candidateId ?>" <?= $linkedId === $candidateId ? 'selected' : '' ?>>
+                                            <?= htmlspecialchars($candidateName) ?></option>
+                                    <?php } ?>
+                                </select>
+                                <?php
+                            }
                         }
                         ?>
                         <button class="image-button medium" onClick="editMember(<?= $member['id'] ?>)" name="save"
@@ -208,6 +223,11 @@ $upcomingPaymentsLimit = normalize_upcoming_payments_limit($settings['upcoming_p
                 <p>
                     <i class="fa-solid fa-circle-info"></i> <?= translate('household_info', $i18n) ?>
                 </p>
+                <?php if ($payerLinkCandidates !== []) { ?>
+                    <p>
+                        <i class="fa-solid fa-circle-info"></i> <?= translate('linked_account_info', $i18n) ?>
+                    </p>
+                <?php } ?>
                 <p>
             </div>
         </div>
