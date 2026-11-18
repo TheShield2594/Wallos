@@ -133,7 +133,13 @@ foreach ($allAiSettings as $aiSettings) {
 
     // The shared prompt (includes/ai_recommendations.php). Descriptions and
     // website domains go only when the account allows it (on by default).
-    $includeDescriptions = (int) ($aiSettings['include_descriptions'] ?? 1) === 1;
+    // Read now, not from the batch read at the start: an opt-out saved while
+    // earlier accounts were processed applies to this account's request.
+    $includeStmt = $db->prepare('SELECT include_descriptions FROM ai_settings WHERE user_id = :userId');
+    $includeStmt->bindValue(':userId', $tempUserId, SQLITE3_INTEGER);
+    $includeResult = $includeStmt->execute();
+    $includeRow = $includeResult ? $includeResult->fetchArray(SQLITE3_ASSOC) : false;
+    $includeDescriptions = $includeRow !== false && (int) ($includeRow['include_descriptions'] ?? 1) === 1;
     $subscriptionsForAI = wallos_ai_build_payload($subscriptions, $currencies, $categories, $members, $includeDescriptions);
     $prompt = wallos_ai_recommendations_prompt($subscriptionsForAI, $userLanguageName, $includeDescriptions);
 

@@ -261,7 +261,9 @@ if ($result) {
                         getPriceConverted(wallos_current_price(wallos_gross_row($subscription)), $currency, $db, $userId),
                         wallos_cycle_active_months($subscription));
                 }
-                $memberFactor = $statsCostMode === 'net' ? 1 - wallos_sanitize_reimbursed_percent($subscription['reimbursed_percent'] ?? 0) / 100 : 1;
+                // A shared row's reimbursement is its owner's, not this account's.
+                $memberFactor = $statsCostMode === 'net' && empty($subscription['shared_owner_name'])
+                    ? 1 - wallos_sanitize_reimbursed_percent($subscription['reimbursed_percent'] ?? 0) / 100 : 1;
                 foreach (wallos_member_fractions($subscription, $rowShares) as $shareMemberId => $fraction) {
                     if (isset($memberCost[$shareMemberId])) {
                         $memberCost[$shareMemberId]['cost'] += $grossMonthly * $fraction * $memberFactor;

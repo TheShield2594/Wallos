@@ -95,3 +95,35 @@ function wallos_fixer_clear_keys(SQLite3 $db, $userId): bool
 
     return $stmt->execute() !== false;
 }
+
+/**
+ * Removes the key saved for one provider. When that provider is the active
+ * one, its active row goes too, so the account has no rate provider
+ * configured (as an empty key used to do before keys were kept per
+ * provider).
+ */
+function wallos_fixer_remove_key(SQLite3 $db, $userId, int $provider): bool
+{
+    if (!in_array($provider, WALLOS_FIXER_KEYED_PROVIDERS, true) || @$db->exec('BEGIN IMMEDIATE') === false) {
+        return false;
+    }
+    $ok = true;
+    foreach ([
+        'DELETE FROM fixer_keys WHERE user_id = :userId AND provider = :provider',
+        'DELETE FROM fixer WHERE user_id = :userId AND provider = :provider',
+    ] as $sql) {
+        $stmt = $db->prepare($sql);
+        $stmt->bindValue(':userId', (int) $userId, SQLITE3_INTEGER);
+        $stmt->bindValue(':provider', $provider, SQLITE3_INTEGER);
+        if ($stmt->execute() === false) {
+            $ok = false;
+            break;
+        }
+    }
+    if ($ok && $db->exec('COMMIT') !== false) {
+        return true;
+    }
+    $db->exec('ROLLBACK');
+
+    return false;
+}

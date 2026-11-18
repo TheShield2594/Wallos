@@ -219,12 +219,19 @@ if (isset($apiData['success']) && $apiData['success'] == true) {
     // result. This copy did not, while the insert that replaces the row it
     // removes did - so a failed delete answered "saved successfully" over a
     // fixer table that now holds two keys for one user.
+    //
+    // The active row and the provider's saved key (fixer_keys) are written in
+    // one transaction, so a failure leaves both as they were.
+    $inTransaction = @$db->exec('BEGIN IMMEDIATE') !== false;
     $removeSql = "DELETE FROM fixer WHERE user_id = :userId";
     $removeStmt = $db->prepare($removeSql);
     $removeStmt->bindParam(':userId', $userId, SQLITE3_INTEGER);
-    $removeResult = $removeStmt->execute();
+    $removeResult = $inTransaction && $removeStmt->execute() !== false;
 
     if ($removeResult === false) {
+        if ($inTransaction) {
+            $db->exec('ROLLBACK');
+        }
         echo json_encode([
             'success' => false,
             'title' => 'Database error',
@@ -240,9 +247,13 @@ if (isset($apiData['success']) && $apiData['success'] == true) {
     $stmtInsert->bindParam(':api_key', $fixerApiKey, SQLITE3_TEXT);
     $stmtInsert->bindParam(':provider', $provider, SQLITE3_INTEGER);
     $stmtInsert->bindParam(':userId', $userId, SQLITE3_INTEGER);
-    $resultInsert = $stmtInsert->execute();
+    $resultInsert = $stmtInsert->execute() !== false && wallos_fixer_store_key($db, $userId, $provider, $fixerApiKey);
+    $resultInsert = $resultInsert && $db->exec('COMMIT') !== false;
+    if (!$resultInsert) {
+        $db->exec('ROLLBACK');
+    }
 
-    if ($resultInsert && wallos_fixer_store_key($db, $userId, $provider, $fixerApiKey)) {
+    if ($resultInsert) {
         // If usage limits are parsed and supported by the db schema
         if ($usageLimit !== null && $usageRemaining !== null
             && $db->querySingle("SELECT COUNT(*) FROM pragma_table_info('fixer') WHERE name='usage_used'") > 0) {

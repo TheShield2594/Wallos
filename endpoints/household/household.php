@@ -54,21 +54,30 @@ function handleEditMember($db, $userId, $i18n)
         $name = validate($_POST['name']);
         $email = $_POST['email'] ? $_POST['email'] : "";
         $email = validate($email);
-        $sql = "UPDATE household SET name = :name, email = :email WHERE id = :memberId AND user_id = :userId";
-        $stmt = $db->prepare($sql);
-        $stmt->bindParam(':name', $name, SQLITE3_TEXT);
-        $stmt->bindParam(':email', $email, SQLITE3_TEXT);
-        $stmt->bindParam(':memberId', $memberId, SQLITE3_INTEGER);
-        $stmt->bindParam(':userId', $userId, SQLITE3_INTEGER);
-        $result = $stmt->execute();
+        // The label and its optional link to an account of the shared
+        // household (issue #59; left out of the request = unchanged) are saved
+        // together, under the write lock that leaving or removal takes, so a
+        // link is never checked against a membership that changes before it
+        // is written, and a refused link keeps the old name and email.
+        $linked = array_key_exists('linked_user_id', $_POST)
+            ? ($_POST['linked_user_id'] === '' ? null : (int) $_POST['linked_user_id'])
+            : false;
+        $result = wallos_household_transaction($db, function () use ($db, $name, $email, $memberId, $userId, $linked) {
+            $sql = "UPDATE household SET name = :name, email = :email WHERE id = :memberId AND user_id = :userId";
+            $stmt = $db->prepare($sql);
+            $stmt->bindValue(':name', $name, SQLITE3_TEXT);
+            $stmt->bindValue(':email', $email, SQLITE3_TEXT);
+            $stmt->bindValue(':memberId', (int) $memberId, SQLITE3_INTEGER);
+            $stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
+            if ($stmt->execute() === false) {
+                return false;
+            }
+            if ($linked === false) {
+                return true;
+            }
 
-        // Optional: link the payer label to an account of the shared
-        // household (issue #59). Left out of the request = unchanged.
-        if ($result && array_key_exists('linked_user_id', $_POST)) {
-            $linked = $_POST['linked_user_id'] === '' ? null : (int) $_POST['linked_user_id'];
-            $link = wallos_household_set_payer_link($db, $userId, (int) $memberId, $linked);
-            $result = $link['success'];
-        }
+            return wallos_household_set_payer_link($db, $userId, (int) $memberId, $linked)['success'];
+        });
 
         if ($result) {
             $response = [

@@ -154,7 +154,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" || $_SERVER["REQUEST_METHOD"] === "GET
             'cycle' => $point['cycle'],
             'frequency' => $point['frequency'],
         ];
-    }, wallos_price_history_points($subscription, wallos_price_changes_list($db, $userId, $subscriptionId, 500)));
+    }, wallos_price_history_points($subscription, wallos_price_changes_list($db, $userId, $subscriptionId, PHP_INT_MAX)));
 
     // Optional Currency Conversion
     if (isset($_REQUEST['convert_currency']) && $_REQUEST['convert_currency'] === 'true' && $subscription['currency_id'] != $userCurrencyId) {

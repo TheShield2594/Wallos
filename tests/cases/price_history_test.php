@@ -38,3 +38,24 @@ wallos_test('a start date after the first change dates the starting price at tha
     );
     assert_same('2025-05-01', $points[0]['date'], 'never after the first change');
 });
+
+wallos_test('price history keeps the stored precision and the real starting price past 24 changes', function () {
+    $db = wallos_test_open_database();
+    wallos_test_create_user($db, 1, 'alice');
+    $eur = wallos_test_currency_id(1, 0);
+    $db->exec("INSERT INTO subscriptions (id, user_id, name, price, currency_id, next_payment, cycle, frequency, inactive, start_date)
+        VALUES (70, 1, 'Many', 30.125, $eur, '2027-01-01', 3, 1, 0, '2020-01-01')");
+    $old = ['price' => 5.0, 'currency_id' => $eur, 'cycle' => 3, 'frequency' => 1, 'tier_name' => null];
+    for ($i = 1; $i <= 30; $i++) {
+        $new = array_merge($old, ['price' => $i === 30 ? 30.125 : 5.0 + $i]);
+        wallos_record_price_change($db, 1, 70, $old, $new, 'provider', sprintf('2021-%02d-01', min(12, $i)) );
+        $old = $new;
+    }
+    $subscription = $db->querySingle('SELECT * FROM subscriptions WHERE id = 70', true);
+    $points = wallos_price_history_points($subscription, wallos_price_changes_list($db, 1, 70, PHP_INT_MAX));
+    assert_same(31, count($points), 'every change');
+    assert_equals(5.0, $points[0]['price'], 'the real starting price');
+    assert_same('2020-01-01', $points[0]['date'], 'at the start date');
+    assert_same(30.125, $points[30]['price'], 'not rounded to two decimals');
+    $db->close();
+});

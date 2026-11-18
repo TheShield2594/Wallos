@@ -322,7 +322,7 @@ function wallos_price_history_points(array $subscription, array $changes)
     $point = function ($date, $price, $currencyId, $cycle, $frequency) {
         return [
             'date' => $date,
-            'price' => $price === null ? null : round((float) $price, 2),
+            'price' => $price === null ? null : (float) $price,
             'currency_id' => (int) $currencyId,
             'cycle' => (int) $cycle,
             'frequency' => max(1, (int) $frequency),

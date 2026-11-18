@@ -13,8 +13,17 @@ $aiOllamaHost = isset($data['ollama_host']) ? trim($data['ollama_host']) : '';
 $aiModel      = isset($data['model']) ? trim($data['model']) : '';
 $aiSchedule   = isset($data['ai_run_schedule']) ? $data['ai_run_schedule'] : "manual";
 // Send descriptions and website domains with the subscriptions (issue #42).
-// On by default; an older client that does not send it keeps it on.
-$aiIncludeDescriptions = array_key_exists('include_descriptions', $data) ? (bool) $data['include_descriptions'] : true;
+// A request that leaves it out (an older client) keeps the saved choice, so
+// an opt-out is never switched back on; a first save defaults to on.
+if (is_array($data) && array_key_exists('include_descriptions', $data)) {
+    $aiIncludeDescriptions = (bool) $data['include_descriptions'];
+} else {
+    $savedStmt = $db->prepare('SELECT include_descriptions FROM ai_settings WHERE user_id = :userId');
+    $savedStmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
+    $savedResult = $savedStmt->execute();
+    $savedRow = $savedResult ? $savedResult->fetchArray(SQLITE3_ASSOC) : false;
+    $aiIncludeDescriptions = $savedRow === false || (int) ($savedRow['include_descriptions'] ?? 1) === 1;
+}
 
 // Validate type
 if (empty($aiType) || !in_array($aiType, ['chatgpt', 'gemini', 'openrouter', 'ollama', 'openai-compatible'])) {

@@ -60,3 +60,20 @@ wallos_test('the migration copies existing keys for the provider they were saved
     assert_same(1, (int) $db->querySingle('SELECT COUNT(*) FROM fixer_keys'), 'running twice adds nothing');
     $db->close();
 });
+
+wallos_test('removing a saved key drops it, and the active row only when that provider is active', function () {
+    $db = wallos_test_open_database();
+    wallos_test_create_user($db, 1, 'alice');
+    wallos_fixer_store_key($db, 1, 0, 'fixer-key-0000');
+    wallos_fixer_store_key($db, 1, 1, 'apilayer-key-1111');
+    $db->exec("INSERT INTO fixer (api_key, provider, user_id) VALUES ('apilayer-key-1111', 1, 1)");
+
+    assert_true(wallos_fixer_remove_key($db, 1, 0), 'fixer.io key removed');
+    assert_same([1 => 'apilayer-key-1111'], wallos_fixer_saved_keys($db, 1), 'the other key stays');
+    assert_same(1, (int) $db->querySingle('SELECT COUNT(*) FROM fixer WHERE user_id = 1'), 'apilayer stays active');
+
+    assert_true(wallos_fixer_remove_key($db, 1, 1), 'the active key removed');
+    assert_same(0, (int) $db->querySingle('SELECT COUNT(*) FROM fixer WHERE user_id = 1'), 'no provider configured any more');
+    assert_true(!wallos_fixer_remove_key($db, 1, 2), 'frankfurter.dev has no key to remove');
+    $db->close();
+});

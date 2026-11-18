@@ -151,3 +151,14 @@ wallos_test('shared rows go into one bucket and pass only filters that select it
     assert_true(wallos_shared_rows_pass_filters(['12,' . WALLOS_SHARED_BUCKET_ID, null, null]), 'unless it selects the bucket');
     assert_true(!wallos_shared_rows_pass_filters([(string) WALLOS_SHARED_BUCKET_ID, '7', null]), 'every filtered dimension must select it');
 });
+
+wallos_test('a linked trial reminder shows the intro amount in both price fields', function () {
+    [$db, $id] = household_followups_fixture(['intro_type' => 'promo', 'intro_price' => '2.5', 'intro_end_date' => '2026-11-20', 'intro_notify_days' => 3]);
+    wallos_household_set_payer_link($db, 1, 51, 2);
+    [$entries] = wallos_collect_linked_cancellation_reminders($db, 2, '2026-11-18', wallos_notification_lookups($db, 2));
+    assert_same(1, count($entries), 'the promo-ending reminder');
+    assert_contains('2.5', $entries[0]['price'], 'price is the intro amount');
+    assert_contains('2.5', $entries[0]['formatted_price'], 'and so is formatted_price');
+    assert_not_contains('10', $entries[0]['formatted_price'], 'not the regular price');
+    $db->close();
+});

@@ -6,6 +6,17 @@ require_once '../../includes/fixer_keys.php';
 $newApiKey = isset($_POST["api_key"]) ? trim($_POST["api_key"]) : "";
 $provider = isset($_POST["provider"]) ? $_POST["provider"] : 0;
 
+// "Remove saved key" (issue #44): keys are kept per provider and an empty key
+// field now means "use the saved one", so removal is its own action.
+if (($_POST["action"] ?? "") === "remove") {
+    $removed = wallos_fixer_remove_key($db, $userId, (int) $provider === 1 ? 1 : 0);
+    echo json_encode([
+        "success" => $removed,
+        "message" => translate($removed ? 'fixer_key_removed' : 'failed_to_store_api_key', $i18n)
+    ]);
+    exit;
+}
+
 // frankfurter.dev serves the ECB reference rates without an account, so there
 // is no key to check and nothing to ask it: choosing it is the whole
 // configuration, and a validation request here would only be a request spent
@@ -113,11 +124,19 @@ if (empty($apiData['success'])) {
 // key it is handed first, which can be the one the user replaced because it
 // had stopped working - and the settings page shows the usage of one row
 // while the cron job spends the quota of the other.
+//
+// The active row and the provider's saved key (fixer_keys) are written in one
+// transaction: a failure leaves both as they were, never a new active key
+// next to the old saved one.
+$inTransaction = @$db->exec('BEGIN IMMEDIATE') !== false;
 $removeOldKey = "DELETE FROM fixer WHERE user_id = :userId";
 $stmt = $db->prepare($removeOldKey);
 $stmt->bindParam(":userId", $userId, SQLITE3_INTEGER);
 
-if ($stmt->execute() === false) {
+if (!$inTransaction || $stmt->execute() === false) {
+    if ($inTransaction) {
+        $db->exec('ROLLBACK');
+    }
     echo json_encode([
         "success" => false,
         "message" => translate('failed_to_store_api_key', $i18n)
@@ -130,8 +149,12 @@ $stmt = $db->prepare($insertNewKey);
 $stmt->bindParam(":api_key", $newApiKey, SQLITE3_TEXT);
 $stmt->bindParam(":provider", $provider, SQLITE3_INTEGER);
 $stmt->bindParam(":userId", $userId, SQLITE3_INTEGER);
-$result = $stmt->execute();
-if ($result && wallos_fixer_store_key($db, $userId, $provider, $newApiKey)) {
+$result = $stmt->execute() !== false && wallos_fixer_store_key($db, $userId, $provider, $newApiKey);
+$result = $result && $db->exec('COMMIT') !== false;
+if (!$result) {
+    $db->exec('ROLLBACK');
+}
+if ($result) {
     if ($usageLimit !== null && $usageRemaining !== null
         && $db->querySingle("SELECT COUNT(*) FROM pragma_table_info('fixer') WHERE name='usage_used'") > 0) {
         $usageStmt = $db->prepare("UPDATE fixer SET usage_used = :used, usage_limit = :limit, usage_updated_at = :updatedAt WHERE user_id = :userId");

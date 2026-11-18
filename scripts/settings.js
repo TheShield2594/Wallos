@@ -1004,6 +1004,50 @@ function updateFixerKeyField() {
   input.placeholder = hints[provider]
     ? input.dataset.placeholderSaved.replace("%s", hints[provider])
     : input.dataset.placeholderEmpty;
+  const removeButton = document.querySelector("#removeFixerKey");
+  if (removeButton) {
+    removeButton.classList.toggle("hide", !hints[provider]);
+  }
+}
+
+function removeFixerKeyButton() {
+  const input = document.querySelector("#fixerKey");
+  const provider = document.querySelector("#fixerProvider").value;
+  const removeButton = document.querySelector("#removeFixerKey");
+  removeButton.disabled = true;
+
+  fetch("endpoints/currency/fixer_api_key.php", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      'X-CSRF-Token': window.csrfToken,
+    },
+    body: new URLSearchParams({ action: "remove", provider: provider }),
+  })
+    .then(response => response.json())
+    .then(data => {
+      if (data.success) {
+        let hints = {};
+        try {
+          hints = JSON.parse(input.dataset.keyHints || "{}");
+        } catch (e) {
+          hints = {};
+        }
+        delete hints[provider];
+        input.dataset.keyHints = JSON.stringify(hints);
+        updateFixerKeyField();
+        showSuccessMessage(data.message);
+      } else {
+        showErrorMessage(data.message);
+      }
+    })
+    .catch(error => {
+      console.error(error);
+      showErrorMessage(translate("unknown_error"));
+    })
+    .finally(() => {
+      removeButton.disabled = false;
+    });
 }
 
 function toggleFixerKeyVisibility() {

@@ -1626,6 +1626,8 @@ $upcomingPaymentsLimit = normalize_upcoming_payments_limit($settings['upcoming_p
                 </select>
             </div>
             <div class="buttons">
+                <input type="button" value="<?= translate('remove_saved_key', $i18n) ?>" id="removeFixerKey"
+                    onClick="removeFixerKeyButton()" class="secondary-button thin mobile-grow hide" />
                 <input type="submit" value="<?= translate('save', $i18n) ?>" id="addFixerKey"
                     onClick="addFixerKeyButton()" class="thin mobile-grow" />
             </div>

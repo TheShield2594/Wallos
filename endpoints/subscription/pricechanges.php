@@ -25,9 +25,9 @@ $stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
 $subscriptionResult = $stmt->execute();
 $subscription = $subscriptionResult ? $subscriptionResult->fetchArray(SQLITE3_ASSOC) : false;
 // The prices the subscription has had, oldest first, for the chart and the
-// "since" summary. Only the last 24 changes are listed, so the starting
-// price is the oldest one listed.
-$history = $subscription ? wallos_price_history_points($subscription, $changes) : [];
+// "since" summary: from every change, so the starting price stays the real
+// one however many changes there are (only the last 24 are listed).
+$history = $subscription ? wallos_price_history_points($subscription, wallos_price_changes_list($db, $userId, $subscriptionId, PHP_INT_MAX)) : [];
 
 echo json_encode([
     'success' => true,

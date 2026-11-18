@@ -818,6 +818,11 @@ function wallos_household_link_candidates(SQLite3 $db, $userId)
  * Links one of the account's payer labels to an account of its household,
  * or unlinks it (null).
  *
+ * The membership check and the write are only safe from a concurrent leave
+ * or removal inside a write transaction (wallos_household_transaction(),
+ * which wallos_household_drop_member() also takes); the settings endpoint
+ * calls it that way.
+ *
  * @return array{success: bool, error?: string}
  */
 function wallos_household_set_payer_link(SQLite3 $db, $userId, $payerId, $linkedUserId)

@@ -1802,13 +1802,15 @@ body.light img.logo-theme-variant[data-native-theme="dark"] {
 .price-history-chart {
   display: flex;
   align-items: flex-end;
-  gap: 6px;
+  gap: 4px;
+  overflow: hidden;
   height: 64px;
   margin: 4px 16px 12px;
 }
 
 .price-history-bar {
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 4px;
   max-width: 32px;
   min-height: 4px;
   border-radius: 4px 4px 2px 2px;

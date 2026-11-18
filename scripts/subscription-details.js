@@ -848,6 +848,9 @@ function detailsLoadPriceChanges(subscription) {
     .catch(() => { /* the card just stays hidden */ });
 }
 
+// The price chart shows at most this many bars (the most recent prices).
+const DETAILS_PRICE_CHART_MAX_BARS = 24;
+
 // A price spread per month, so a monthly and a yearly price compare.
 function detailsMonthlyPrice(price, cycle, frequency) {
   const perCycle = { 1: 30.4375, 2: 30.4375 / 7, 3: 1, 4: 1 / 12 }[cycle];
@@ -907,17 +910,19 @@ function detailsRenderPriceChanges(changes, history) {
   summary.textContent = summaryText ? `${summaryText} ${strings.price_history_footnote}` : '';
   summary.classList.toggle('hide', summaryText === '');
 
-  // Bar chart: one bar per price, per month so cycles compare. Skipped when
-  // the prices are in different currencies (no historical conversion).
-  const monthly = history.map((point) => detailsMonthlyPrice(point.price, point.cycle, point.frequency));
-  const sameCurrency = history.every((point) => point.currency_id === history[0].currency_id);
-  const chartable = history.length > 1 && sameCurrency && monthly.every((value) => value !== null);
+  // Bar chart: one bar per price, per month so cycles compare, for the most
+  // recent prices only so every bar stays visible in a narrow panel. Skipped
+  // when the prices are in different currencies (no historical conversion).
+  const chartPoints = history.slice(-DETAILS_PRICE_CHART_MAX_BARS);
+  const monthly = chartPoints.map((point) => detailsMonthlyPrice(point.price, point.cycle, point.frequency));
+  const sameCurrency = chartPoints.every((point) => point.currency_id === chartPoints[0].currency_id);
+  const chartable = chartPoints.length > 1 && sameCurrency && monthly.every((value) => value !== null);
   chart.classList.toggle('hide', !chartable);
   if (chartable) {
     const max = Math.max(...monthly, 0.01);
-    history.forEach((point, index) => {
+    chartPoints.forEach((point, index) => {
       const bar = document.createElement('span');
-      bar.className = 'price-history-bar' + (index === history.length - 1 ? ' is-current' : '');
+      bar.className = 'price-history-bar' + (index === chartPoints.length - 1 ? ' is-current' : '');
       bar.style.height = `${Math.max(6, Math.round((monthly[index] / max) * 100))}%`;
       bar.title = `${detailsFormatDate(point.date)} · ${priceText(point.price, point.currency_id, point.cycle, point.frequency)}`;
       chart.appendChild(bar);
