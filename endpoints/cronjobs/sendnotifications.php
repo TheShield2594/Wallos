@@ -88,7 +88,7 @@ foreach ($users as $owner) {
             $activePeriod = getActiveBudgetPeriod($now, $budgetPeriodType, $budgetAnchor);
             $isPeriodStart = $activePeriod['start']->format('Y-m-d') === $today;
 
-            $stmt = $db->prepare('SELECT price, currency_id, next_payment, cycle, frequency, inactive, auto_renew, start_date, billing_anchor_day, active_months, end_date, intro_type, intro_price, intro_end_date FROM subscriptions WHERE user_id = :userId AND inactive = 0');
+            $stmt = $db->prepare('SELECT price, currency_id, next_payment, cycle, frequency, inactive, auto_renew, start_date, billing_anchor_day, active_months, end_date, intro_type, intro_price, intro_end_date FROM subscriptions WHERE user_id = :userId AND inactive = 0 AND ' . wallos_standalone_sql());
             $stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
             $result = $stmt->execute();
             $periodSubscriptions = [];

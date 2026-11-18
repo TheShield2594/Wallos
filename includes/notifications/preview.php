@@ -29,8 +29,8 @@ function wallos_notification_preview_context(SQLite3 $db, $userId, $kind, $today
     CurrencyFormatter::useCurrencies($lookups['currencies']);
 
     // One payer's digest, as the cron sends it: the payer of the next payment.
-    $stmt = $db->prepare('SELECT * FROM subscriptions WHERE user_id = :userId AND inactive = 0
-        AND payer_user_id = (SELECT payer_user_id FROM subscriptions WHERE user_id = :userId AND inactive = 0 ORDER BY next_payment ASC, id ASC LIMIT 1)
+    $stmt = $db->prepare('SELECT * FROM subscriptions WHERE user_id = :userId AND inactive = 0 AND ' . wallos_standalone_sql() . '
+        AND payer_user_id = (SELECT payer_user_id FROM subscriptions WHERE user_id = :userId AND inactive = 0 AND ' . wallos_standalone_sql() . ' ORDER BY next_payment ASC, id ASC LIMIT 1)
         ORDER BY next_payment ASC, id ASC LIMIT 3');
     $stmt->bindValue(':userId', (int) $userId, SQLITE3_INTEGER);
     $result = $stmt->execute();

@@ -6,6 +6,7 @@ require_once '../../includes/cancellation_deadline.php';
 require_once '../../includes/intro_pricing.php';
 require_once '../../includes/households.php';
 require_once '../../includes/cost_sharing.php';
+require_once '../../includes/bundles.php';
 
 if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
     if (isset($_GET['id']) && $_GET['id'] != "") {
@@ -75,6 +76,14 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
             $subscriptionData['intro_active'] = wallos_intro_active($row);
             $subscriptionData['current_price'] = wallos_current_price($row);
             $subscriptionData['replacement_subscription_id'] = $row['replacement_subscription_id'];
+            // Bundles (issue #24): the bill it is included in, and how many it includes.
+            $subscriptionData['parent_subscription_id'] = wallos_is_bundle_child($row) ? (int) $row['parent_subscription_id'] : null;
+            $subscriptionData['allocated_amount'] = $row['allocated_amount'] === null ? null : (float) $row['allocated_amount'];
+            $bundleContext = wallos_bundle_list_context($db, (int) $row['user_id']);
+            // A household member sees the link, not the name of a parent that may be private.
+            $subscriptionData['parent_name'] = $subscriptionData['parent_subscription_id'] !== null && !$isShared
+                ? htmlspecialchars_decode($bundleContext['names'][$subscriptionData['parent_subscription_id']] ?? '') : null;
+            $subscriptionData['child_count'] = $bundleContext['children'][(int) $row['id']] ?? 0;
             $subscriptionData['renew_from_action'] = (int) ($row['renew_from_action'] ?? 0);
             $subscriptionData['variable_amount'] = (int) ($row['variable_amount'] ?? 0);
             $subscriptionData['end_date'] = $row['end_date'] ?? null;

@@ -17,6 +17,8 @@ $logoRow = $logoResult ? $logoResult->fetchArray(SQLITE3_ASSOC) : false;
 // The row, its payment and price history, and the references to it go
 // together: if any part fails, nothing is deleted.
 $deleteStatements = [
+    // Subscriptions billed through this one become standalone again (issue #24).
+    "UPDATE subscriptions SET parent_subscription_id = NULL, allocated_amount = NULL WHERE parent_subscription_id = :subscriptionId AND user_id = :userId",
     "DELETE FROM subscriptions WHERE id = :subscriptionId AND user_id = :userId",
     "DELETE FROM subscription_payments WHERE subscription_id = :subscriptionId AND user_id = :userId",
     "DELETE FROM subscription_price_changes WHERE subscription_id = :subscriptionId AND user_id = :userId",

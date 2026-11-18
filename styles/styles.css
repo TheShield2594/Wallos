@@ -5061,3 +5061,37 @@ a.segmented-option {
   right: 6px;
   transform: translateY(-50%);
 }
+
+/* Bundled subscriptions (issue #24): the parent shows "+N included", its
+   children are indented beneath it and can be hidden from the filter menu. */
+.list-row-chip {
+  display: inline-block;
+  margin-inline-start: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background-color: var(--fill);
+  color: var(--text2);
+  font-size: 12px;
+  font-weight: 400;
+  vertical-align: 1px;
+}
+
+.list-row.is-bundle-child {
+  padding-inline-start: 38px;
+}
+
+.list-row.is-bundle-child .tile {
+  transform: scale(0.85);
+}
+
+.hide-bundle-children .list-row.is-bundle-child {
+  display: none;
+}
+
+.calendar .calendar-event.is-bundle-child {
+  opacity: 0.6;
+}
+
+#toggle-bundle-children.selected {
+  font-weight: 600;
+}

@@ -260,7 +260,8 @@ if ($sortOrder == "alphanumeric") {
 
 $activeMonthlyTotal = 0;
 foreach ($print as $printRow) {
-  if (!$printRow['inactive'] && !$printRow['one_time']) {
+  // A child is paid through its parent bill (issue #24): counted once.
+  if (!$printRow['inactive'] && !$printRow['one_time'] && empty($printRow['parent_subscription_id'])) {
     $activeMonthlyTotal += $printRow['monthly_main'];
   }
 }
@@ -301,6 +302,7 @@ if ($db->querySingle("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND 
         <i class="fa-solid fa-filter" aria-hidden="true"></i>
       </button>
       <?php $sharedFilterAvailable = wallos_shared_subscriptions($db, $userId) !== []; ?>
+      <?php $hasBundleChildren = wallos_bundle_child_counts($db, $userId) !== []; ?>
       <?php include 'includes/filters_menu.php'; ?>
     </div>
     <?php include 'includes/sort_options.php'; ?>
@@ -427,6 +429,29 @@ if ($db->querySingle("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND 
         <input type="checkbox" id="price_change_provider" name="price_change_reason" value="provider">
         <label for="price_change_provider"><?= translate('price_change_from_provider', $i18n) ?></label>
       </div>
+    </div>
+
+    <?php // Bundles (issue #24): billed through another subscription. ?>
+    <div class="form-group" id="bundle-group" data-confirm-disable="<?= htmlspecialchars(translate('bundle_confirm_disable_children', $i18n)) ?>">
+      <div class="inline">
+        <div class="split66">
+          <label for="parent_subscription_id"><?= translate('bundle_billed_through', $i18n) ?></label>
+          <select id="parent_subscription_id" name="parent_subscription_id" onchange="toggleBundleFields()">
+            <option value=""><?= translate('bundle_billed_separately', $i18n) ?></option>
+            <?php foreach (wallos_bundle_parent_options($db, $userId) as $parentOption) { ?>
+              <option value="<?= (int) $parentOption['id'] ?>"><?= htmlspecialchars(htmlspecialchars_decode($parentOption['name'])) ?></option>
+            <?php } ?>
+          </select>
+        </div>
+        <div class="split33 hide" id="allocated-amount-field">
+          <label for="allocated_amount"><?= translate('bundle_allocated_amount', $i18n) ?></label>
+          <input type="number" step="0.01" min="0" id="allocated_amount" name="allocated_amount" autocomplete="off"
+            placeholder="<?= translate('optional', $i18n) ?>">
+        </div>
+      </div>
+      <p class="form-hint hide" id="bundle-hint"><?= translate('bundle_inherits_hint', $i18n) ?></p>
+      <p class="form-hint hide" id="bundle-has-children-hint"><?= translate('bundle_has_children_hint', $i18n) ?></p>
+      <input type="hidden" id="bundle_children_action" name="bundle_children_action" value="disable">
     </div>
 
     <div class="form-group">

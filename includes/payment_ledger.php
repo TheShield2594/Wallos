@@ -23,6 +23,7 @@
 require_once __DIR__ . '/recurrence.php';
 require_once __DIR__ . '/currency_rates.php';
 require_once __DIR__ . '/intro_pricing.php';
+require_once __DIR__ . '/bundles.php';
 
 const WALLOS_LEDGER_STATUSES = ['paid', 'assumed', 'pending_amount'];
 
@@ -121,7 +122,20 @@ function wallos_update_schedule(SQLite3 $db, array $subscription, array $fields)
     $stmt->bindValue(':id', (int) $subscription['id'], SQLITE3_INTEGER);
     $stmt->bindValue(':userId', (int) $subscription['user_id'], SQLITE3_INTEGER);
 
-    return $stmt->execute() !== false;
+    if ($stmt->execute() === false) {
+        return false;
+    }
+    // Subscriptions included in this one (issue #24) mirror its next payment.
+    if (array_key_exists('next_payment', $fields)
+        && !wallos_bundle_sync_children_next_payment($db, $subscription['user_id'], $subscription['id'], $fields['next_payment'])) {
+        return false;
+    }
+    // A plan that ran its course takes the subscriptions included in it along.
+    if ((int) ($fields['inactive'] ?? 0) === 1) {
+        return wallos_bundle_disable_children($db, $subscription['user_id'], $subscription['id']);
+    }
+
+    return true;
 }
 
 /**

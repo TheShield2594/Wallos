@@ -880,6 +880,23 @@ $i18n = [
     "too_many_reminders" => "Pick at most %d reminders.",
     "day" => "day",
     "ntfy" => "Ntfy",
+    // Bundled subscriptions (issue #24)
+    "bundle_billed_through" => "Billed through",
+    "bundle_billed_separately" => "Billed separately",
+    "bundle_allocated_amount" => "Allocated amount",
+    "bundle_inherits_hint" => "Included in another subscription: the billing cycle, next payment, payment method and payer follow it, and it is left out of your totals. The allocated amount, in the parent's currency, moves that part of the parent's cost to this subscription's category in the statistics.",
+    "bundle_has_children_hint" => "Other subscriptions are billed through this one, so it cannot be included in another.",
+    "bundle_via" => "via %s",
+    "bundle_n_included" => "+%d included",
+    "bundle_hide_included" => "Hide included subscriptions",
+    "bundle_allocations_exceed_price" => "The allocated amounts add up to more than the parent's price.",
+    "bundle_confirm_disable_children" => "Subscriptions are billed through this one. Disable them too? Choose Cancel to detach them instead, so they become standalone subscriptions.",
+    "bundle_error_self" => "A subscription cannot be billed through itself.",
+    "bundle_error_not_found" => "The subscription it is billed through does not exist or does not belong to you.",
+    "bundle_error_parent_is_child" => "That subscription is itself billed through another one. Only one level is allowed.",
+    "bundle_error_parent_not_active" => "Pick an active, recurring subscription to bill through.",
+    "bundle_error_has_children" => "Other subscriptions are billed through this one, so it cannot be included in another.",
+    "optional" => "Optional",
 ];
 
 

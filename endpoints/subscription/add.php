@@ -16,6 +16,7 @@ require_once '../../includes/price_changes.php';
 require_once '../../includes/ai_recommendations.php';
 require_once '../../includes/currency_formatter.php';
 require_once '../../includes/cost_sharing.php';
+require_once '../../includes/bundles.php';
 
 if (!file_exists('../../images/uploads/logos')) {
     mkdir('../../images/uploads/logos', 0777, true);
@@ -310,6 +311,35 @@ if ($isEdit) {
     }
 }
 
+// Bundled subscriptions (issue #24): "Billed through" another subscription.
+// A child takes the parent's cycle, frequency, payment method, payer and
+// next payment; a shared edit keeps the owner's choice.
+$parentSubscriptionId = wallos_sanitize_parent_id($_POST['parent_subscription_id'] ?? null);
+$allocatedAmount = wallos_sanitize_allocated_amount($_POST['allocated_amount'] ?? null);
+if ($sharedEdit) {
+    $parentSubscriptionId = wallos_sanitize_parent_id($editable['parent_subscription_id'] ?? null);
+    $allocatedAmount = wallos_sanitize_allocated_amount($editable['allocated_amount'] ?? null);
+}
+$bundleParent = null;
+if ($parentSubscriptionId !== null) {
+    $bundleCheck = wallos_bundle_validate_parent($db, $userId, $isEdit ? $_POST['id'] : null, $parentSubscriptionId);
+    if ($bundleCheck['error'] !== null) {
+        rejectForeignId(translate($bundleCheck['error'], $i18n));
+    }
+    $bundleParent = $bundleCheck['parent'];
+    $inherited = wallos_bundle_inherited_fields($bundleParent);
+    $cycle = (string) $inherited['cycle'];
+    $frequency = (string) $inherited['frequency'];
+    $paymentMethodId = $inherited['payment_method_id'];
+    $payerUserId = $inherited['payer_user_id'];
+    $nextPayment = $inherited['next_payment'];
+    $autoRenew = (bool) $inherited['auto_renew'];
+} else {
+    $allocatedAmount = null;
+}
+// Disabling a parent: its children are disabled too, or detached.
+$bundleChildrenAction = wallos_bundle_children_action($_POST['bundle_children_action'] ?? 'disable');
+
 // Store the price at the precision its currency shows (Settings > Currencies > Decimals).
 $priceCurrencyStmt = $db->prepare('SELECT code, decimals FROM currencies WHERE id = :id AND user_id = :userId');
 $priceCurrencyStmt->bindValue(':id', (int) $currencyId, SQLITE3_INTEGER);
@@ -587,7 +617,8 @@ if (!$isEdit) {
                         auto_renew, start_date, logo_text_color, logo_variant,
                         billing_anchor_day, renew_from_action, variable_amount, end_date,
                         total_payments, payments_made, ended_reason, plan_mode, tier_name, active_months,
-                        reimbursed_percent, reimbursed_reason, description
+                        reimbursed_percent, reimbursed_reason, description,
+                        parent_subscription_id, allocated_amount
                     ) VALUES (
                         :name, :logo, :price, :currencyId, :nextPayment, :cycle, :frequency, :notes,
                         :paymentMethodId, :payerUserId, :categoryId, :notify, :inactive, :url,
@@ -595,7 +626,8 @@ if (!$isEdit) {
                         :autoRenew, :startDate, :logoTextColor, :logoVariant,
                         :billingAnchorDay, :renewFromAction, :variableAmount, :endDate,
                         :totalPayments, :paymentsMade, :endedReason, :planMode, :tierName, :activeMonths,
-                        :reimbursedPercent, :reimbursedReason, :description
+                        :reimbursedPercent, :reimbursedReason, :description,
+                        :parentSubscriptionId, :allocatedAmount
                     )";
 } else {
     $id = $_POST['id'];
@@ -646,7 +678,9 @@ if (!$isEdit) {
                         active_months = :activeMonths,
                         reimbursed_percent = :reimbursedPercent,
                         reimbursed_reason = :reimbursedReason,
-                        description = :description";
+                        description = :description,
+                        parent_subscription_id = :parentSubscriptionId,
+                        allocated_amount = :allocatedAmount";
 
     if ($logo != "") {
         $sql .= ", logo = :logo, logo_text_color = :logoTextColor, logo_variant = :logoVariant";
@@ -696,6 +730,8 @@ $stmt->bindValue(':activeMonths', $activeMonths, SQLITE3_INTEGER);
 $stmt->bindValue(':reimbursedPercent', $reimbursedPercent, SQLITE3_FLOAT);
 $stmt->bindValue(':reimbursedReason', $reimbursedReason, $reimbursedReason === null ? SQLITE3_NULL : SQLITE3_TEXT);
 $stmt->bindValue(':description', $description, SQLITE3_TEXT);
+$stmt->bindValue(':parentSubscriptionId', $parentSubscriptionId, $parentSubscriptionId === null ? SQLITE3_NULL : SQLITE3_INTEGER);
+$stmt->bindValue(':allocatedAmount', $allocatedAmount, $allocatedAmount === null ? SQLITE3_NULL : SQLITE3_FLOAT);
 
 // The row, its cancellation notice, intro period and sharing are saved as
 // one unit: if any part fails, nothing is saved and the form stays open.
@@ -725,6 +761,16 @@ if ($saved) {
         if ($saved && !$sharedEdit) {
             $saved = wallos_store_subscription_shares($db, $savedId, $userId, $sharesInput['shares']);
         }
+        // A parent's children follow its schedule, payment method and payer,
+        // and are disabled (or detached) with it.
+        if ($saved && $isEdit) {
+            if ($inactive) {
+                $saved = wallos_bundle_on_parent_disabled($db, $userId, $savedId, $sharedEdit ? 'disable' : $bundleChildrenAction);
+            }
+            if ($saved) {
+                $saved = wallos_bundle_sync_children($db, $userId, $savedId);
+            }
+        }
         if ($saved && !$sharedEdit) {
             // Private, or shared with the owner's household.
             $saved = wallos_set_subscription_sharing($db, $userId, $savedId, ($_POST['visibility'] ?? 'private') === 'household'
@@ -746,6 +792,12 @@ if ($saved) {
     $success['message'] = translate('subscription_' . $text . '_successfuly', $i18n);
     if ($logoError !== "") {
         $success['logo_warning'] = $logoError;
+    }
+    // Allocations above the parent's price are allowed, with a warning.
+    $warnParentId = $bundleParent !== null ? (int) $bundleParent['id'] : (int) $savedId;
+    $warnParentPrice = $bundleParent !== null ? $bundleParent['price'] : $price;
+    if (wallos_bundle_allocations_exceed($warnParentPrice, wallos_bundle_allocated_total($db, $userId, $warnParentId))) {
+        $success['bundle_warning'] = translate('bundle_allocations_exceed_price', $i18n);
     }
 
     // The logo was just replaced: drop the previous files if nothing else uses them.

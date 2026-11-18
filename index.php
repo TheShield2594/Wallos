@@ -30,7 +30,8 @@ $upcomingSubscriptions = get_upcoming_payments(
 $upcomingLimit = normalize_upcoming_payments_limit($settings['upcoming_payments_limit'] ?? 3);
 $todayString = (new DateTime('today'))->format('Y-m-d');
 foreach (wallos_shared_subscriptions($db, $userId, true) as $sharedRow) {
-    if ((int) $sharedRow['cycle'] === 5 || $sharedRow['next_payment'] < $todayString) {
+    // A child is paid through its parent bill (issue #24).
+    if ((int) $sharedRow['cycle'] === 5 || $sharedRow['next_payment'] < $todayString || wallos_is_bundle_child($sharedRow)) {
         continue;
     }
     $sharedRow['price'] = wallos_price_on($sharedRow, $sharedRow['next_payment']);
@@ -40,7 +41,7 @@ usort($upcomingSubscriptions, fn($a, $b) => strcmp($a['next_payment'], $b['next_
 $upcomingSubscriptions = array_slice($upcomingSubscriptions, 0, $upcomingLimit);
 
 // Fetch enabled subscriptions with manual renewal that are overdue
-$stmt = $db->prepare("SELECT id, logo, logo_text_color, logo_variant, name, price, currency_id, next_payment, inactive, auto_renew FROM subscriptions WHERE user_id = :userId AND next_payment < date('now') AND auto_renew = 0 AND inactive = 0 AND cycle != 5 ORDER BY next_payment ASC");
+$stmt = $db->prepare("SELECT id, logo, logo_text_color, logo_variant, name, price, currency_id, next_payment, inactive, auto_renew FROM subscriptions WHERE user_id = :userId AND next_payment < date('now') AND auto_renew = 0 AND inactive = 0 AND cycle != 5 AND " . wallos_standalone_sql() . " ORDER BY next_payment ASC");
 $stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
 $result = $stmt->execute();
 $overdueSubscriptions = [];
