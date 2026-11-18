@@ -157,6 +157,22 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" || $_SERVER["REQUEST_METHOD"] === "GET
         $notification_settings['gotify_notifications'] = $gotify_notifications;
     }
 
+    $query = "SELECT * FROM apprise_notifications WHERE user_id = :userId";
+    $stmt = $db->prepare($query);
+    $stmt->bindValue(':userId', $userId);
+    $result = $stmt->execute();
+    $apprise_notifications = $result ? $result->fetchArray(SQLITE3_ASSOC) : false;
+    if ($apprise_notifications) {
+        unset($apprise_notifications['user_id']);
+        // Stateless Apprise URLs carry third-party tokens.
+        foreach (['urls', 'config_key'] as $secret) {
+            if (!empty($apprise_notifications[$secret])) {
+                $apprise_notifications[$secret] = "********";
+            }
+        }
+        $notification_settings['apprise_notifications'] = $apprise_notifications;
+    }
+
     $query = "SELECT * FROM ntfy_notifications WHERE user_id = :userId";
     $stmt = $db->prepare($query);
     $stmt->bindValue(':userId', $userId);

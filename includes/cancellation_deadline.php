@@ -176,10 +176,28 @@ function wallos_cancel_locked_until(array $subscription)
 function wallos_cancellation_due(array $subscription, $today)
 {
     $deadline = wallos_cancel_deadline($subscription);
-    if ($deadline === null || $deadline['cancel_by'] > $today) {
+    if ($deadline === null) {
         return null;
     }
-    if (($subscription['last_cancel_notified_for'] ?? null) === $deadline['cancel_by']) {
+    $marker = $subscription['last_cancel_notified_for'] ?? null;
+
+    // A lead time (issue #40): one reminder N days before the cancel-by date,
+    // and the usual one on the date itself. The lead reminder is stored as
+    // "lead:<cancel-by>", so the one on the date is still due afterwards.
+    $lead = wallos_cancel_lead_days($subscription);
+    if ($lead > 0 && $deadline['cancel_by'] > $today) {
+        $leadStart = (new DateTime($deadline['cancel_by']))->modify('-' . $lead . ' days')->format('Y-m-d');
+        if ($today < $leadStart || $marker === $deadline['cancel_by'] || $marker === 'lead:' . $deadline['cancel_by']) {
+            return null;
+        }
+
+        return $deadline + ['stage' => 'lead', 'marker' => 'lead:' . $deadline['cancel_by']];
+    }
+
+    if ($deadline['cancel_by'] > $today) {
+        return null;
+    }
+    if ($marker === $deadline['cancel_by']) {
         return null;
     }
     if ($deadline['renewal'] !== null) {
@@ -194,7 +212,17 @@ function wallos_cancellation_due(array $subscription, $today)
         }
     }
 
-    return $deadline;
+    return $deadline + ['stage' => 'final', 'marker' => $deadline['cancel_by']];
+}
+
+/**
+ * Days before the cancel-by date to send an early reminder (0 = none).
+ */
+function wallos_cancel_lead_days(array $subscription)
+{
+    $lead = (int) ($subscription['cancellation_notify_days_before'] ?? 0);
+
+    return max(0, min(365, $lead));
 }
 
 /**

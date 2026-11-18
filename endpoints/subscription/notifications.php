@@ -25,7 +25,11 @@ if ($notifyDaysBefore < -1 || $notifyDaysBefore > 180) {
 }
 
 // One-time purchases never notify, matching the add/edit form.
-$stmt = $db->prepare("UPDATE subscriptions SET notify = :notify, notify_days_before = :days
+// Choosing a different single lead time replaces a list of reminders
+// (subscriptions.reminder_days); toggling with the same value keeps it.
+$stmt = $db->prepare("UPDATE subscriptions SET notify = :notify,
+    reminder_days = CASE WHEN notify_days_before IS :days THEN reminder_days ELSE NULL END,
+    notify_days_before = :days
     WHERE id = :id AND user_id = :userId AND cycle != 5");
 $stmt->bindValue(':notify', $notify, SQLITE3_INTEGER);
 $stmt->bindValue(':days', $notifyDaysBefore, SQLITE3_INTEGER);

@@ -229,6 +229,19 @@ if ($userIdToDelete == 1 || $userIdToDelete != $userId) {
     $stmt->bindValue(':id', $userIdToDelete, SQLITE3_INTEGER);
     $result = $stmt->execute();
 
+    // Apprise settings, message templates and the reminder send log
+    $stmt = $db->prepare('DELETE FROM apprise_notifications WHERE user_id = :id');
+    $stmt->bindValue(':id', $userIdToDelete, SQLITE3_INTEGER);
+    $result = $stmt->execute();
+
+    $stmt = $db->prepare('DELETE FROM notification_templates WHERE user_id = :id');
+    $stmt->bindValue(':id', $userIdToDelete, SQLITE3_INTEGER);
+    $result = $stmt->execute();
+
+    $stmt = $db->prepare('DELETE FROM notification_log WHERE user_id = :id');
+    $stmt->bindValue(':id', $userIdToDelete, SQLITE3_INTEGER);
+    $result = $stmt->execute();
+
     // The account's rows are gone; drop its logo files that nothing else uses.
     foreach (array_unique(array_filter($logoFilesToCheck)) as $logoFile) {
         deleteLogoFileIfUnused($db, $logoFile, '../../images/uploads/logos/');

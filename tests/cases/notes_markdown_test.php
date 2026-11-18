@@ -118,12 +118,14 @@ wallos_test('a note that ends in a quotation mark survives the escape', function
     }
 });
 
-wallos_test('both notification crons escape notes through the shared webhook helper', function () {
-    foreach (['endpoints/cronjobs/sendnotifications.php', 'endpoints/cronjobs/sendcancellationnotifications.php'] as $file) {
-        $source = file_get_contents(WALLOS_ROOT . '/' . $file);
+wallos_test('both reminder kinds pass notes to the webhook through the shared helper', function () {
+    require_once WALLOS_ROOT . '/includes/notifications/dispatch.php';
 
-        // webhookFillPayload() runs every value, notes included, through webhookJsonEscape().
-        assert_contains('\'subscription_notes\' => $subscription[\'notes\']', $source,
-            $file . ' escapes notes before templating them into the webhook payload');
+    // webhookFillPayload() runs every value, notes included, through webhookJsonEscape().
+    foreach (['payment', 'cancellation'] as $kind) {
+        $values = WallosWebhookChannel::placeholders($kind, ['notes' => "line \"one\"\nline two"], 'Ann');
+        $payload = webhookFillPayload('{"notes":"{{subscription_notes}}"}', $values);
+        assert_same(['notes' => "line \"one\"\nline two"], json_decode($payload, true),
+            $kind . ' reminders keep the webhook payload valid JSON whatever the notes hold');
     }
 });

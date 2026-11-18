@@ -4,9 +4,9 @@
   they have no recurring commitment to cancel, and the subscription form clears
   their cancellation date.
 
-  The cron's query is inline (the file requires PHPMailer and the notification
-  providers, so it cannot be included here), so the test reads the statement out
-  of the file and runs that — asserting against the real SQL, not a copy of it.
+  The cron's candidate query is WALLOS_CANCELLATION_CANDIDATES_SQL
+  (includes/notifications/schedule.php), so the test runs the real SQL, not a
+  copy of it.
 */
 
 /**
@@ -16,13 +16,9 @@
  */
 function cancellation_cron_query()
 {
-    $source = file_get_contents(WALLOS_ROOT . '/endpoints/cronjobs/sendcancellationnotifications.php');
+    require_once WALLOS_ROOT . '/includes/notifications/schedule.php';
 
-    if (!preg_match('/\$query = "(SELECT \* FROM subscriptions WHERE[^"]+)";/', $source, $matches)) {
-        return '';
-    }
-
-    return $matches[1];
+    return WALLOS_CANCELLATION_CANDIDATES_SQL;
 }
 
 /**
@@ -54,9 +50,12 @@ function cancellation_cron_names($db, $userId, $today = null)
     return $names;
 }
 
-wallos_test('the cancellation cron query was found in the cron', function () {
+wallos_test('the cancellation cron collects its reminders with the shared query', function () {
     assert_contains('cancellation_date', cancellation_cron_query(),
-        'the cron still selects subscriptions by cancellation date');
+        'the query still selects subscriptions by cancellation date');
+    $source = file_get_contents(WALLOS_ROOT . '/endpoints/cronjobs/sendcancellationnotifications.php');
+    assert_contains('wallos_collect_cancellation_reminders(', $source, 'the cron collects through the shared helper');
+    assert_contains('wallos_dispatch_notifications(', $source, 'and sends through the shared dispatcher');
 });
 
 wallos_test('the cancellation cron skips one-time purchases due today', function () {
@@ -169,20 +168,6 @@ wallos_test('the potential-savings total normalizes each cycle and converts each
         'nothing flagged means nothing to save');
 });
 
-wallos_test('the cancellation cron keeps the account id while looping over household members', function () {
-    $source = file_get_contents(WALLOS_ROOT . '/endpoints/cronjobs/sendcancellationnotifications.php');
-
-    // Reusing $userId as the loop key replaced the account id with a household
-    // member id, so every channel after email ran its SSRF check (and its
-    // household lookup) against the wrong account.
-    assert_not_contains('foreach ($notify as $userId', $source,
-        'no channel loop overwrites $userId');
-    assert_not_contains("household WHERE id = :userId'", $source,
-        'household lookups are not by id alone');
-    assert_same(7, substr_count($source, "household WHERE id = :id AND user_id = :ownerId"),
-        'every channel looks up the payer within the owning account');
-});
-
 wallos_test('only delivered reminders are marked as sent, per reminder and per type', function () {
     require_once WALLOS_ROOT . '/includes/cancellation_deadline.php';
 
@@ -206,20 +191,6 @@ wallos_test('only delivered reminders are marked as sent, per reminder and per t
     assert_same([4 => 'converted:2026-12-04'], wallos_delivered_markers([4 => 'converted:2026-12-04'], $delivered, 'intro'), 'and the trial notice');
 
     assert_same([], wallos_delivered_markers([5 => 'b'], [], 'cancel'), 'nothing delivered, nothing marked');
-});
-
-wallos_test('the cancellation cron counts an HTTP error answer as undelivered', function () {
-    $source = file_get_contents(WALLOS_ROOT . '/endpoints/cronjobs/sendcancellationnotifications.php');
-
-    assert_same(5, substr_count($source, '$httpCode < 200 || $httpCode >= 300'),
-        'Discord, Gotify, Pushover, ntfy and the webhook accept only a 2xx answer');
-    assert_contains('wallos_notification_http_delivered($httpCode, $result, true)', $source,
-        'Telegram also checks the "ok" field of its answer');
-    assert_same(6, substr_count($source, 'wallos_notifications_delivered($delivered, $perUser)'),
-        'every per-payer channel records the reminders it delivered');
-    assert_contains('wallos_notifications_delivered($delivered, [$subscription])', $source,
-        'the webhook records each reminder on its own');
-    assert_not_contains('deliveredPayers', $source, 'no per-payer shortcut is left');
 });
 
 wallos_test('a Telegram answer counts as delivered only with "ok": true', function () {

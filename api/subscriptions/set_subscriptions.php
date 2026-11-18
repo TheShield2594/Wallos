@@ -23,7 +23,10 @@ For 'add' and 'edit' actions (all optional for 'edit'):
 - logo_url: an image URL to download as the logo (string).
 - logo: direct image file upload for the logo.
 - notify / notifications: whether to send payment notifications (1 or 0).
-- notify_days_before: how many days before to send notification (integer).
+- notify_days_before: how many days before to send notification (integer, -1 = the account default). Setting it on its own replaces a list of reminders with this one.
+- reminder_days: several reminders, as a comma-separated list of days before the payment (e.g. "7,3,0"); notify_days_before is then the largest.
+- cancellation_notify_days_before: an extra reminder this many days before the cancel-by date (integer, 0 = none).
+- mute_payment_until_cancellation: 1 to send no payment reminders for payments up to the cancel-by date.
 - inactive: whether the subscription is inactive (1 or 0).
 - cancellation_date: the cancellation date (YYYY-MM-DD).
 - cancel_notice_mode: 'none', 'fixed' (remind on cancellation_date) or 'before_renewal'.
@@ -65,6 +68,7 @@ require_once '../../includes/intro_pricing.php';
 require_once '../../includes/households.php';
 require_once '../../includes/price_changes.php';
 require_once '../../includes/recurrence.php';
+require_once '../../includes/notifications/schedule.php';
 
 /**
  * The active_months parameter (issue #25): the stored mask when absent, every
@@ -162,9 +166,32 @@ function api_extra_fields($existing, $cycle)
         }
     }
 
+    // Reminders (issues #39, #40). reminder_days sets several offsets; a
+    // notify_days_before on its own replaces them with that single one, so
+    // clients that only know the single field keep working.
+    $reminders = null;
+    if (isset($_POST['reminder_days']) || isset($_POST['notify_days_before'])
+        || isset($_POST['cancellation_notify_days_before']) || isset($_POST['mute_payment_until_cancellation'])) {
+        $reminderInput = [
+            'notify_days_before' => $_POST['notify_days_before'] ?? ($existing['notify_days_before'] ?? -1),
+            'reminder_days' => isset($_POST['reminder_days'])
+                ? $_POST['reminder_days']
+                : (isset($_POST['notify_days_before']) ? null : ($existing['reminder_days'] ?? null)),
+            'cancellation_notify_days_before' => $_POST['cancellation_notify_days_before'] ?? ($existing['cancellation_notify_days_before'] ?? 0),
+            'mute_payment_until_cancellation' => $_POST['mute_payment_until_cancellation'] ?? ($existing['mute_payment_until_cancellation'] ?? 0),
+        ];
+        if (($reminderInput['notify_days_before'] === '' || $reminderInput['notify_days_before'] === null)) {
+            $reminderInput['notify_days_before'] = -1;
+        }
+        $reminders = wallos_reminder_fields_from_input($reminderInput);
+    }
+
     // Returns false when a write failed; the caller rolls the save back.
-    return ['error' => null, 'apply' => function ($db, $subscriptionId, $userId) use ($cancel, $intro, $shared) {
+    return ['error' => null, 'apply' => function ($db, $subscriptionId, $userId) use ($cancel, $intro, $shared, $reminders) {
         if (!wallos_store_cancel_fields($db, $subscriptionId, $userId, $cancel['fields'])) {
+            return false;
+        }
+        if ($reminders !== null && !wallos_store_reminder_fields($db, $subscriptionId, $userId, $reminders)) {
             return false;
         }
         if ($shared !== null && !wallos_set_subscription_sharing($db, $userId, $subscriptionId, $shared)['success']) {

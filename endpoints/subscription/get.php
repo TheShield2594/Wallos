@@ -55,6 +55,9 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
             $subscriptionData['inactive'] = $row['inactive'];
             $subscriptionData['url'] = htmlspecialchars_decode($row['url'] ?? "");
             $subscriptionData['notify_days_before'] = $row['notify_days_before'];
+            $subscriptionData['reminder_days'] = $row['reminder_days'] ?? null;
+            $subscriptionData['cancellation_notify_days_before'] = (int) ($row['cancellation_notify_days_before'] ?? 0);
+            $subscriptionData['mute_payment_until_cancellation'] = (int) ($row['mute_payment_until_cancellation'] ?? 0);
             $subscriptionData['cancellation_date'] = $row['cancellation_date'];
             $subscriptionData['cancel_notice_mode'] = wallos_cancel_mode($row);
             $subscriptionData['cancel_notice_value'] = $row['cancel_notice_value'] === null ? null : (int) $row['cancel_notice_value'];

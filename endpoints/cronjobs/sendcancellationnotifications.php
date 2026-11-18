@@ -1,787 +1,89 @@
 <?php
-use PHPMailer\PHPMailer\PHPMailer;
-use PHPMailer\PHPMailer\SMTP;
-use PHPMailer\PHPMailer\Exception;
+/*
+  Cancellation, free-trial and promo reminders.
+
+  Runs every 15 minutes (see the cronjobs file) and processes each account
+  once a day at its "Send at" time, like sendnotifications.php. Run from the
+  admin page, or with --force on the command line, every account is
+  processed now.
+
+  Which reminders are due: wallos_cancellation_due() and the intro helpers,
+  collected by wallos_collect_cancellation_reminders(). Every channel the
+  payment reminders use goes out here too, through the same dispatcher.
+*/
 
 require_once 'validate.php';
 require_once __DIR__ . '/../../includes/connect_endpoint_crontabs.php';
-require_once __DIR__ . '/../../includes/ssrf_helper.php';
-require_once __DIR__ . '/../../includes/webhook_helper.php';
-require_once __DIR__ . '/../../includes/cancellation_deadline.php';
-require_once __DIR__ . '/../../includes/intro_pricing.php';
+require_once __DIR__ . '/../../includes/notifications/dispatch.php';
+require_once __DIR__ . '/../../includes/notifications/schedule.php';
+require_once __DIR__ . '/../../includes/currency_formatter.php';
 
-require __DIR__ . '/../../libs/PHPMailer/PHPMailer.php';
-require __DIR__ . '/../../libs/PHPMailer/SMTP.php';
-require __DIR__ . '/../../libs/PHPMailer/Exception.php';
+require_once __DIR__ . '/../../libs/PHPMailer/PHPMailer.php';
+require_once __DIR__ . '/../../libs/PHPMailer/SMTP.php';
+require_once __DIR__ . '/../../libs/PHPMailer/Exception.php';
 
 require 'settimezone.php';
 
-// Get all user ids
-$query = "SELECT id, username FROM user";
-$stmt = $db->prepare($query);
-$usersToNotify = $stmt->execute();
-
-while ($userToNotify = $usersToNotify->fetchArray(SQLITE3_ASSOC)) {
-    $userId = $userToNotify['id'];
-    if (php_sapi_name() !== 'cli') {
-        echo "For user: " . $userToNotify['username'] . "<br />";
-    }
-
-    $emailNotificationsEnabled = false;
-    $gotifyNotificationsEnabled = false;
-    $telegramNotificationsEnabled = false;
-    $pushoverNotificationsEnabled = false;
-    $discordNotificationsEnabled = false;
-    $ntfyNotificationsEnabled = false;
-    $webhookNotificationsEnabled = false;
-
-    // Check if email notifications are enabled and get the settings
-    $query = "SELECT * FROM email_notifications WHERE user_id = :userId";
-    $stmt = $db->prepare($query);
-    $stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
-    $result = $stmt->execute();
-
-    if ($row = $result->fetchArray(SQLITE3_ASSOC)) {
-        $emailNotificationsEnabled = $row['enabled'];
-        $email['smtpAddress'] = $row["smtp_address"];
-        $email['smtpPort'] = $row["smtp_port"];
-        $email['encryption'] = $row["encryption"];
-        $email['smtpUsername'] = $row["smtp_username"];
-        $email['smtpPassword'] = $row["smtp_password"];
-        $email['fromEmail'] = $row["from_email"] ? $row["from_email"] : "wallos@wallosapp.com";
-        $email['otherEmails'] = $row["other_emails"];
-    }
-
-    // Check if Discord notifications are enabled and get the settings
-    $query = "SELECT * FROM discord_notifications WHERE user_id = :userId";
-    $stmt = $db->prepare($query);
-    $stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
-    $result = $stmt->execute();
-
-    if ($row = $result->fetchArray(SQLITE3_ASSOC)) {
-        $discordNotificationsEnabled = $row['enabled'];
-        $discord['webhook_url'] = $row["webhook_url"];
-        $discord['bot_username'] = $row["bot_username"];
-        $discord['bot_avatar_url'] = $row["bot_avatar_url"];
-    }
-
-    // Check if Gotify notifications are enabled and get the settings
-    $query = "SELECT * FROM gotify_notifications WHERE user_id = :userId";
-    $stmt = $db->prepare($query);
-    $stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
-    $result = $stmt->execute();
-
-    $gotify = [];
-
-    if ($row = $result->fetchArray(SQLITE3_ASSOC)) {
-        $gotifyNotificationsEnabled = $row['enabled'];
-        $gotify['serverUrl'] = $row["url"];
-        $gotify['appToken'] = $row["token"];
-        $gotify['ignore_ssl'] = $row["ignore_ssl"];
-    }
-
-    // Check if Telegram notifications are enabled and get the settings
-    $query = "SELECT * FROM telegram_notifications WHERE user_id = :userId";
-    $stmt = $db->prepare($query);
-    $stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
-    $result = $stmt->execute();
-
-    if ($row = $result->fetchArray(SQLITE3_ASSOC)) {
-        $telegramNotificationsEnabled = $row['enabled'];
-        $telegram['botToken'] = $row["bot_token"];
-        $telegram['chatId'] = $row["chat_id"];
-    }
-
-    // Check if Pushover notifications are enabled and get the settings
-    $query = "SELECT * FROM pushover_notifications WHERE user_id = :userId";
-    $stmt = $db->prepare($query);
-    $stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
-    $result = $stmt->execute();
-
-    if ($row = $result->fetchArray(SQLITE3_ASSOC)) {
-        $pushoverNotificationsEnabled = $row['enabled'];
-        $pushover['user_key'] = $row["user_key"];
-        $pushover['token'] = $row["token"];
-    }
-
-    // Check if Ntfy notifications are enabled and get the settings
-    $query = "SELECT * FROM ntfy_notifications WHERE user_id = :userId";
-    $stmt = $db->prepare($query);
-    $stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
-    $result = $stmt->execute();
-
-    if ($row = $result->fetchArray(SQLITE3_ASSOC)) {
-        $ntfyNotificationsEnabled = $row['enabled'];
-        $ntfy['host'] = $row["host"];
-        $ntfy['topic'] = $row["topic"];
-        $ntfy['headers'] = $row["headers"];
-        $ntfy['ignore_ssl'] = $row["ignore_ssl"];
-    }
-
-    // Check if webhook notifications are enabled and have cancelation payload set and get the settings
-    $query = "SELECT * FROM webhook_notifications WHERE user_id = :userId";
-    $stmt = $db->prepare($query);
-    $stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
-    $result = $stmt->execute();
-
-    $webhook = [];
-    if ($row = $result->fetchArray(SQLITE3_ASSOC)) {
-        $webhook['url'] = $row["url"];
-        $webhook['headers'] = $row["headers"];
-        $webhook['cancelation_payload'] = $row["cancelation_payload"];
-        $webhook['ignore_ssl'] = $row["ignore_ssl"];
-        $webhook['request_method'] = $row["request_method"];
-        $webhookNotificationsEnabled = $row['enabled'] && $row['cancelation_payload'] != "";
-    }
-
-    $notificationsEnabled = $emailNotificationsEnabled || $gotifyNotificationsEnabled || $telegramNotificationsEnabled ||
-        $pushoverNotificationsEnabled || $discordNotificationsEnabled ||$ntfyNotificationsEnabled || $webhookNotificationsEnabled;
-
-    // If no notifications are enabled, no need to run
-    if (!$notificationsEnabled) {
-        if (php_sapi_name() !== 'cli') {
-            echo "Notifications are disabled. No need to run.<br />";
-        }
-        continue;
-    } else {
-        // Get all currencies
-        $currencies = array();
-        $query = "SELECT * FROM currencies WHERE user_id = :userId";
-        $stmt = $db->prepare($query);
-        $stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
-        $result = $stmt->execute();
-
-        while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
-            $currencies[$row['id']] = $row;
-        }
-
-        // Get all household members
-        $query = "SELECT * FROM household WHERE user_id = :userId";
-        $stmt = $db->prepare($query);
-        $stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
-        $resultHousehold = $stmt->execute();
-
-        $household = [];
-        while ($rowHousehold = $resultHousehold->fetchArray(SQLITE3_ASSOC)) {
-            $household[$rowHousehold['id']] = $rowHousehold;
-        }
-
-        // Get all categories
-        $query = "SELECT * FROM categories WHERE user_id = :userId";
-        $stmt = $db->prepare($query);
-        $stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
-        $resultCategories = $stmt->execute();
-
-        $categories = [];
-        while ($rowCategory = $resultCategories->fetchArray(SQLITE3_ASSOC)) {
-            $categories[$rowCategory['id']] = $rowCategory;
-        }
-
-        // Get current date to check which subscriptions are set to notify for cancellation
-        $currentDate = new DateTime('now');
-        $currentDate = $currentDate->format('Y-m-d');
-
-        // Candidates: active, recurring subscriptions with a cancellation
-        // notice. Whether the reminder is due today is decided by
-        // wallos_cancellation_due(): from the cancel-by date (a fixed date, or
-        // N days/months before the next renewal) until that renewal, once.
-        // One-time purchases have no recurring commitment to cancel.
-        $query = "SELECT * FROM subscriptions WHERE user_id = :user_id AND inactive = :inactive AND cycle != :oneTimeCycle AND (cancel_notice_mode = 'before_renewal' OR (cancellation_date IS NOT NULL AND cancellation_date != '' AND COALESCE(cancel_notice_mode, 'fixed') = 'fixed')) ORDER BY payer_user_id ASC";
-        $stmt = $db->prepare($query);
-        $stmt->bindValue(':user_id', $userId, SQLITE3_INTEGER);
-        $stmt->bindValue(':inactive', 0, SQLITE3_INTEGER);
-        $stmt->bindValue(':oneTimeCycle', 5, SQLITE3_INTEGER);
-        $resultSubscriptions = $stmt->execute();
-
-        $notify = [];
-        $remindedDeadlines = [];
-        // Reminders at least one channel delivered (keyed by
-        // wallos_notification_key()); only those are marked as sent, so a
-        // failed delivery is tried again next run.
-        $delivered = [];
-        $i = 0;
-        while ($rowSubscription = $resultSubscriptions->fetchArray(SQLITE3_ASSOC)) {
-            $deadline = wallos_cancellation_due($rowSubscription, $currentDate);
-            if ($deadline === null) {
-                continue;
-            }
-            $remindedDeadlines[$rowSubscription['id']] = $deadline['cancel_by'];
-            $deadlineNote = $deadline['renewal'] !== null
-                ? " (cancel by " . $deadline['cancel_by'] . " to avoid the renewal on " . $deadline['renewal'] . ")"
-                : "";
-            $notify[$rowSubscription['payer_user_id']][$i]['name'] = $rowSubscription['name'];
-            $notify[$rowSubscription['payer_user_id']][$i]['price'] = $rowSubscription['price'] . $currencies[$rowSubscription['currency_id']]['symbol'];
-            $notify[$rowSubscription['payer_user_id']][$i]['currency'] = $currencies[$rowSubscription['currency_id']]['name'];
-            $notify[$rowSubscription['payer_user_id']][$i]['category'] = $categories[$rowSubscription['category_id']]['name'];
-            $notify[$rowSubscription['payer_user_id']][$i]['payer'] = $household[$rowSubscription['payer_user_id']]['name'];
-            $notify[$rowSubscription['payer_user_id']][$i]['date'] = $rowSubscription['next_payment'];
-            $notify[$rowSubscription['payer_user_id']][$i]['cancel_by'] = $deadline['cancel_by'];
-            $notify[$rowSubscription['payer_user_id']][$i]['deadline_note'] = $deadlineNote;
-            $notify[$rowSubscription['payer_user_id']][$i]['key'] = wallos_notification_key('cancel', $rowSubscription['id']);
-            $notify[$rowSubscription['payer_user_id']][$i]['url'] = $rowSubscription['url'];
-            $notify[$rowSubscription['payer_user_id']][$i]['notes'] = $rowSubscription['notes'];
-            $i++;
-        }
-
-        // Free trials and promos: a reminder before the regular price starts,
-        // and a one-off notice once it has (see includes/intro_pricing.php).
-        // They go out through the same channels as cancellation reminders,
-        // since both are the moment to decide whether to keep paying.
-        $query = "SELECT * FROM subscriptions WHERE user_id = :user_id AND inactive = 0 AND (intro_type IS NOT NULL OR intro_converted_on IS NOT NULL) ORDER BY payer_user_id ASC";
-        $stmt = $db->prepare($query);
-        $stmt->bindValue(':user_id', $userId, SQLITE3_INTEGER);
-        $resultIntro = $stmt->execute();
-
-        $remindedIntros = [];
-        while ($rowSubscription = $resultIntro->fetchArray(SQLITE3_ASSOC)) {
-            $symbol = $currencies[$rowSubscription['currency_id']]['symbol'];
-            if (wallos_intro_ending_due($rowSubscription, $currentDate)) {
-                $remindedIntros[$rowSubscription['id']] = $rowSubscription['intro_end_date'];
-                $deadlineNote = ($rowSubscription['intro_type'] === 'trial' ? " (free trial ends " : " (intro price ends ")
-                    . $rowSubscription['intro_end_date'] . ", then " . $rowSubscription['price'] . $symbol . ")";
-                $cancelBy = $rowSubscription['intro_end_date'];
-                $price = wallos_intro_price($rowSubscription) . $symbol;
-            } elseif (wallos_intro_converted_due($rowSubscription, $currentDate)) {
-                $remindedIntros[$rowSubscription['id']] = 'converted:' . $rowSubscription['intro_converted_on'];
-                $deadlineNote = " (intro period ended " . $rowSubscription['intro_converted_on'] . "; the regular price now applies)";
-                $cancelBy = $rowSubscription['intro_converted_on'];
-                $price = $rowSubscription['price'] . $symbol;
-            } else {
-                continue;
-            }
-            $notify[$rowSubscription['payer_user_id']][$i]['name'] = $rowSubscription['name'];
-            $notify[$rowSubscription['payer_user_id']][$i]['price'] = $price;
-            $notify[$rowSubscription['payer_user_id']][$i]['currency'] = $currencies[$rowSubscription['currency_id']]['name'];
-            $notify[$rowSubscription['payer_user_id']][$i]['category'] = $categories[$rowSubscription['category_id']]['name'];
-            $notify[$rowSubscription['payer_user_id']][$i]['payer'] = $household[$rowSubscription['payer_user_id']]['name'];
-            $notify[$rowSubscription['payer_user_id']][$i]['date'] = $rowSubscription['next_payment'];
-            $notify[$rowSubscription['payer_user_id']][$i]['cancel_by'] = $cancelBy;
-            $notify[$rowSubscription['payer_user_id']][$i]['deadline_note'] = $deadlineNote;
-            $notify[$rowSubscription['payer_user_id']][$i]['key'] = wallos_notification_key('intro', $rowSubscription['id']);
-            $notify[$rowSubscription['payer_user_id']][$i]['url'] = $rowSubscription['url'];
-            $notify[$rowSubscription['payer_user_id']][$i]['notes'] = $rowSubscription['notes'];
-            $i++;
-        }
-
-        if (!empty($notify)) {
-
-            // Email notifications if enabled
-            if ($emailNotificationsEnabled) {
-                try {
-                    // Re-validate at send time: a save-time check alone is bypassable via
-                    // DNS rebinding between when the host was saved and when the cron fires.
-                    if (!validate_smtp_host($email['smtpAddress'], (int) $email['smtpPort'], $db)) {
-                        echo "SSRF attempt detected for SMTP host. Email notifications not sent.<br />";
-                    } else {
-                        $stmt = $db->prepare('SELECT * FROM user WHERE id = :user_id');
-                        $stmt->bindValue(':user_id', $userId, SQLITE3_INTEGER);
-                        $result = $stmt->execute();
-                        $defaultUser = $result->fetchArray(SQLITE3_ASSOC);
-                        $defaultEmail = $defaultUser['email'];
-                        $defaultName = $defaultUser['username'];
-
-                        foreach ($notify as $payerUserId => $perUser) {
-                            $message = "The following subscriptions are up for cancellation:\n";
-
-                            foreach ($perUser as $subscription) {
-                                $message .= $subscription['name'] . " for " . $subscription['price'] . $subscription['deadline_note'] ."\n";
-                            }
-
-                            $smtpAuth = (isset($email["smtpUsername"]) && $email["smtpUsername"] != "") || (isset($email["smtpPassword"]) && $email["smtpPassword"] != "");
-
-                            $mail = new PHPMailer(true);
-                            $mail->CharSet = "UTF-8";
-                            $mail->isSMTP();
-                            $mail->Timeout = 15;
-
-                            $mail->Host = $email['smtpAddress'];
-                            $mail->SMTPAuth = $smtpAuth;
-                            if ($smtpAuth) {
-                                $mail->Username = $email['smtpUsername'];
-                                $mail->Password = $email['smtpPassword'];
-                            }
-                            if ($email['encryption'] != "none") {
-                                $mail->SMTPSecure = $email['encryption'];
-                            }
-                            $mail->Port = $email['smtpPort'];
-
-                            $stmt = $db->prepare('SELECT * FROM household WHERE id = :id AND user_id = :ownerId');
-                            $stmt->bindValue(':id', $payerUserId, SQLITE3_INTEGER);
-                            $stmt->bindValue(':ownerId', $userId, SQLITE3_INTEGER);
-                            $result = $stmt->execute();
-                            $user = $result->fetchArray(SQLITE3_ASSOC);
-
-                            $emailaddress = !empty($user['email']) ? $user['email'] : $defaultEmail;
-                            $name = !empty($user['name']) ? $user['name'] : $defaultName;
-
-                            try {
-                                $mail->setFrom($email['fromEmail'], 'Tally');
-                                $mail->addAddress($emailaddress, $name);
-
-                                if (!empty($email['otherEmails'])) {
-                                    $list = explode(';', $email['otherEmails']);
-
-                                    // Avoid duplicate emails
-                                    $list = array_unique($list);
-                                    $list = array_filter($list, function ($value) use ($emailaddress) {
-                                        return $value !== $emailaddress;
-                                    });
-
-                                    foreach($list as $value) {
-                                        $mail->addCC(trim($value));
-                                    }
-                                }
-
-                                $mail->Subject = 'Tally Cancellation Notification';
-                                $mail->Body = $message;
-
-                                if ($mail->send()) {
-                                    echo "Email Notifications sent<br />";
-                                    wallos_notifications_delivered($delivered, $perUser);
-                                } else {
-                                    echo "Error sending notifications: " . $mail->ErrorInfo . "<br />";
-                                }
-                            } catch (\Throwable $e) {
-                                // Keep going: the next recipient may well be deliverable.
-                                echo "Error sending email notification to " . $emailaddress . ": " . $e->getMessage() . "<br />";
-                            }
-                        }
-                    }
-                } catch (\Throwable $e) {
-                    // One channel failing (an SMTP error makes PHPMailer throw) must not
-                    // stop the channels after it, or every user after this one.
-                    echo "Error sending Email notifications: " . $e->getMessage() . "<br />";
-                }
-            }
-
-            // Discord notifications if enabled
-            if ($discordNotificationsEnabled) {
-                try {
-                    $ssrf = is_url_safe_for_ssrf($discord['webhook_url'], $db, $userId);
-                    if (!$ssrf) {
-                        echo "Discord notification skipped: URL failed SSRF validation.<br />";
-                    } else {
-                        foreach ($notify as $payerUserId => $perUser) {
-                            // Get name of user from household table
-                            $stmt = $db->prepare('SELECT * FROM household WHERE id = :id AND user_id = :ownerId');
-                            $stmt->bindValue(':id', $payerUserId, SQLITE3_INTEGER);
-                            $stmt->bindValue(':ownerId', $userId, SQLITE3_INTEGER);
-                            $result = $stmt->execute();
-                            $user = $result->fetchArray(SQLITE3_ASSOC);
-
-                            $title = translate('wallos_notification', $i18n);
-
-                            if ($user['name']) {
-                                $message = $user['name'] . ", the following subscriptions are up for cancellation:\n";
-                            } else {
-                                $message = "The following subscriptions are up for cancellation:\n";
-                            }
-
-                            foreach ($perUser as $subscription) {
-                                $message .= $subscription['name'] . " for " . $subscription['price'] . $subscription['deadline_note'] . "\n";
-                            }
-
-                            $postfields = [
-                                'content' => $message
-                            ];
-
-                            if (!empty($discord['bot_username'])) {
-                                $postfields['username'] = $discord['bot_username'];
-                            }
-
-                            if (!empty($discord['bot_avatar_url'])) {
-                                $postfields['avatar_url'] = $discord['bot_avatar_url'];
-                            }
-
-                            $ch = curl_init();
-
-                            curl_setopt($ch, CURLOPT_URL, $discord['webhook_url']);
-                            curl_setopt($ch, CURLOPT_POST, 1);
-                            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($postfields));
-                            curl_setopt($ch, CURLOPT_HTTPHEADER, [
-                                'Content-Type: application/json'
-                            ]);
-                            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-                            curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
-                            curl_setopt($ch, CURLOPT_TIMEOUT, 15);
-                            curl_setopt($ch, CURLOPT_RESOLVE, ["{$ssrf['host']}:{$ssrf['port']}:{$ssrf['ip']}"]);
-
-                            $response = curl_exec($ch);
-                        
-                            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-                            // A 4xx/5xx answer is not a delivery: the reminder is tried again.
-                            if ($response === false || $httpCode < 200 || $httpCode >= 300) {
-                                echo "Error sending notifications: " . ($response === false ? curl_error($ch) : "HTTP " . $httpCode) . "<br />";
-                            } else {
-                                echo "Discord Notifications sent<br />";
-                                wallos_notifications_delivered($delivered, $perUser);
-                            }
-                        
-                            unset($ch);
-                        }
-                    }
-                } catch (\Throwable $e) {
-                    // One channel failing (an SMTP error makes PHPMailer throw) must not
-                    // stop the channels after it, or every user after this one.
-                    echo "Error sending Discord notifications: " . $e->getMessage() . "<br />";
-                }
-            }
-
-            // Gotify notifications if enabled
-            if ($gotifyNotificationsEnabled) {
-                try {
-                    $ssrf = is_url_safe_for_ssrf($gotify['serverUrl'], $db, $userId);
-                    if (!$ssrf) {
-                        echo "Gotify notification skipped: URL failed SSRF validation.<br />";
-                    } else {
-                        foreach ($notify as $payerUserId => $perUser) {
-                            // Get name of user from household table
-                            $stmt = $db->prepare('SELECT * FROM household WHERE id = :id AND user_id = :ownerId');
-                            $stmt->bindValue(':id', $payerUserId, SQLITE3_INTEGER);
-                            $stmt->bindValue(':ownerId', $userId, SQLITE3_INTEGER);
-                            $result = $stmt->execute();
-                            $user = $result->fetchArray(SQLITE3_ASSOC);
-
-                            if ($user['name']) {
-                                $message = $user['name'] . ", the following subscriptions are up for cancellation:\n";
-                            } else {
-                                $message = "The following subscriptions are up for cancellation:\n";
-                            }
-
-                            foreach ($perUser as $subscription) {
-                                $message .= $subscription['name'] . " for " . $subscription['price'] . $subscription['deadline_note'] . "\n";
-                            }
-
-                            $data = array(
-                                'message' => $message,
-                                'priority' => 5
-                            );
-
-                            $data_string = json_encode($data);
-
-                            $ch = curl_init($gotify['serverUrl'] . '/message?token=' . $gotify['appToken']);
-                            curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "POST");
-                            curl_setopt($ch, CURLOPT_POSTFIELDS, $data_string);
-                            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-                            curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
-                            curl_setopt($ch, CURLOPT_TIMEOUT, 15);
-                            curl_setopt(
-                                $ch,
-                                CURLOPT_HTTPHEADER,
-                                array(
-                                    'Content-Type: application/json',
-                                    'Content-Length: ' . strlen($data_string)
-                                )
-                            );
-
-                            if ($gotify['ignore_ssl']) {
-                                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-                                curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
-                            }
-                            curl_setopt($ch, CURLOPT_RESOLVE, ["{$ssrf['host']}:{$ssrf['port']}:{$ssrf['ip']}"]);
-
-                            $result = curl_exec($ch);
-                            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-                            // A 4xx/5xx answer is not a delivery: the reminder is tried again.
-                            if ($result === false || $httpCode < 200 || $httpCode >= 300) {
-                                echo "Error sending notifications: " . ($result === false ? curl_error($ch) : "HTTP " . $httpCode) . "<br />";
-                            } else {
-                                echo "Gotify Notifications sent<br />";
-                                wallos_notifications_delivered($delivered, $perUser);
-                            }
-                        }
-                    }
-                } catch (\Throwable $e) {
-                    // One channel failing (an SMTP error makes PHPMailer throw) must not
-                    // stop the channels after it, or every user after this one.
-                    echo "Error sending Gotify notifications: " . $e->getMessage() . "<br />";
-                }
-            }
-
-            // Telegram notifications if enabled
-            if ($telegramNotificationsEnabled) {
-                try {
-                    foreach ($notify as $payerUserId => $perUser) {
-                        // Get name of user from household table
-                        $stmt = $db->prepare('SELECT * FROM household WHERE id = :id AND user_id = :ownerId');
-                        $stmt->bindValue(':id', $payerUserId, SQLITE3_INTEGER);
-                        $stmt->bindValue(':ownerId', $userId, SQLITE3_INTEGER);
-                        $result = $stmt->execute();
-                        $user = $result->fetchArray(SQLITE3_ASSOC);
-
-                        if ($user['name']) {
-                            $message = $user['name'] . ", the following subscriptions are up for cancellation:\n";
-                        } else {
-                            $message = "The following subscriptions are up for cancellation:\n";
-                        }
-
-                        foreach ($perUser as $subscription) {
-                            $message .= $subscription['name'] . " for " . $subscription['price'] . $subscription['deadline_note'] . "\n";
-                        }
-
-                        $data = array(
-                            'chat_id' => $telegram['chatId'],
-                            'text' => $message
-                        );
-
-                        $data_string = json_encode($data);
-
-                        $ch = curl_init('https://api.telegram.org/bot' . $telegram['botToken'] . '/sendMessage');
-                        curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "POST");
-                        curl_setopt($ch, CURLOPT_POSTFIELDS, $data_string);
-                        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-                        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
-                        curl_setopt($ch, CURLOPT_TIMEOUT, 15);
-                        curl_setopt(
-                            $ch,
-                            CURLOPT_HTTPHEADER,
-                            array(
-                                'Content-Type: application/json',
-                                'Content-Length: ' . strlen($data_string)
-                            )
-                        );
-
-                        $result = curl_exec($ch);
-                        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-                        // A 4xx/5xx answer is not a delivery: the reminder is tried again.
-                        if (!wallos_notification_http_delivered($httpCode, $result, true)) {
-                            echo "Error sending notifications: " . ($result === false ? curl_error($ch) : "HTTP " . $httpCode) . "<br />";
-                        } else {
-                            echo "Telegram Notifications sent<br />";
-                            wallos_notifications_delivered($delivered, $perUser);
-                        }
-                    }
-                } catch (\Throwable $e) {
-                    // One channel failing (an SMTP error makes PHPMailer throw) must not
-                    // stop the channels after it, or every user after this one.
-                    echo "Error sending Telegram notifications: " . $e->getMessage() . "<br />";
-                }
-            }
-
-            // Pushover notifications if enabled
-            if ($pushoverNotificationsEnabled) {
-                try {
-                    foreach ($notify as $payerUserId => $perUser) {
-                        // Get name of user from household table
-                        $stmt = $db->prepare('SELECT * FROM household WHERE id = :id AND user_id = :ownerId');
-                        $stmt->bindValue(':id', $payerUserId, SQLITE3_INTEGER);
-                        $stmt->bindValue(':ownerId', $userId, SQLITE3_INTEGER);
-                        $result = $stmt->execute();
-                        $user = $result->fetchArray(SQLITE3_ASSOC);
-
-                        if ($user['name']) {
-                            $message = $user['name'] . ", the following subscriptions are up for cancellation:\n";
-                        } else {
-                            $message = "The following subscriptions are up for cancellation:\n";
-                        }
-
-                        foreach ($perUser as $subscription) {
-                            $message .= $subscription['name'] . " for " . $subscription['price'] . $subscription['deadline_note'] . "\n";
-                        }
-
-                        $ch = curl_init();
-                        curl_setopt($ch, CURLOPT_URL, "https://api.pushover.net/1/messages.json");
-                        curl_setopt($ch, CURLOPT_POST, 1);
-                        curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query([
-                            'token' => $pushover['token'],
-                            'user' => $pushover['user_key'],
-                            'message' => $message,
-                        ]));
-                        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-                        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
-                        curl_setopt($ch, CURLOPT_TIMEOUT, 15);
-
-                        $result = curl_exec($ch);
-
-                        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-                        // A 4xx/5xx answer is not a delivery: the reminder is tried again.
-                        if ($result === false || $httpCode < 200 || $httpCode >= 300) {
-                            echo "Error sending notifications: " . ($result === false ? curl_error($ch) : "HTTP " . $httpCode) . "<br />";
-                        } else {
-                            echo "Pushover Notifications sent<br />";
-                            wallos_notifications_delivered($delivered, $perUser);
-                        }
-                    
-                        unset($ch);
-                    }
-                } catch (\Throwable $e) {
-                    // One channel failing (an SMTP error makes PHPMailer throw) must not
-                    // stop the channels after it, or every user after this one.
-                    echo "Error sending Pushover notifications: " . $e->getMessage() . "<br />";
-                }
-            }
-
-            // Ntfy notifications if enabled
-            if ($ntfyNotificationsEnabled) {
-                try {
-                    $ssrf = is_url_safe_for_ssrf($ntfy['host'], $db, $userId);
-                    if (!$ssrf) {
-                        echo "Ntfy notification skipped: URL failed SSRF validation.<br />";
-                    } else {
-                        foreach ($notify as $payerUserId => $perUser) {
-                            // Get name of user from household table
-                            $stmt = $db->prepare('SELECT * FROM household WHERE id = :id AND user_id = :ownerId');
-                            $stmt->bindValue(':id', $payerUserId, SQLITE3_INTEGER);
-                            $stmt->bindValue(':ownerId', $userId, SQLITE3_INTEGER);
-                            $result = $stmt->execute();
-                            $user = $result->fetchArray(SQLITE3_ASSOC);
-
-                            if ($user['name']) {
-                                $message = $user['name'] . ", the following subscriptions are up for cancellation:\n";
-                            } else {
-                                $message = "The following subscriptions are up for cancellation:\n";
-                            }
-
-                            foreach ($perUser as $subscription) {
-                                $message .= $subscription['name'] . " for " . $subscription['price'] . $subscription['deadline_note'] . "\n";
-                            }
-
-                            // Empty or non-JSON headers made array_keys(null) throw, so
-                            // no ntfy cancellation notification was ever sent.
-                            $customheaders = webhookParseHeaders($ntfy["headers"] ?? '');
-
-                            $ch = curl_init();
-
-                            $ntfyHost = rtrim($ntfy["host"], '/');
-                            $ntfyTopic = $ntfy['topic'];
-
-                            curl_setopt($ch, CURLOPT_URL, $ntfyHost . '/' . $ntfyTopic);
-                            curl_setopt($ch, CURLOPT_POST, 1);
-                            curl_setopt($ch, CURLOPT_POSTFIELDS, $message);
-                            curl_setopt($ch, CURLOPT_HTTPHEADER, $customheaders);
-                            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-                            curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
-                            curl_setopt($ch, CURLOPT_TIMEOUT, 15);
-
-                            if ($ntfy['ignore_ssl']) {
-                                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-                                curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
-                            }
-                            curl_setopt($ch, CURLOPT_RESOLVE, ["{$ssrf['host']}:{$ssrf['port']}:{$ssrf['ip']}"]);
-
-                            $response = curl_exec($ch);
-                        
-                            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-                            // A 4xx/5xx answer is not a delivery: the reminder is tried again.
-                            if ($response === false || $httpCode < 200 || $httpCode >= 300) {
-                                echo "Error sending notifications: " . ($response === false ? curl_error($ch) : "HTTP " . $httpCode) . "<br />";
-                            } else {
-                                echo "Ntfy Notifications sent<br />";
-                                wallos_notifications_delivered($delivered, $perUser);
-                            }
-                        
-                            unset($ch);
-                        }
-                    }
-                } catch (\Throwable $e) {
-                    // One channel failing (an SMTP error makes PHPMailer throw) must not
-                    // stop the channels after it, or every user after this one.
-                    echo "Error sending Ntfy notifications: " . $e->getMessage() . "<br />";
-                }
-            }
-
-            // Webhook notifications if enabled
-            if ($webhookNotificationsEnabled) {
-                try {
-                    $ssrf = is_url_safe_for_ssrf($webhook['url'], $db, $userId);
-                    if (!$ssrf) {
-                        echo "Webhook notification skipped: URL failed SSRF validation.<br />";
-                    } else {
-                        foreach ($notify as $payerUserId => $perUser) {
-                            // Get name of user from household table
-                            $stmt = $db->prepare('SELECT * FROM household WHERE id = :id AND user_id = :ownerId');
-                            $stmt->bindValue(':id', $payerUserId, SQLITE3_INTEGER);
-                            $stmt->bindValue(':ownerId', $userId, SQLITE3_INTEGER);
-                            $result = $stmt->execute();
-                            $user = $result->fetchArray(SQLITE3_ASSOC);
-                
-                            $payer = $user['name'] ?? "";
-                
-                            foreach ($perUser as $subscription) {
-                                $payload = webhookFillPayload($webhook['cancelation_payload'], [
-                                    'subscription_name' => $subscription['name'],
-                                    'subscription_price' => $subscription['price'],
-                                    'subscription_currency' => $subscription['currency'],
-                                    'subscription_category' => $subscription['category'],
-                                    'subscription_payer' => $payer,
-                                    'subscription_date' => $subscription['date'],
-                                    'subscription_cancel_by' => $subscription['cancel_by'],
-                                    'subscription_url' => $subscription['url'],
-                                    'subscription_notes' => $subscription['notes'],
-                                ]);
-                
-                                // Initialize cURL for each subscription
-                                $ch = curl_init();
-                                curl_setopt($ch, CURLOPT_URL, $webhook['url']);
-                                curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $webhook['request_method']);
-                                curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
-                                curl_setopt($ch, CURLOPT_HTTPHEADER, webhookBuildHeaders($webhook['headers']));
-                
-                                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-                                curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
-                                curl_setopt($ch, CURLOPT_TIMEOUT, 15);
-                
-                                // Handle SSL settings
-                                if ($webhook['ignore_ssl']) {
-                                    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-                                    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
-                                }
-                                curl_setopt($ch, CURLOPT_RESOLVE, ["{$ssrf['host']}:{$ssrf['port']}:{$ssrf['ip']}"]);
-                
-                                // Execute the cURL request
-                                $response = curl_exec($ch);
-                                $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-                
-                                if ($response === false || $httpCode < 200 || $httpCode >= 300) {
-                                    $errorDetail = $response === false ? curl_error($ch) : "HTTP " . $httpCode;
-                                    echo "Error sending cancellation notifications: " . $errorDetail . "<br />";
-                                } else {
-                                    echo "Webhook Cancellation Notification sent for subscription: " . $subscription['name'] . "<br />";
-                                    wallos_notifications_delivered($delivered, [$subscription]);
-                                }
-                            
-                                unset($ch);
-                
-                                usleep(1000000); // 1s delay between requests
-                            }
-                        }
-                    }
-                } catch (\Throwable $e) {
-                    // One channel failing (an SMTP error makes PHPMailer throw) must not
-                    // stop the channels after it, or every user after this one.
-                    echo "Error sending Webhook notifications: " . $e->getMessage() . "<br />";
-                }
-            }
-            
-            // Mark what at least one channel delivered (a failing channel is
-            // logged above); without this the reminder would repeat on every
-            // run until the renewal. Undelivered ones are tried again.
-            $markStmt = $db->prepare('UPDATE subscriptions SET last_cancel_notified_for = :cancelBy WHERE id = :id AND user_id = :userId');
-            foreach (wallos_delivered_markers($remindedDeadlines, $delivered, 'cancel') as $subscriptionId => $cancelBy) {
-                $markStmt->bindValue(':cancelBy', $cancelBy, SQLITE3_TEXT);
-                $markStmt->bindValue(':id', $subscriptionId, SQLITE3_INTEGER);
-                $markStmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
-                $markStmt->execute();
-                $markStmt->reset();
-            }
-            $markStmt = $db->prepare('UPDATE subscriptions SET intro_notified_for = :marker WHERE id = :id AND user_id = :userId');
-            foreach (wallos_delivered_markers($remindedIntros, $delivered, 'intro') as $subscriptionId => $marker) {
-                $markStmt->bindValue(':marker', $marker, SQLITE3_TEXT);
-                $markStmt->bindValue(':id', $subscriptionId, SQLITE3_INTEGER);
-                $markStmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
-                $markStmt->execute();
-                $markStmt->reset();
-            }
-
-
-        } else {
-            if (php_sapi_name() !== 'cli') {
-                echo "Nothing to notify.<br />";
-            }
-        }
-
-    }
-
+$force = php_sapi_name() !== 'cli' || in_array('--force', $argv ?? [], true);
+$containerTimezone = date_default_timezone_get();
+
+$users = [];
+$result = $db->query('SELECT id, username, email FROM user');
+while ($result && ($row = $result->fetchArray(SQLITE3_ASSOC))) {
+    $users[] = $row;
 }
 
-?>
+$settingsByUser = [];
+$result = $db->query('SELECT * FROM notification_settings');
+while ($result && ($row = $result->fetchArray(SQLITE3_ASSOC))) {
+    $settingsByUser[(int) $row['user_id']] = $row;
+}
+
+foreach ($users as $owner) {
+    $userId = (int) $owner['id'];
+    $settings = $settingsByUser[$userId] ?? ['days' => 1, 'send_time' => '09:00'];
+
+    date_default_timezone_set(wallos_notification_timezone($settings)->getName());
+    $now = new DateTime('now');
+    $today = $now->format('Y-m-d');
+
+    if (!$force && !wallos_notification_slot_due($settings['send_time'] ?? '09:00', $settings['last_cancellation_run'] ?? null, $now)) {
+        date_default_timezone_set($containerTimezone);
+        continue;
+    }
+
+    if (php_sapi_name() !== 'cli') {
+        echo "For user: " . htmlspecialchars($owner['username']) . "<br />";
+    }
+
+    try {
+        $env = new WallosNotifyEnv($db, $userId);
+        $channels = wallos_load_notification_channels($env, 'cancellation');
+
+        if ($channels !== []) {
+            $lookups = wallos_notification_lookups($db, $userId);
+            CurrencyFormatter::useCurrencies($lookups['currencies']);
+
+            [$entries, $markers] = wallos_collect_cancellation_reminders($db, $userId, $today, $lookups);
+
+            if ($entries !== []) {
+                $contexts = wallos_notification_contexts($entries, $lookups['household'], $owner, 'cancellation');
+                $delivered = wallos_dispatch_notifications($env, $channels, 'cancellation', $contexts, wallos_notification_templates_load($db, $userId));
+
+                // Mark what at least one channel delivered; the others are
+                // tried again on the next day's run.
+                wallos_record_cancellation_reminders($db, $userId, $markers, $delivered);
+            } elseif (php_sapi_name() !== 'cli') {
+                echo "Nothing to notify.<br />";
+            }
+        } elseif (php_sapi_name() !== 'cli') {
+            echo "Notifications are disabled. No need to run.<br />";
+        }
+    } catch (\Throwable $e) {
+        // One account failing must not stop the others.
+        echo "Error processing cancellation reminders for user " . $userId . ": " . $e->getMessage() . "<br />\n";
+    }
+
+    wallos_mark_notification_run($db, $userId, 'last_cancellation_run', $today);
+    date_default_timezone_set($containerTimezone);
+}

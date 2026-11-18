@@ -42,7 +42,7 @@ function render_tile($name, $logoSrc = '', $variantSrc = null, $textColor = null
   $row keys: id, name, logo, logo_variant, logo_text_color, subtitle,
   subtitle_tone ('' | 'danger' | 'warning' | 'success' | 'accent'), trailing, trailing_sub,
   trailing_sub_strike (bool: the sub value is a price no longer charged), dim (bool),
-  progress (null | 0..100). Name and text values are escaped here.
+  progress (null | 0..100), progress_tone ('' | 'warning' | 'danger'). Name and text values are escaped here.
 */
 function render_list_row($row)
 {
@@ -58,7 +58,7 @@ function render_list_row($row)
             <span class="list-row-title"><?= htmlspecialchars(htmlspecialchars_decode($row['name'])) ?></span>
             <span class="list-row-subtitle<?= !empty($row['subtitle_tone']) ? ' is-' . $row['subtitle_tone'] : '' ?>"><?= htmlspecialchars($row['subtitle'] ?? '') ?></span>
             <?php if (isset($row['progress']) && $row['progress'] !== null) { ?>
-                <span class="list-row-progress" aria-hidden="true"><span style="width: <?= max(0, min(100, (int) $row['progress'])) ?>%"></span></span>
+                <span class="list-row-progress<?= !empty($row['progress_tone']) ? ' is-' . $row['progress_tone'] : '' ?>" aria-hidden="true"><span style="width: <?= max(0, min(100, (int) $row['progress'])) ?>%"></span></span>
             <?php } ?>
         </span>
         <span class="list-row-trailing">
