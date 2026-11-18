@@ -641,41 +641,72 @@ function wallos_household_delete(SQLite3 $db, $ownerId)
 function wallos_household_delete_by_id(SQLite3 $db, $householdId)
 {
     return wallos_household_transaction($db, function () use ($db, $householdId) {
-        foreach ([
-            'UPDATE subscriptions SET shared_household_id = NULL WHERE shared_household_id = :householdId',
-            'DELETE FROM household_members WHERE household_id = :householdId',
-            'DELETE FROM households WHERE id = :householdId',
-        ] as $sql) {
-            $stmt = $db->prepare($sql);
-            $stmt->bindValue(':householdId', (int) $householdId, SQLITE3_INTEGER);
-            if ($stmt->execute() === false) {
-                return false;
-            }
-        }
-
-        return true;
+        return wallos_household_delete_rows($db, $householdId);
     });
+}
+
+/**
+ * The writes behind wallos_household_delete_by_id(), without a transaction of
+ * their own, for a caller that already holds one.
+ *
+ * @return bool false when a write failed
+ */
+function wallos_household_delete_rows(SQLite3 $db, $householdId)
+{
+    foreach ([
+        'UPDATE subscriptions SET shared_household_id = NULL WHERE shared_household_id = :householdId',
+        'DELETE FROM household_members WHERE household_id = :householdId',
+        'DELETE FROM households WHERE id = :householdId',
+    ] as $sql) {
+        $stmt = @$db->prepare($sql);
+        if ($stmt === false) {
+            return false;
+        }
+        $stmt->bindValue(':householdId', (int) $householdId, SQLITE3_INTEGER);
+        if (@$stmt->execute() === false) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 /**
  * Account deletion: a household the account owns is deleted; any other
  * membership or invite goes.
+ *
+ * Opens no transaction of its own: account deletion runs it inside the one
+ * that covers every other table, so a failure here rolls all of it back.
+ *
+ * @return bool false when a read or write failed
  */
 function wallos_household_forget_user(SQLite3 $db, $userId)
 {
-    $stmt = $db->prepare('SELECT id FROM households WHERE owner_user_id = :userId');
+    $stmt = @$db->prepare('SELECT id FROM households WHERE owner_user_id = :userId');
+    if ($stmt === false) {
+        return false;
+    }
     $stmt->bindValue(':userId', (int) $userId, SQLITE3_INTEGER);
-    $result = $stmt->execute();
+    $result = @$stmt->execute();
+    if ($result === false) {
+        return false;
+    }
     $owned = [];
-    while ($result && ($row = $result->fetchArray(SQLITE3_ASSOC))) {
+    while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
         $owned[] = (int) $row['id'];
     }
     foreach ($owned as $householdId) {
-        wallos_household_delete_by_id($db, $householdId);
+        if (!wallos_household_delete_rows($db, $householdId)) {
+            return false;
+        }
     }
-    $stmt = $db->prepare('DELETE FROM household_members WHERE user_id = :userId');
+    $stmt = @$db->prepare('DELETE FROM household_members WHERE user_id = :userId');
+    if ($stmt === false) {
+        return false;
+    }
     $stmt->bindValue(':userId', (int) $userId, SQLITE3_INTEGER);
-    $stmt->execute();
+
+    return @$stmt->execute() !== false;
 }
 
 /**

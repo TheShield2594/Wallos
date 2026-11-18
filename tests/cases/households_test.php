@@ -308,8 +308,11 @@ wallos_test('households: deleting an account removes its household and membershi
     assert_same(null, wallos_household_membership($db, 2), 'bob is no longer in it');
     assert_same(null, $db->querySingle("SELECT shared_household_id FROM subscriptions WHERE id = $bobShared"), "bob's item is private again");
 
+    // Both endpoints delete through wallos_delete_account(), which runs this
+    // inside the transaction that covers every other table.
+    assert_contains('wallos_household_forget_user(', file_get_contents(WALLOS_ROOT . '/includes/account_deletion.php'), 'account deletion cleans up households');
     foreach (['endpoints/settings/deleteaccount.php', 'endpoints/admin/deleteuser.php'] as $path) {
-        assert_contains('wallos_household_forget_user(', file_get_contents(WALLOS_ROOT . '/' . $path), "$path cleans up households");
+        assert_contains('wallos_delete_account(', file_get_contents(WALLOS_ROOT . '/' . $path), "$path deletes through wallos_delete_account()");
     }
     $db->close();
 });
