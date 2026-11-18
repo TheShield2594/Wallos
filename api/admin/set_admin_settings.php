@@ -2,7 +2,9 @@
 /*
 This API Endpoint accepts POST requests only.
 It receives the following parameters:
-- api_key: the API key of the user (must be user ID 1 / admin).
+- api_key: the API key of the user (must belong to an admin).
+  Send it as "Authorization: Bearer <key>" (or an X-API-Key header); the api_key
+  parameter still works but is deprecated. Required scope: write. The key's owner must be an admin.
 - registrations_open: (optional) '1' or '0' (allow new signups).
 - max_users: (optional) maximum allowed users (integer).
 - require_email_verification: (optional) '1' or '0'.
@@ -33,6 +35,8 @@ Example response:
 */
 
 require_once '../../includes/connect_endpoint.php';
+require_once __DIR__ . '/../../includes/api_auth.php';
+require_once __DIR__ . '/../../includes/admin_roles.php';
 require_once '../../includes/ssrf_helper.php';
 require_once '../../includes/oidc_settings.php';
 
@@ -47,41 +51,17 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-$apiKey = $_POST['api_key'] ?? $_POST['apiKey'] ?? null;
-
 // Authenticate user first
-if (!$apiKey) {
-    echo json_encode([
-        'success' => false,
-        'title' => 'Missing API key',
-        'message' => 'API key is required.'
-    ]);
-    exit;
-}
-
-$sql = "SELECT * FROM user WHERE api_key = :apiKey";
-$stmt = $db->prepare($sql);
-$stmt->bindValue(':apiKey', $apiKey, SQLITE3_TEXT);
-$result = $stmt->execute();
-$user = $result->fetchArray(SQLITE3_ASSOC);
-
-if (!$user) {
-    echo json_encode([
-        'success' => false,
-        'title' => 'Unauthorized',
-        'message' => 'Invalid API key.'
-    ]);
-    exit;
-}
+$user = wallos_api_require($db, 'write', ['requireAdmin' => true]);
 
 $userId = $user['id'];
 
-// Must be Admin user (ID 1)
-if ($userId !== 1) {
+// Must be an admin
+if (!wallos_is_admin($db, $userId)) {
     echo json_encode([
         'success' => false,
         'title' => 'Forbidden',
-        'message' => 'Only the admin user (user ID 1) can update global settings.'
+        'message' => 'Only an admin can update global settings.'
     ]);
     exit;
 }

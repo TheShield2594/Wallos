@@ -265,14 +265,94 @@ while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
 
     ?>
 
+    <?php
+    // API keys (issue #43): only a hash is stored, so a key is shown once,
+    // when it is created.
+    require_once 'includes/api_keys.php';
+    $apiKeys = wallos_api_list_keys($db, $userId);
+    $apiScopeLabels = [
+        'read' => translate('api_scope_read', $i18n),
+        'write' => translate('api_scope_write', $i18n),
+        'ical' => translate('api_scope_ical', $i18n),
+        'admin:read' => translate('api_scope_admin_read', $i18n),
+    ];
+    ?>
     <section class="account-section">
         <header>
-            <h2><?= translate('api_key', $i18n) ?></h2>
+            <h2><?= translate('api_keys', $i18n) ?></h2>
         </header>
         <div class="account-api-key">
-            <div class="form-group-inline">
-                <input type="text" id="apikey" name="apikey" value="<?= htmlspecialchars($userData['api_key'] ?? '') ?>" placeholder="API Key" readonly>
-                <input type="submit" value="<?= translate('regenerate', $i18n) ?>" id="regenerateApiKey" onClick="regenerateApiKey()" />
+            <div class="api-key-list" id="apiKeyList">
+                <?php if ($apiKeys === []) { ?>
+                    <p class="form-hint" id="apiKeyListEmpty"><?= translate('no_api_keys', $i18n) ?></p>
+                <?php } ?>
+                <?php foreach ($apiKeys as $apiKey) { ?>
+                    <div class="api-key-row" data-keyid="<?= (int) $apiKey['id'] ?>">
+                        <div class="api-key-details">
+                            <strong><?= htmlspecialchars($apiKey['name']) ?></strong>
+                            <code><?= htmlspecialchars($apiKey['prefix']) ?>&hellip;</code>
+                            <span class="api-key-scopes">
+                                <?php foreach ($apiKey['scopes'] as $scope) { ?>
+                                    <span class="user-role-badge<?= $scope === 'admin:read' ? ' is-admin-scope' : '' ?>"><?= htmlspecialchars($apiScopeLabels[$scope] ?? $scope) ?></span>
+                                <?php } ?>
+                            </span>
+                            <span class="form-hint">
+                                <?= translate('created', $i18n) ?> <?= htmlspecialchars(substr($apiKey['created_at'], 0, 16)) ?> UTC
+                                &middot;
+                                <?= translate('last_used', $i18n) ?>
+                                <?= $apiKey['last_used_at'] ? htmlspecialchars(substr($apiKey['last_used_at'], 0, 16)) . ' UTC' : translate('never', $i18n) ?>
+                            </span>
+                        </div>
+                        <button class="image-button medium" onClick="revokeApiKey(<?= (int) $apiKey['id'] ?>)"
+                            title="<?= translate('revoke', $i18n) ?>" aria-label="<?= translate('revoke', $i18n) ?>"
+                            data-confirm="<?= htmlspecialchars(translate('revoke_api_key_confirmation', $i18n)) ?>">
+                            <i class="fa-solid fa-ban"></i>
+                        </button>
+                    </div>
+                <?php } ?>
+            </div>
+
+            <div class="api-key-created hide" id="newApiKeyBox">
+                <p><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> <?= translate('api_key_shown_once', $i18n) ?></p>
+                <div class="form-group-inline">
+                    <input type="text" id="newApiKey" value="" readonly aria-label="<?= translate('api_key', $i18n) ?>">
+                    <input type="button" class="secondary-button thin" value="<?= translate('copy_to_clipboard', $i18n) ?>" onClick="copyNewApiKey()" />
+                </div>
+            </div>
+
+            <h3><?= translate('create_api_key', $i18n) ?></h3>
+            <div class="form-group">
+                <input type="text" id="newApiKeyName" maxlength="100" autocomplete="off"
+                    placeholder="<?= translate('name', $i18n) ?>" aria-label="<?= translate('name', $i18n) ?>">
+            </div>
+            <fieldset class="chip-fieldset">
+                <legend><?= translate('api_key_scopes', $i18n) ?></legend>
+                <div class="chip-group" id="newApiKeyScopes">
+                    <?php foreach (['read', 'write', 'ical'] as $scope) { ?>
+                        <input type="checkbox" class="chip-input" id="api_scope_<?= $scope ?>" value="<?= $scope ?>" <?= $scope === 'read' ? 'checked' : '' ?>>
+                        <label class="chip" for="api_scope_<?= $scope ?>"><?= htmlspecialchars($apiScopeLabels[$scope]) ?></label>
+                    <?php } ?>
+                    <?php if ($isAdmin) { ?>
+                        <input type="checkbox" class="chip-input" id="api_scope_admin_read" value="admin:read" onChange="toggleApiKeyReauth()">
+                        <label class="chip" for="api_scope_admin_read"><?= htmlspecialchars($apiScopeLabels['admin:read']) ?></label>
+                    <?php } ?>
+                </div>
+            </fieldset>
+            <?php if ($isAdmin) { ?>
+                <div class="api-key-reauth hide" id="apiKeyReauth">
+                    <div class="form-group-inline">
+                        <input type="password" id="apiKeyReauthPassword" autocomplete="current-password"
+                            placeholder="<?= translate('password', $i18n) ?>" aria-label="<?= translate('password', $i18n) ?>">
+                        <?php if ($userData['totp_enabled']) { ?>
+                            <input type="text" id="apiKeyReauthTotp" inputmode="numeric" autocomplete="one-time-code" maxlength="6"
+                                placeholder="<?= translate('totp_code', $i18n) ?>" aria-label="<?= translate('totp_code', $i18n) ?>">
+                        <?php } ?>
+                    </div>
+                    <p class="form-hint"><?= translate('api_key_admin_read_info', $i18n) ?></p>
+                </div>
+            <?php } ?>
+            <div class="buttons">
+                <input type="submit" class="thin mobile-grow" value="<?= translate('create_api_key', $i18n) ?>" id="createApiKeyButton" onClick="createApiKey()" />
             </div>
             <div class="settings-notes">
                 <p>
@@ -299,7 +379,7 @@ while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
         </div>
         <div>
             <?php
-            if ($userId != 1 && !$demoMode) {
+            if (wallos_can_delete_user($db, $userId) && !$demoMode) {
                 ?>
                 <h3><?= translate('danger_zone', $i18n) ?></h3>
                 <div class="form-group-inline">

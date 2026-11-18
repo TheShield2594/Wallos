@@ -23,13 +23,40 @@ function currentMoth() {
 }
 
 function showExportPopup() {
-  const host = window.location.href;
-  const apiPath = "api/subscriptions/get_ical_feed.php";
-  const apiKey = document.getElementById('apiKey').value;
-  const queryParams = `?api_key=${apiKey}`;
-  const fullUrl = host.replace('calendar.php', apiPath) + queryParams;
-  document.getElementById('iCalendarUrl').value = fullUrl;
   document.getElementById('subscriptions_calendar').classList.add('is-open');
+}
+
+// The feed URL carries an API key with only the "ical" scope. Keys are stored
+// hashed, so a link can be shown only when it is created; older links keep
+// working, and Profile -> API keys lists and revokes them.
+function createCalendarLink(button) {
+  button.disabled = true;
+  fetch('endpoints/user/createapikey.php', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRF-Token': window.csrfToken,
+    },
+    body: JSON.stringify({ name: button.dataset.name, scopes: ['ical'] })
+  })
+    .then(response => response.json())
+    .then(data => {
+      button.disabled = false;
+      if (!data.success) {
+        showErrorMessage(data.message);
+        return;
+      }
+      const feedUrl = new URL('api/subscriptions/get_ical_feed.php', window.location.href);
+      feedUrl.search = '';
+      feedUrl.searchParams.set('api_key', data.apiKey);
+      document.getElementById('iCalendarUrl').value = feedUrl.toString();
+      button.classList.add('hide');
+      document.getElementById('copyCalendarLink').classList.remove('hide');
+    })
+    .catch(() => {
+      button.disabled = false;
+      showErrorMessage(translate('unknown_error'));
+    });
 }
 
 function closePopup() {

@@ -3,6 +3,8 @@
 This API Endpoint accepts POST requests only.
 It receives the following parameters:
 - api_key: the API key of the user (for Tally authentication).
+  Send it as "Authorization: Bearer <key>" (or an X-API-Key header); the api_key
+  parameter still works but is deprecated. Required scope: write.
 - action: the action to perform ('add', 'edit', 'delete').
 - id / subscription_id: (required for 'edit' and 'delete') the ID of the subscription.
 
@@ -65,6 +67,7 @@ Example response:
 
 error_reporting(E_ERROR | E_PARSE);
 require_once '../../includes/connect_endpoint.php';
+require_once __DIR__ . '/../../includes/api_auth.php';
 require_once '../../includes/inputvalidation.php';
 require_once '../../includes/ssrf_helper.php';
 require_once '../../includes/logo_theme_variant.php';
@@ -301,32 +304,8 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-$apiKey = $_POST['api_key'] ?? $_POST['apiKey'] ?? null;
-
 // Authenticate user first
-if (!$apiKey) {
-    echo json_encode([
-        'success' => false,
-        'title' => 'Missing API key',
-        'message' => 'API key is required.'
-    ]);
-    exit;
-}
-
-$sql = "SELECT * FROM user WHERE api_key = :apiKey";
-$stmt = $db->prepare($sql);
-$stmt->bindValue(':apiKey', $apiKey, SQLITE3_TEXT);
-$result = $stmt->execute();
-$user = $result->fetchArray(SQLITE3_ASSOC);
-
-if (!$user) {
-    echo json_encode([
-        'success' => false,
-        'title' => 'Unauthorized',
-        'message' => 'Invalid API key.'
-    ]);
-    exit;
-}
+$user = wallos_api_require($db, 'write');
 
 $userId = $user['id'];
 $action = $_POST['action'] ?? null;

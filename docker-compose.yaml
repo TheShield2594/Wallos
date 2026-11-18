@@ -31,6 +31,14 @@ services:
       # OIDC_AUTO_CREATE_USER: "true"
       # OIDC_DISABLE_PASSWORD_LOGIN: "false"
       # OIDC_REQUIRE_EMAIL_VERIFIED: "true"
+      # Admin role from the identity provider: the claim with the user's groups or
+      # roles (ID token or userinfo; dotted paths like realm_access.roles work) and
+      # the comma-separated values that make an account an admin. Synced on every
+      # OIDC login; the last admin is never demoted.
+      # OIDC_ROLES_CLAIM: "groups"
+      # OIDC_ADMIN_VALUES: "tally-admins"
+      # Recovery: turn password login back on whatever the OIDC settings say
+      # TALLY_FORCE_PASSWORD_LOGIN: "true"
       # Optional SSRF allowlist (overrides the Security Settings allowlist in the Admin UI)
       # SSRF_ALLOWLIST: "auth.example.com,192.168.1.100:8123"
     # Volumes store your data between container upgrades

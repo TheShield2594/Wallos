@@ -165,4 +165,4 @@
       <i class="fa-solid fa-times-circle"></i> <?= translate("clear", $i18n) ?>
     </div>
   </div>
-</div>
+</div>

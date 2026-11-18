@@ -2,7 +2,9 @@
 /*
 This API Endpoint accepts POST requests only.
 It receives the following parameters:
-- api_key: the API key of the user (must be user ID 1 / admin).
+- api_key: the API key of the user (must belong to an admin).
+  Send it as "Authorization: Bearer <key>" (or an X-API-Key header); the api_key
+  parameter still works but is deprecated. Required scope: write. The key's owner must be an admin.
 - oidc_enabled: (optional) '1' to enable OIDC logins, '0' to disable.
 - name: (optional) provider name.
 - client_id: (optional) OAuth client ID.
@@ -18,6 +20,9 @@ It receives the following parameters:
 - auto_create_user: (optional) '1' to auto-register new OIDC users, '0' otherwise.
 - password_login_disabled: (optional) '1' to disable password logins, '0' otherwise.
 - require_email_verified: (optional) '1' to reject unverified emails, '0' otherwise.
+- roles_claim: (optional) claim holding the user's groups or roles (e.g. groups, or realm_access.roles).
+- admin_values: (optional) comma-separated values of that claim that make an account an admin.
+  Password login can only be disabled while at least one admin account is linked to OIDC.
 
 It returns a JSON object with the following properties:
 - success: whether the request was successful (boolean).
@@ -33,6 +38,8 @@ Example response:
 */
 
 require_once '../../includes/connect_endpoint.php';
+require_once __DIR__ . '/../../includes/api_auth.php';
+require_once __DIR__ . '/../../includes/admin_roles.php';
 require_once '../../includes/ssrf_helper.php';
 require_once '../../includes/oidc_settings.php';
 
@@ -47,41 +54,17 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-$apiKey = $_POST['api_key'] ?? $_POST['apiKey'] ?? null;
-
 // Authenticate user first
-if (!$apiKey) {
-    echo json_encode([
-        'success' => false,
-        'title' => 'Missing API key',
-        'message' => 'API key is required.'
-    ]);
-    exit;
-}
-
-$sql = "SELECT * FROM user WHERE api_key = :apiKey";
-$stmt = $db->prepare($sql);
-$stmt->bindValue(':apiKey', $apiKey, SQLITE3_TEXT);
-$result = $stmt->execute();
-$user = $result->fetchArray(SQLITE3_ASSOC);
-
-if (!$user) {
-    echo json_encode([
-        'success' => false,
-        'title' => 'Unauthorized',
-        'message' => 'Invalid API key.'
-    ]);
-    exit;
-}
+$user = wallos_api_require($db, 'write', ['requireAdmin' => true]);
 
 $userId = $user['id'];
 
-// Must be Admin user (ID 1)
-if ($userId !== 1) {
+// Must be an admin
+if (!wallos_is_admin($db, $userId)) {
     echo json_encode([
         'success' => false,
         'title' => 'Forbidden',
-        'message' => 'Only the admin user (user ID 1) can update OIDC configurations.'
+        'message' => 'Only an admin can update OIDC configurations.'
     ]);
     exit;
 }
@@ -123,7 +106,10 @@ $incomingMapping = [
     'auto_create_user' => isset($_POST['auto_create_user']) ? intval($_POST['auto_create_user']) : null,
     'password_login_disabled' => isset($_POST['password_login_disabled']) ? intval($_POST['password_login_disabled']) : null,
     'require_email_verified' => isset($_POST['require_email_verified']) ? intval($_POST['require_email_verified']) : null,
+    'roles_claim' => isset($_POST['roles_claim']) ? trim((string) $_POST['roles_claim']) : null,
+    'admin_values' => isset($_POST['admin_values']) ? implode(',', wallos_oidc_parse_admin_values($_POST['admin_values'])) : null,
 ];
+$wasPasswordLoginDisabled = (int) $dbSettings['password_login_disabled'] === 1;
 
 // Merge if not managed by environment
 $hasConfigChange = false;
@@ -158,52 +144,18 @@ if ($hasConfigChange) {
         exit;
     }
 
-    // Save to oauth_settings table
-    $checkStmt = $db->prepare('SELECT COUNT(*) as count FROM oauth_settings WHERE id = 1');
-    $resultCheck = $checkStmt->execute();
-    $rowCheck = $resultCheck->fetchArray(SQLITE3_ASSOC);
-
-    if ($rowCheck['count'] > 0) {
-        $stmtSave = $db->prepare('UPDATE oauth_settings SET 
-                name = :oidcName, 
-                client_id = :oidcClientId, 
-                client_secret = :oidcClientSecret, 
-                authorization_url = :oidcAuthUrl, 
-                token_url = :oidcTokenUrl, 
-                user_info_url = :oidcUserInfoUrl, 
-                redirect_url = :oidcRedirectUrl, 
-                logout_url = :oidcLogoutUrl, 
-                user_identifier_field = :oidcUserIdentifierField, 
-                scopes = :oidcScopes, 
-                auth_style = :oidcAuthStyle,
-                auto_create_user = :oidcAutoCreateUser,
-                password_login_disabled = :oidcPasswordLoginDisabled,
-                require_email_verified = :oidcRequireEmailVerified
-                WHERE id = 1');
-    } else {
-        $stmtSave = $db->prepare('INSERT INTO oauth_settings (
-                id, name, client_id, client_secret, authorization_url, token_url, user_info_url, redirect_url, logout_url, user_identifier_field, scopes, auth_style, auto_create_user, password_login_disabled, require_email_verified
-            ) VALUES (
-                1, :oidcName, :oidcClientId, :oidcClientSecret, :oidcAuthUrl, :oidcTokenUrl, :oidcUserInfoUrl, :oidcRedirectUrl, :oidcLogoutUrl, :oidcUserIdentifierField, :oidcScopes, :oidcAuthStyle, :oidcAutoCreateUser, :oidcPasswordLoginDisabled, :oidcRequireEmailVerified
-            )');
+    if (!$wasPasswordLoginDisabled && (int) $dbSettings['password_login_disabled'] === 1
+        && !wallos_password_login_disable_allowed($db)) {
+        echo json_encode([
+            'success' => false,
+            'title' => 'Not allowed',
+            'message' => 'Password login can only be disabled while at least one admin account is linked to OIDC.'
+        ]);
+        exit;
     }
 
-    $stmtSave->bindValue(':oidcName', $dbSettings['name'], SQLITE3_TEXT);
-    $stmtSave->bindValue(':oidcClientId', $dbSettings['client_id'], SQLITE3_TEXT);
-    $stmtSave->bindValue(':oidcClientSecret', $dbSettings['client_secret'], SQLITE3_TEXT);
-    $stmtSave->bindValue(':oidcAuthUrl', $dbSettings['authorization_url'], SQLITE3_TEXT);
-    $stmtSave->bindValue(':oidcTokenUrl', $dbSettings['token_url'], SQLITE3_TEXT);
-    $stmtSave->bindValue(':oidcUserInfoUrl', $dbSettings['user_info_url'], SQLITE3_TEXT);
-    $stmtSave->bindValue(':oidcRedirectUrl', $dbSettings['redirect_url'], SQLITE3_TEXT);
-    $stmtSave->bindValue(':oidcLogoutUrl', $dbSettings['logout_url'], SQLITE3_TEXT);
-    $stmtSave->bindValue(':oidcUserIdentifierField', $dbSettings['user_identifier_field'], SQLITE3_TEXT);
-    $stmtSave->bindValue(':oidcScopes', $dbSettings['scopes'], SQLITE3_TEXT);
-    $stmtSave->bindValue(':oidcAuthStyle', $dbSettings['auth_style'], SQLITE3_TEXT);
-    $stmtSave->bindValue(':oidcAutoCreateUser', $dbSettings['auto_create_user'], SQLITE3_INTEGER);
-    $stmtSave->bindValue(':oidcPasswordLoginDisabled', $dbSettings['password_login_disabled'], SQLITE3_INTEGER);
-    $stmtSave->bindValue(':oidcRequireEmailVerified', $dbSettings['require_email_verified'], SQLITE3_INTEGER);
-    
-    $resultSave = $stmtSave->execute();
+    // Save to oauth_settings table
+    $resultSave = wallos_save_db_oidc_settings($db, $dbSettings);
     if (!$resultSave) {
         echo json_encode([
             'success' => false,

@@ -8,12 +8,20 @@ require_once '../../includes/logo_cleanup.php';
 $postData = file_get_contents("php://input");
 $data = json_decode($postData, true);
 
-$userIdToDelete = $data['userId'];
+require_once __DIR__ . '/../../includes/admin_roles.php';
 
-if ($userIdToDelete == 1 || $userIdToDelete != $userId) {
+$userIdToDelete = (int) ($data['userId'] ?? 0);
+
+if ($userIdToDelete <= 0 || $userIdToDelete !== (int) $userId) {
     die(json_encode([
         "success" => false,
         "message" => translate('error', $i18n)
+    ]));
+} elseif (!wallos_can_delete_user($db, $userIdToDelete)) {
+    // The last admin cannot leave: promote someone else first.
+    die(json_encode([
+        "success" => false,
+        "message" => translate('cannot_remove_last_admin', $i18n)
     ]));
 } else {
     // Collect this account's uploaded logo files before its rows go, so they
@@ -68,6 +76,7 @@ if ($userIdToDelete == 1 || $userIdToDelete != $userId) {
         'DELETE FROM totp WHERE user_id = :id',
         'DELETE FROM total_yearly_cost WHERE user_id = :id',
         'DELETE FROM login_tokens WHERE user_id = :id',
+        'DELETE FROM api_keys WHERE user_id = :id',
         'DELETE FROM password_resets WHERE user_id = :id',
         'DELETE FROM custom_css_style WHERE user_id = :id',
         'DELETE FROM uploaded_avatars WHERE user_id = :id',

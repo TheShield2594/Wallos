@@ -10,6 +10,8 @@
                third-party secrets, so they are never logged.
 */
 
+require_once __DIR__ . '/../../admin_roles.php';
+
 class WallosAppriseChannel extends WallosNotificationChannel
 {
     const NAME = 'apprise';
@@ -108,7 +110,7 @@ class WallosAppriseChannel extends WallosNotificationChannel
     {
         $configuration = wallos_get_effective_ssrf_allowlist($db);
         $allowlist = $configuration['allowlist'];
-        $mayUseAllowlist = (int) $userId === 1 || $configuration['allow_standard_users'];
+        $mayUseAllowlist = $configuration['allow_standard_users'] || wallos_is_admin($db, $userId);
         $blocked = [];
         foreach ($urls as $url) {
             $host = parse_url(preg_replace('/^[a-z0-9+.-]+:\/\//i', 'http://', $url), PHP_URL_HOST);

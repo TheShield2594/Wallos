@@ -17,7 +17,10 @@ try {
 }
 
 if (PHP_SAPI !== 'cli') {
-    if ($userId !== 1) {
+    require_once __DIR__ . '/../../includes/admin_roles.php';
+    // Before migration 000079 there is no is_admin column; wallos_is_admin()
+    // then falls back to "user id 1", so an upgrade can still be run here.
+    if (!wallos_is_admin($db, $userId)) {
         http_response_code(403);
         die("Forbidden");
     }
