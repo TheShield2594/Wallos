@@ -12,6 +12,9 @@ It returns a JSON object with the following properties:
 - subscription: an object containing the subscription details.
   price_history lists every price the subscription has had, oldest first,
   in the currency it was recorded in (never converted).
+  parent_subscription_id is the subscription it is billed through (null when
+  billed separately) and allocated_amount the part of the parent's price
+  attributed to it (issue #24).
 - notes: warning messages or additional information (array).
 
 Example response:

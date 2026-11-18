@@ -12,6 +12,7 @@ require_once '../../includes/connect_endpoint.php';
 require_once '../../includes/currency_formatter.php';
 require_once '../../includes/currency_rates.php';
 require_once '../../includes/ical_helper.php';
+require_once '../../includes/bundles.php';
 
 header('Content-Type: application/json; charset=UTF-8');
 
@@ -103,7 +104,8 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" || $_SERVER["REQUEST_METHOD"] === "GET
         $paymentMethods[$paymentMethod['id']] = $paymentMethod['name'];
     }
 
-    $sql = "SELECT * FROM subscriptions WHERE user_id = :userId AND inactive = 0 ORDER BY next_payment ASC";
+    // One event per bill: subscriptions included in a parent are paid through it (issue #24).
+    $sql = "SELECT * FROM subscriptions WHERE user_id = :userId AND inactive = 0 AND " . wallos_standalone_sql() . " ORDER BY next_payment ASC";
 
     $stmt = $db->prepare($sql);
     $stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);

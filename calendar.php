@@ -4,6 +4,7 @@ require_once 'includes/currency_rates.php';
 require_once 'includes/recurrence.php';
 require_once 'includes/intro_pricing.php';
 require_once 'includes/households.php';
+require_once 'includes/bundles.php';
 
 function getPriceConverted($price, $currency, $database, $userId)
 {
@@ -182,6 +183,11 @@ if ($weekStartsSunday) {
 
     $registerPayment = function ($date, $subscription) use (&$paymentsByDay, &$totalCostThisMonth, &$numberOfSubscriptionsToPayThisMonth, &$amountDueThisMonth, $today, $db, $userId) {
       $paymentsByDay[(int) date('j', $date)][] = $subscription;
+      // A subscription included in a parent bill (issue #24) is shown on its
+      // day but paid through the parent: it stays out of the totals.
+      if (wallos_is_bundle_child($subscription)) {
+        return;
+      }
       // A payment inside a free trial or promo costs the intro price.
       $convertedPrice = getPriceConverted(wallos_price_on($subscription, date('Y-m-d', $date)), $subscription['currency_id'], $db, $userId);
       $totalCostThisMonth += $convertedPrice;
@@ -229,7 +235,7 @@ if ($weekStartsSunday) {
               <?php if (!empty($paymentsByDay[$day])) { ?>
                 <div class="calendar-cell-content">
                   <?php foreach ($paymentsByDay[$day] as $payment) { ?>
-                    <div class="calendar-event" onClick="showSubscriptionDetails(event, <?= $payment['id'] ?>)"
+                    <div class="calendar-event<?= wallos_is_bundle_child($payment) ? ' is-bundle-child' : '' ?>" onClick="showSubscriptionDetails(event, <?= $payment['id'] ?>)"
                       title="<?= htmlspecialchars($payment['name']) ?>">
                       <?= htmlspecialchars($payment['name']) ?>
                     </div>

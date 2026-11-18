@@ -9,6 +9,7 @@ require_once __DIR__ . '/households.php';
 require_once __DIR__ . '/monthly_cost.php';
 require_once __DIR__ . '/cost_sharing.php';
 require_once __DIR__ . '/notifications/schedule.php';
+require_once __DIR__ . '/bundles.php';
 
 function getBillingCycle($cycle, $frequency, $i18n)
 {
@@ -134,6 +135,20 @@ function addListRowFields(&$printRow, $subscription, $mainCurrencyId, $db)
     }
     $printRow['monthly_main'] = $monthly;
 
+    // Bundles (issue #24): "via <parent>" on a child, "+N included" on a parent.
+    $printRow['parent_subscription_id'] = wallos_is_bundle_child($subscription) ? (int) $subscription['parent_subscription_id'] : null;
+    $printRow['allocated_amount'] = isset($subscription['allocated_amount']) ? (float) $subscription['allocated_amount'] : null;
+    $printRow['parent_name'] = null;
+    $printRow['included_count'] = 0;
+    // Not on another member's shared row: its parent may be private.
+    if (isset($subscription['user_id']) && empty($subscription['shared_owner_name'])) {
+        $bundleContext = wallos_bundle_list_context($db, (int) $subscription['user_id']);
+        if ($printRow['parent_subscription_id'] !== null) {
+            $printRow['parent_name'] = $bundleContext['names'][$printRow['parent_subscription_id']] ?? null;
+        }
+        $printRow['included_count'] = $bundleContext['children'][(int) $subscription['id']] ?? 0;
+    }
+
     // Schedule state: fixed-term plans, variable amounts and the paid badge.
     static $paidMaps = [];
     $mapKey = spl_object_id($db) . '-' . (int) ($subscription['user_id'] ?? 0);
@@ -202,6 +217,11 @@ function listRowPlanText($subscription, $i18n, $lang)
 
 function listRowSubtitle($subscription, $i18n, $lang)
 {
+    // A subscription included in a parent bill is named after it.
+    if (!empty($subscription['parent_name'])) {
+        [$text, $tone] = listRowSubtitle(array_merge($subscription, ['parent_name' => null]), $i18n, $lang);
+        return [sprintf(translate('bundle_via', $i18n), htmlspecialchars_decode($subscription['parent_name'])) . ' · ' . $text, $tone];
+    }
     // Someone else's shared subscription is named after its owner.
     $sharedPrefix = !empty($subscription['shared_owner_name']) ? sprintf(translate('shared_by', $i18n), $subscription['shared_owner_name']) . ' · ' : '';
     if ($sharedPrefix !== '') {
@@ -321,6 +341,10 @@ function printSubscriptions($subscriptions, $sort, $categories, $members, $i18n,
         }
         $groups[$key]['rows'][] = $subscription;
     }
+    // Children follow their parent within a group (issue #24).
+    foreach ($groups as $groupKey => $group) {
+        $groups[$groupKey]['rows'] = wallos_bundle_nest_rows($group['rows']);
+    }
 
     // Fixed order for the state groups; field groups keep the sorted order.
     $order = ['cancel-passed' => -4, 'cancel-this_month' => -3, 'cancel-next_month' => -2, 'cancel-later' => -1, 'active' => 0, 'completed' => 2, 'shared' => 3, 'disabled' => 4, 'lifetime' => 5];
@@ -371,6 +395,8 @@ function printSubscriptions($subscriptions, $sort, $categories, $members, $i18n,
                         'dim' => (bool) $subscription['inactive'],
                         'progress' => ($showProgress && !$subscription['inactive'] && !$subscription['one_time']) ? min(100, $subscription['progress']) : null,
                         'progress_tone' => $progressTone,
+                        'chip' => !empty($subscription['included_count']) ? sprintf(translate('bundle_n_included', $i18n), (int) $subscription['included_count']) : '',
+                        'extra_class' => !empty($subscription['parent_subscription_id']) ? 'is-bundle-child' : (!empty($subscription['included_count']) ? 'is-bundle-parent' : ''),
                     ]);
                 }
                 ?>
@@ -378,7 +404,8 @@ function printSubscriptions($subscriptions, $sort, $categories, $members, $i18n,
             <?php
             $footer = '';
             if (strpos($key, 'cancel-') === 0) {
-                $monthlyTotal = array_sum(array_column($group['rows'], 'monthly_main'));
+                // Children are paid through their parent: counted once.
+                $monthlyTotal = array_sum(array_column(wallos_without_bundle_children($group['rows']), 'monthly_main'));
                 $footer = sprintf(
                     translate('cancel_group_footer', $i18n),
                     count($group['rows']),
@@ -387,7 +414,8 @@ function printSubscriptions($subscriptions, $sort, $categories, $members, $i18n,
             } elseif ($key === 'active' && $groupByCancelBy) {
                 $footer = '';
             } elseif ($key === 'active') {
-                $monthlyTotal = array_sum(array_column($group['rows'], 'monthly_main'));
+                // Children are paid through their parent: counted once.
+                $monthlyTotal = array_sum(array_column(wallos_without_bundle_children($group['rows']), 'monthly_main'));
                 $footer = sprintf(
                     translate('active_footer', $i18n),
                     count($group['rows']),

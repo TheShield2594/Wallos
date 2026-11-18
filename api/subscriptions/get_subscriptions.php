@@ -81,7 +81,9 @@ Example response:
             "category_name": "Entertainment",
             "payer_user_name": "Jane Doe",
             "payment_method_name": "Credit Card",
-            "replacement_subscription_id": 1
+            "replacement_subscription_id": 1,
+            "parent_subscription_id": null,
+            "allocated_amount": null
         }
     ],
     "users": [

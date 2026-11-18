@@ -173,6 +173,7 @@ function resetForm() {
   const form = document.querySelector("#subs-form");
   form.reset();
   delete form.dataset.anchorDay;
+  setBundleFields(null);
   setReminderFields(null);
   toggleOneTimeCycleUI(false);
   toggleEndsFields();
@@ -309,6 +310,7 @@ function fillEditFormFields(subscription) {
 
   // Last, so nothing above re-enables a locked field or shows Delete again.
   setSharedEditMode(subscription);
+  setBundleFields(subscription);
   rememberPriceForChange(subscription);
 
   setFormOpen(true);
@@ -719,6 +721,9 @@ function submitFormData(formData, submitButton, endpoint) {
         if (data.logo_warning) {
           showErrorMessage(data.logo_warning);
         }
+        if (data.bundle_warning) {
+          showErrorMessage(data.bundle_warning);
+        }
         fetchSubscriptions(null, null, "add");
         closeAddSubscription();
       } else {
@@ -772,6 +777,7 @@ document.addEventListener('DOMContentLoaded', function () {
       return;
     }
     syncReminderFields();
+    confirmBundleChildrenAction();
 
     const formData = new FormData(subscriptionForm);
 
@@ -1879,4 +1885,124 @@ document.addEventListener("DOMContentLoaded", function () {
       field.addEventListener('change', updateSharingHint);
     }
   });
+});
+
+// Bundles (issue #24): "Billed through" another subscription. A child takes
+// the parent's cycle, next payment, payment method and payer, so those
+// fields are locked while a parent is picked (the server copies them).
+const BUNDLE_INHERITED_FIELDS = ['#frequency', '#cycle', '#next_payment', '#auto_renew', '#payment_method', '#payer_user'];
+
+function setBundleFields(subscription) {
+  const select = document.querySelector('#parent_subscription_id');
+  if (!select) {
+    return;
+  }
+  const form = document.querySelector('#subs-form');
+  const group = document.querySelector('#bundle-group');
+  const shared = !!subscription && (subscription.access || 'owner') !== 'owner';
+  const childCount = subscription ? Number(subscription.child_count || 0) : 0;
+  form.dataset.bundleShared = shared ? '1' : '';
+  form.dataset.bundleChildCount = String(childCount);
+  form.dataset.bundleWasInactive = subscription && subscription.inactive ? '1' : '';
+  document.querySelector('#bundle_children_action').value = 'disable';
+
+  select.querySelectorAll('option[data-temporary]').forEach((option) => option.remove());
+  select.querySelectorAll('option').forEach((option) => {
+    const isSelf = !!subscription && option.value !== '' && Number(option.value) === Number(subscription.id);
+    option.hidden = isSelf;
+    option.disabled = isSelf;
+  });
+  const parentId = subscription && subscription.parent_subscription_id ? String(subscription.parent_subscription_id) : '';
+  if (parentId !== '' && !select.querySelector(`option[value="${parentId}"]`)) {
+    // A parent that is no longer offered (e.g. disabled) is kept.
+    const option = document.createElement('option');
+    option.value = parentId;
+    option.textContent = subscription.parent_name || ('#' + parentId);
+    option.dataset.temporary = '1';
+    select.appendChild(option);
+  }
+  select.value = parentId;
+  document.querySelector('#allocated_amount').value =
+    subscription && subscription.allocated_amount !== null && subscription.allocated_amount !== undefined ? subscription.allocated_amount : '';
+
+  // A subscription other ones are billed through cannot be included in one.
+  select.disabled = shared || childCount > 0;
+  document.querySelector('#bundle-has-children-hint').classList.toggle('hide', childCount === 0);
+  if (group) {
+    group.classList.toggle('is-locked', shared);
+  }
+  toggleBundleFields();
+}
+
+function toggleBundleFields() {
+  const select = document.querySelector('#parent_subscription_id');
+  if (!select) {
+    return;
+  }
+  const form = document.querySelector('#subs-form');
+  const isChild = select.value !== '';
+  const shared = form.dataset.bundleShared === '1';
+  document.querySelector('#allocated-amount-field').classList.toggle('hide', !isChild);
+  document.querySelector('#allocated_amount').disabled = !isChild || shared;
+  document.querySelector('#bundle-hint').classList.toggle('hide', !isChild);
+  BUNDLE_INHERITED_FIELDS.forEach((selector) => {
+    const field = document.querySelector(selector);
+    if (!field) {
+      return;
+    }
+    // Payer and payment method stay locked on a shared edit.
+    const sharedLock = shared && (selector === '#payment_method' || selector === '#payer_user');
+    field.disabled = isChild || sharedLock;
+  });
+}
+
+// Disabling a subscription other ones are billed through: disable them too
+// (OK), or detach them so they become standalone (Cancel).
+function confirmBundleChildrenAction() {
+  const form = document.querySelector('#subs-form');
+  const actionField = document.querySelector('#bundle_children_action');
+  if (!actionField) {
+    return;
+  }
+  actionField.value = 'disable';
+  const inactive = document.querySelector('#inactive');
+  if (Number(form.dataset.bundleChildCount || 0) > 0 && inactive.checked && form.dataset.bundleWasInactive !== '1') {
+    const message = document.querySelector('#bundle-group').dataset.confirmDisable;
+    actionField.value = window.confirm(message) ? 'disable' : 'detach';
+  }
+}
+
+// "Hide included subscriptions" in the filter menu: a view switch kept in
+// this browser. The list container keeps the class when its rows reload.
+function setBundleChildrenHidden(hidden) {
+  const list = document.querySelector('#subscriptions');
+  if (list) {
+    list.classList.toggle('hide-bundle-children', hidden);
+  }
+  const toggle = document.querySelector('#toggle-bundle-children');
+  if (toggle) {
+    toggle.classList.toggle('selected', hidden);
+    toggle.setAttribute('aria-checked', hidden ? 'true' : 'false');
+  }
+}
+
+function toggleBundleChildren() {
+  const list = document.querySelector('#subscriptions');
+  const hidden = !(list && list.classList.contains('hide-bundle-children'));
+  try {
+    window.localStorage.setItem('hideBundleChildren', hidden ? '1' : '0');
+  } catch (e) {
+    // Kept for this page view only.
+  }
+  setBundleChildrenHidden(hidden);
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+  let hidden = false;
+  try {
+    hidden = window.localStorage.getItem('hideBundleChildren') === '1';
+  } catch (e) {
+    hidden = false;
+  }
+  setBundleChildrenHidden(hidden);
 });

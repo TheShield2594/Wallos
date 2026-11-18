@@ -27,6 +27,7 @@ It returns:
 
 require_once '../../includes/connect_endpoint.php';
 require_once '../../includes/budget_period_calculations.php';
+require_once '../../includes/bundles.php';
 
 header('Content-Type: application/json; charset=UTF-8');
 
@@ -102,7 +103,8 @@ $anchorDate = sanitizeBudgetAnchorDate($user['budget_period_anchor_date'] ?? get
 
 $activePeriod = getActiveBudgetPeriod($referenceDate, $periodType, $anchorDate);
 
-$subsSql = "SELECT * FROM subscriptions WHERE user_id = :userId AND inactive = 0";
+// Subscriptions included in a parent bill are paid through it (issue #24).
+$subsSql = "SELECT * FROM subscriptions WHERE user_id = :userId AND inactive = 0 AND " . wallos_standalone_sql();
 $subsStmt = $db->prepare($subsSql);
 $subsStmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
 $subsResult = $subsStmt->execute();

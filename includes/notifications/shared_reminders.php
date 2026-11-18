@@ -32,7 +32,8 @@ function wallos_linked_shared_subscriptions(SQLite3 $db, $recipientId)
 {
     $rows = [];
     foreach (wallos_shared_subscriptions($db, $recipientId, true) as $row) {
-        if ((int) ($row['shared_payer_linked_user_id'] ?? 0) === (int) $recipientId) {
+        // One reminder per bill: a child is paid through its parent (issue #24).
+        if ((int) ($row['shared_payer_linked_user_id'] ?? 0) === (int) $recipientId && !wallos_is_bundle_child($row)) {
             $rows[] = $row;
         }
     }

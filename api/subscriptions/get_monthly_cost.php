@@ -37,6 +37,7 @@ require_once '../../includes/connect_endpoint.php';
 require_once '../../includes/recurrence.php';
 require_once '../../includes/intro_pricing.php';
 require_once '../../includes/monthly_cost.php';
+require_once '../../includes/bundles.php';
 
 header('Content-Type: application/json; charset=UTF-8');
 
@@ -104,7 +105,8 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" || $_SERVER["REQUEST_METHOD"] === "GET
     $notes = [];
     $currencies = [];
 
-    $sql = "SELECT * FROM subscriptions WHERE user_id = :userId AND inactive = 0";
+    // Subscriptions included in a parent bill are paid through it (issue #24).
+    $sql = "SELECT * FROM subscriptions WHERE user_id = :userId AND inactive = 0 AND " . wallos_standalone_sql();
     $stmt = $db->prepare($sql);
     $stmt->bindValue(':userId', $userId);
     $result = $stmt->execute();

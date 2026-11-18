@@ -65,10 +65,14 @@ if ($cloned) {
     $newId = $db->lastInsertRowID();
 
     // Settings carried over as they are: the cancellation notice and an
-    // intro period (the reminder state starts fresh).
+    // intro period (the reminder state starts fresh). A clone of a bundled
+    // child stays in the same bill (issue #24): its parent is a standalone
+    // subscription, so the one-level rule holds. A clone of a parent gets
+    // no children: those stay with the original.
     $carriedColumns = ['cancel_notice_mode', 'cancel_notice_value', 'cancel_notice_unit', 'min_term_end',
         'intro_type', 'intro_price', 'intro_end_date', 'intro_notify_days',
-        'reminder_days', 'cancellation_notify_days_before', 'mute_payment_until_cancellation'];
+        'reminder_days', 'cancellation_notify_days_before', 'mute_payment_until_cancellation',
+        'parent_subscription_id', 'allocated_amount'];
     $columnList = implode(', ', $carriedColumns);
     $carryStmt = $db->prepare("UPDATE subscriptions SET ($columnList) = (SELECT $columnList FROM subscriptions WHERE id = :sourceId AND user_id = :userId)
         WHERE id = :newId AND user_id = :userId");
