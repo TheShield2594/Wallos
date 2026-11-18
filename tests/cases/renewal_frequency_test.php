@@ -23,7 +23,7 @@ function renewal_cron_sandbox()
 {
     $root = WALLOS_TEST_TMP . '/renewal-' . uniqid('', true);
 
-    foreach (['endpoints/cronjobs', 'includes/i18n', 'db'] as $directory) {
+    foreach (['endpoints/cronjobs', 'includes/i18n', 'includes/notifications', 'db'] as $directory) {
         mkdir($root . '/' . $directory, 0700, true);
     }
     foreach (['updatenextpayment.php', 'validate.php', 'settimezone.php'] as $file) {
@@ -31,7 +31,7 @@ function renewal_cron_sandbox()
     }
     copy(WALLOS_ROOT . '/includes/connect_endpoint_crontabs.php', $root . '/includes/connect_endpoint_crontabs.php');
     copy(WALLOS_ROOT . '/includes/db_lock.php', $root . '/includes/db_lock.php');
-    foreach (['renewal_dates.php', 'recurrence.php', 'payment_ledger.php', 'currency_rates.php', 'intro_pricing.php'] as $include) {
+    foreach (['renewal_dates.php', 'recurrence.php', 'payment_ledger.php', 'currency_rates.php', 'intro_pricing.php', 'renewal_cron.php', 'notifications/schedule.php'] as $include) {
         copy(WALLOS_ROOT . '/includes/' . $include, $root . '/includes/' . $include);
     }
     foreach (glob(WALLOS_ROOT . '/includes/i18n/*.php') as $file) {

@@ -62,7 +62,7 @@ wallos_test('the renewal cron, mark-paid and the calendar step dates through the
     assert_contains('wallos_renewal_date(', $engine, 'the recurrence engine clamps through wallos_renewal_date()');
 
     $callers = [
-        'endpoints/cronjobs/updatenextpayment.php' => 'wallos_apply_schedule_advance(',
+        'includes/renewal_cron.php' => 'wallos_apply_schedule_advance(',
         'includes/payment_ledger.php' => 'wallos_next_occurrence(',
         'calendar.php' => 'wallos_occurrences_in_range(',
         'includes/budget_period_calculations.php' => 'wallos_occurrences_in_range(',
