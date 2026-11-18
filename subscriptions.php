@@ -148,8 +148,9 @@ if ($result) {
 }
 
 // Subscriptions shared with the account's household join the list unless it
-// is filtered by the account's own categories, members or payment methods.
-if (!isset($_GET['member']) && !isset($_GET['category']) && !isset($_GET['payment'])) {
+// is filtered by the account's own categories, members or payment methods
+// without the "Shared with me" bucket (see includes/households.php).
+if (wallos_shared_rows_pass_filters([$_GET['member'] ?? null, $_GET['category'] ?? null, $_GET['payment'] ?? null])) {
   $stateFilter = (!isset($settings['hideDisabledSubscriptions']) || $settings['hideDisabledSubscriptions'] !== 'true') ? ($_GET['state'] ?? null) : null;
   $subscriptions = mergeSharedSubscriptions($subscriptions ?? [], $db, $userId, $sort, $order, $settings['disabledToBottom'] === 'true', $stateFilter,
     fn($row) => wallos_notification_filter_matches($row, $notificationFilter));
@@ -299,6 +300,7 @@ if ($db->querySingle("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND 
         aria-label="<?= translate("filter", $i18n) ?>">
         <i class="fa-solid fa-filter" aria-hidden="true"></i>
       </button>
+      <?php $sharedFilterAvailable = wallos_shared_subscriptions($db, $userId) !== []; ?>
       <?php include 'includes/filters_menu.php'; ?>
     </div>
     <?php include 'includes/sort_options.php'; ?>

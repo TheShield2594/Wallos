@@ -1,7 +1,7 @@
 <?php require_once __DIR__ . '/default_names.php'; ?>
 <div class="filtermenu-content">
   <?php
-  if (count($members) > 1) {
+  if (count($members) > 1 || !empty($sharedFilterAvailable)) {
     ?>
     <div class="filtermenu-submenu">
       <div class="filter-title" onClick="toggleSubMenu('member')"><?= translate("member", $i18n) ?></div>
@@ -24,13 +24,18 @@
           <?php
         }
         ?>
+        <?php if (!empty($sharedFilterAvailable)) {
+          $isSelected = isset($_GET['member']) && in_array(WALLOS_SHARED_BUCKET_ID, array_map('intval', explode(',', $_GET['member'])), true);
+          ?>
+          <div class="filter-item <?= $isSelected ? 'selected' : '' ?>" data-memberid="<?= WALLOS_SHARED_BUCKET_ID ?>"><?= translate('shared_bucket', $i18n) ?></div>
+        <?php } ?>
       </div>
     </div>
     <?php
   }
   ?>
   <?php
-  if (count($categories) > 1) {
+  if (count($categories) > 1 || !empty($sharedFilterAvailable)) {
     ?>
     <div class="filtermenu-submenu">
       <div class="filter-title" onClick="toggleSubMenu('category')"><?= translate("category", $i18n) ?></div>
@@ -63,13 +68,18 @@
           <?php
         }
         ?>
+        <?php if (!empty($sharedFilterAvailable)) {
+          $isSelected = isset($_GET['category']) && in_array(WALLOS_SHARED_BUCKET_ID, array_map('intval', explode(',', $_GET['category'])), true);
+          ?>
+          <div class="filter-item <?= $isSelected ? 'selected' : '' ?>" data-categoryid="<?= WALLOS_SHARED_BUCKET_ID ?>"><?= translate('shared_bucket', $i18n) ?></div>
+        <?php } ?>
       </div>
     </div>
     <?php
   }
   ?>
   <?php
-  if (count($payment_methods) > 1) {
+  if (count($payment_methods) > 1 || !empty($sharedFilterAvailable)) {
     ?>
     <div class="filtermenu-submenu">
       <div class="filter-title" onClick="toggleSubMenu('payment')"><?= translate("payment_method", $i18n) ?></div>
@@ -93,6 +103,11 @@
           <?php
         }
         ?>
+        <?php if (!empty($sharedFilterAvailable)) {
+          $isSelected = isset($_GET['payment']) && in_array(WALLOS_SHARED_BUCKET_ID, array_map('intval', explode(',', $_GET['payment'])), true);
+          ?>
+          <div class="filter-item <?= $isSelected ? 'selected' : '' ?>" data-paymentid="<?= WALLOS_SHARED_BUCKET_ID ?>"><?= translate('shared_bucket', $i18n) ?></div>
+        <?php } ?>
       </div>
     </div>
     <?php

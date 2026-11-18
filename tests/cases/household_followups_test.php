@@ -138,3 +138,16 @@ wallos_test('the linked payer gets cancellation and trial reminders on their own
     assert_same([], $markers['intro'], 'once');
     $db->close();
 });
+
+wallos_test('shared rows go into one bucket and pass only filters that select it', function () {
+    $rows = wallos_shared_rows_in_bucket([['id' => 9, 'category_id' => 3, 'payer_user_id' => 4, 'payment_method_id' => 5]]);
+    assert_same(WALLOS_SHARED_BUCKET_ID, $rows[0]['category_id'], 'category bucket');
+    assert_same(WALLOS_SHARED_BUCKET_ID, $rows[0]['payer_user_id'], 'payer bucket');
+    assert_same(WALLOS_SHARED_BUCKET_ID, $rows[0]['payment_method_id'], 'payment method bucket');
+    assert_same([3, 4, 5], [$rows[0]['shared_category_id'], $rows[0]['shared_payer_id'], $rows[0]['shared_payment_method_id']], "the owner's ids are kept");
+
+    assert_true(wallos_shared_rows_pass_filters([null, '', null]), 'no filter');
+    assert_true(!wallos_shared_rows_pass_filters(['12', null, null]), "a filter on the account's own members leaves them out");
+    assert_true(wallos_shared_rows_pass_filters(['12,' . WALLOS_SHARED_BUCKET_ID, null, null]), 'unless it selects the bucket');
+    assert_true(!wallos_shared_rows_pass_filters([(string) WALLOS_SHARED_BUCKET_ID, '7', null]), 'every filtered dimension must select it');
+});

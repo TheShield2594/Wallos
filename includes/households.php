@@ -40,6 +40,14 @@ require_once __DIR__ . '/currency_rates.php';
 
 const WALLOS_HOUSEHOLD_ROLES = ['viewer', 'editor'];
 
+/*
+  Shared rows keep their owner's category, payer and payment method, which
+  are not the viewer's records. Breakdowns and filters put them in one
+  "Shared with me" bucket under this id (issue #59), which no row of the
+  viewer's own can have.
+*/
+const WALLOS_SHARED_BUCKET_ID = 2147483647;
+
 /**
  * The household an account is active in.
  *
@@ -846,4 +854,49 @@ function wallos_household_clear_links(SQLite3 $db, $userId)
     $stmt->bindValue(':userId', (int) $userId, SQLITE3_INTEGER);
 
     return @$stmt->execute() !== false;
+}
+
+
+/**
+ * Shared rows with their category, payer and payment method moved to the
+ * shared bucket; the owner's ids stay in shared_category_id,
+ * shared_payer_id and shared_payment_method_id.
+ *
+ * @param array[] $rows wallos_shared_subscriptions() rows
+ * @return array[]
+ */
+function wallos_shared_rows_in_bucket(array $rows)
+{
+    return array_map(function ($row) {
+        $row['shared_category_id'] = $row['category_id'] ?? null;
+        $row['shared_payer_id'] = $row['payer_user_id'] ?? null;
+        $row['shared_payment_method_id'] = $row['payment_method_id'] ?? null;
+        $row['category_id'] = WALLOS_SHARED_BUCKET_ID;
+        $row['payer_user_id'] = WALLOS_SHARED_BUCKET_ID;
+        $row['payment_method_id'] = WALLOS_SHARED_BUCKET_ID;
+
+        return $row;
+    }, $rows);
+}
+
+/**
+ * Whether shared rows belong in a list filtered by these member, category
+ * and payment method selections: every dimension that is filtered must
+ * include the shared bucket.
+ *
+ * @param array $selections comma-separated id lists; null or '' = not filtered
+ */
+function wallos_shared_rows_pass_filters(array $selections)
+{
+    foreach ($selections as $selection) {
+        if ($selection === null || $selection === '') {
+            continue;
+        }
+        $ids = array_map('intval', explode(',', (string) $selection));
+        if (!in_array(WALLOS_SHARED_BUCKET_ID, $ids, true)) {
+            return false;
+        }
+    }
+
+    return true;
 }
