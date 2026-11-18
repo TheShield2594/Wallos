@@ -1553,6 +1553,7 @@ $upcomingPaymentsLimit = normalize_upcoming_payments_limit($settings['upcoming_p
     </section>
 
     <?php
+    require_once 'includes/fixer_keys.php';
     $apiKey = "";
     $sql = "SELECT api_key, provider FROM fixer WHERE user_id = :userId";
     $stmt = $db->prepare($sql);
@@ -1574,13 +1575,31 @@ $upcomingPaymentsLimit = normalize_upcoming_payments_limit($settings['upcoming_p
             <h2>Fixer API Key</h2>
         </header>
         <div class="account-fixer">
+            <?php
+            // Keys are kept per provider (issue #44) and never written into the
+            // page: the field starts empty, and its placeholder says whether a
+            // key is saved for the selected provider. Saving with the field
+            // empty uses that key.
+            $fixerKeyHints = array_map('wallos_fixer_key_hint', wallos_fixer_saved_keys($db, $userId));
+            ?>
             <div class="form-group">
-                <input type="text" name="fixer-key" id="fixerKey" autocomplete="off" value="<?= htmlspecialchars($apiKey) ?>"
-                    placeholder="<?= translate('api_key', $i18n) ?>" <?= $demoMode ? 'disabled title="Not available on Demo Mode"' : '' ?>>
+                <div class="input-with-toggle">
+                    <input type="password" name="fixer-key" id="fixerKey" autocomplete="off" value=""
+                        placeholder="<?= translate('api_key', $i18n) ?>"
+                        data-placeholder-empty="<?= htmlspecialchars(translate('api_key', $i18n)) ?>"
+                        data-placeholder-saved="<?= htmlspecialchars(translate('fixer_key_saved_placeholder', $i18n)) ?>"
+                        data-key-hints="<?= htmlspecialchars(json_encode((object) $fixerKeyHints)) ?>"
+                        <?= $demoMode ? 'disabled title="Not available on Demo Mode"' : '' ?>>
+                    <button type="button" class="icon-button" id="fixerKeyReveal" onclick="toggleFixerKeyVisibility()"
+                        aria-pressed="false" aria-label="<?= translate('show_key', $i18n) ?>"
+                        title="<?= translate('show_key', $i18n) ?>">
+                        <i class="fa-solid fa-eye"></i>
+                    </button>
+                </div>
             </div>
             <div class="form-group">
                 <label for="fixerProvider"><?= translate('provider', $i18n) ?>:</label>
-                <select name="fixer-provider" id="fixerProvider">
+                <select name="fixer-provider" id="fixerProvider" onchange="updateFixerKeyField()">
                     <option value="0" <?= $provider == 0 ? 'selected' : '' ?>>fixer.io</option>
                     <option value="1" <?= $provider == 1 ? 'selected' : '' ?>>apilayer.com</option>
                     <option value="2" <?= $provider == 2 ? 'selected' : '' ?>>frankfurter.dev</option>

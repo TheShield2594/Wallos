@@ -5041,3 +5041,21 @@ a.segmented-option {
   outline: 2px solid var(--tint);
   outline-offset: 2px;
 }
+
+/* A secret input with a show/hide button inside its right edge. */
+.input-with-toggle {
+  position: relative;
+  width: 100%;
+}
+
+.input-with-toggle input {
+  width: 100%;
+  padding-right: 40px;
+}
+
+.input-with-toggle .icon-button {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+}

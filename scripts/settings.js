@@ -980,6 +980,38 @@ document.addEventListener('DOMContentLoaded', function () {
 
 });
 
+// Keys are kept per provider (issue #44): the field shows whether the selected
+// provider has a saved key; left empty, saving uses it.
+function updateFixerKeyField() {
+  const input = document.querySelector("#fixerKey");
+  const provider = document.querySelector("#fixerProvider").value;
+  if (!input) {
+    return;
+  }
+  let hints = {};
+  try {
+    hints = JSON.parse(input.dataset.keyHints || "{}");
+  } catch (e) {
+    hints = {};
+  }
+  input.value = "";
+  input.closest(".form-group").classList.toggle("hide", provider === "2");
+  input.placeholder = hints[provider]
+    ? input.dataset.placeholderSaved.replace("%s", hints[provider])
+    : input.dataset.placeholderEmpty;
+}
+
+function toggleFixerKeyVisibility() {
+  const input = document.querySelector("#fixerKey");
+  const button = document.querySelector("#fixerKeyReveal");
+  const reveal = input.type === "password";
+  input.type = reveal ? "text" : "password";
+  button.setAttribute("aria-pressed", reveal ? "true" : "false");
+  button.querySelector("i").className = reveal ? "fa-solid fa-eye-slash" : "fa-solid fa-eye";
+}
+
+document.addEventListener("DOMContentLoaded", updateFixerKeyField);
+
 function addFixerKeyButton() {
   const addButton = document.getElementById("addFixerKey");
   addButton.disabled = true;
@@ -1006,6 +1038,17 @@ function addFixerKeyButton() {
         showSuccessMessage(data.message);
         addButton.disabled = false;
         convertCurrencyCheckbox.disabled = false;
+        if (data.key_hint !== undefined) {
+          let hints = {};
+          try {
+            hints = JSON.parse(apiKeyInput.dataset.keyHints || "{}");
+          } catch (e) {
+            hints = {};
+          }
+          hints[String(data.provider)] = data.key_hint;
+          apiKeyInput.dataset.keyHints = JSON.stringify(hints);
+        }
+        updateFixerKeyField();
 
         fetch("endpoints/currency/update_exchange.php", {
           method: "POST",
